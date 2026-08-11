@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import type { Metrics, ProcInfo } from "../types";
 
 function formatBytes(n: number): string {
@@ -51,37 +52,49 @@ export function MonitorView() {
       return;
     }
     let stopped = false;
-    const tick = async () => {
-      try {
-        const m = await ipc.monitorMetrics(connectionId);
-        if (stopped) return;
-        if (lastSample.current) {
-          const dt = 2;
-          setNetSpeed({
-            rx: Math.max(0, m.netRx - lastSample.current.netRx) / dt,
-            tx: Math.max(0, m.netTx - lastSample.current.netTx) / dt,
-          });
+    let iv: number | undefined;
+    let pv: number | undefined;
+
+    const startTimers = () => {
+      clearInterval(iv);
+      clearInterval(pv);
+      const interval = loadSettings().monitorInterval;
+      const tick = async () => {
+        try {
+          const m = await ipc.monitorMetrics(connectionId);
+          if (stopped) return;
+          if (lastSample.current) {
+            setNetSpeed({
+              rx: Math.max(0, m.netRx - lastSample.current.netRx) / (interval / 1000),
+              tx: Math.max(0, m.netTx - lastSample.current.netTx) / (interval / 1000),
+            });
+          }
+          lastSample.current = m;
+          cpuHist.current = [...cpuHist.current.slice(-59), m.cpu];
+          setMetrics(m);
+          setTick((t) => t + 1);
+        } catch {
+          /* ignore */
         }
-        lastSample.current = m;
-        cpuHist.current = [...cpuHist.current.slice(-59), m.cpu];
-        setMetrics(m);
-        setTick((t) => t + 1);
-      } catch {
-        /* ignore */
-      }
+      };
+      void tick();
+      iv = setInterval(() => void tick(), interval);
+      pv = setInterval(async () => {
+        try {
+          const p = await ipc.monitorProcesses(connectionId, 20);
+          if (!stopped) setProcs(p);
+        } catch {
+          /* ignore */
+        }
+      }, Math.max(interval * 2, 5000));
     };
-    void tick();
-    const iv = setInterval(() => void tick(), 2000);
-    const pv = setInterval(async () => {
-      try {
-        const p = await ipc.monitorProcesses(connectionId, 20);
-        if (!stopped) setProcs(p);
-      } catch {
-        /* ignore */
-      }
-    }, 5000);
+
+    startTimers();
+    const onSettings = () => startTimers();
+    window.addEventListener(SETTINGS_CHANGE_EVENT, onSettings);
     return () => {
       stopped = true;
+      window.removeEventListener(SETTINGS_CHANGE_EVENT, onSettings);
       clearInterval(iv);
       clearInterval(pv);
     };
@@ -155,6 +168,10 @@ export function MonitorView() {
             <span className="net-row__label">↓ 下行</span>
             <span className="net-row__value">{formatBytes(netSpeed.rx)}/s</span>
           </div>
+          <div className="net-row">
+            <span className="net-row__label">连接数</span>
+            <span className="net-row__value">{metrics?.netConns ?? 0}</span>
+          </div>
         </div>
       </div>
 
@@ -171,6 +188,37 @@ export function MonitorView() {
             strokeLinejoin="round"
           />
         </svg>
+      </div>
+
+      <div className="ds-card mon-procs">
+        <div className="res-card__head">
+          <span className="res-card__label">
+            <Icon name="folder" size={14} />磁盘分区
+          </span>
+        </div>
+        <div className="mon-table">
+          <div className="mon-table__head">
+            <span>挂载点</span>
+            <span>总容量</span>
+            <span>已用</span>
+            <span>使用率</span>
+          </div>
+          {(metrics?.disks ?? []).map((d) => (
+            <div className="mon-table__row" key={d.mount}>
+              <span>{d.mount}</span>
+              <span>{formatBytes(d.total)}</span>
+              <span>{formatBytes(d.used)}</span>
+              <span style={{ color: d.pct >= 90 ? "var(--status-error-default)" : undefined }}>
+                {d.pct.toFixed(0)}%
+              </span>
+            </div>
+          ))}
+          {(metrics?.disks ?? []).length === 0 && (
+            <div className="mon-table__row">
+              <span>暂无数据</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="ds-card mon-procs">

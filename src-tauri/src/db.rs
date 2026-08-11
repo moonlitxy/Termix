@@ -33,6 +33,9 @@ impl Db {
             CREATE TABLE IF NOT EXISTS forward_rules (
                 id TEXT PRIMARY KEY, rtype TEXT, name TEXT, local_host TEXT, local_port INTEGER,
                 remote_host TEXT, remote_port INTEGER, session_id TEXT, enabled INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY, value TEXT
             );",
         )
         .map_err(|e| e.to_string())?;
@@ -319,6 +322,33 @@ impl Db {
         .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    // ---- 应用级设置（主密码盐/校验等） ----
+
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        let c = self.conn.lock().unwrap();
+        c.query_row("SELECT value FROM app_settings WHERE key=?", params![key], |r| {
+            r.get(0)
+        })
+        .ok()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        let c = self.conn.lock().unwrap();
+        c.execute(
+            "INSERT INTO app_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![key, value],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn remove_setting(&self, key: &str) -> Result<(), String> {
+        let c = self.conn.lock().unwrap();
+        c.execute("DELETE FROM app_settings WHERE key=?", params![key])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 fn now_ms() -> i64 {
@@ -326,4 +356,177 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Db {
+        Db::open(":memory:").unwrap()
+    }
+
+    fn session_input(name: &str) -> SessionInput {
+        SessionInput {
+            name: name.into(),
+            host: "192.168.1.10".into(),
+            port: 22,
+            username: "root".into(),
+            auth_type: "password".into(),
+            password: Some("secret".into()),
+            private_key_path: None,
+            private_key_passphrase: None,
+            group_id: None,
+            memo: None,
+            encoding: None,
+        }
+    }
+
+    #[test]
+    fn session_crud_roundtrip() {
+        let db = test_db();
+        assert!(db.list_sessions().unwrap().is_empty());
+
+        let id = db.create_session(session_input("prod")).unwrap();
+        let list = db.list_sessions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "prod");
+        assert_eq!(list[0].host, "192.168.1.10");
+        assert_eq!(list[0].port, 22);
+        assert_eq!(list[0].encoding, "utf-8");
+        assert!(list[0].last_connected_at.is_none());
+
+        // update
+        let mut input = session_input("prod-renamed");
+        input.encoding = Some("gbk".into());
+        db.update_session(&id, input).unwrap();
+        let list = db.list_sessions().unwrap();
+        assert_eq!(list[0].name, "prod-renamed");
+        assert_eq!(list[0].encoding, "gbk");
+
+        // touch
+        db.touch_session(&id).unwrap();
+        assert!(db.list_sessions().unwrap()[0].last_connected_at.is_some());
+
+        // delete
+        db.delete_session(&id).unwrap();
+        assert!(db.list_sessions().unwrap().is_empty());
+    }
+
+    #[test]
+    fn group_crud() {
+        let db = test_db();
+        let id = db.create_group(GroupInput { name: "生产".into(), parent_id: None }).unwrap();
+        let groups = db.list_groups().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "生产");
+        assert!(groups[0].parent_id.is_none());
+        assert_eq!(groups[0].ord, 0);
+
+        db.delete_group(&id).unwrap();
+        assert!(db.list_groups().unwrap().is_empty());
+    }
+
+    #[test]
+    fn history_add_list_clear() {
+        let db = test_db();
+        let sid = db.create_session(session_input("h")).unwrap();
+
+        db.add_history(&sid, "ls -la").unwrap();
+        db.add_history(&sid, "df -h").unwrap();
+        db.add_history(&sid, "free -m").unwrap();
+
+        let all = db.list_history(&sid, 50).unwrap();
+        assert_eq!(all.len(), 3);
+        // 毫秒级时间戳下同批插入可能执行时间相同，因此只校验内容集合
+        let mut cmds: Vec<&str> = all.iter().map(|h| h.command.as_str()).collect();
+        cmds.sort();
+        assert_eq!(cmds, vec!["df -h", "free -m", "ls -la"]);
+
+        // limit 生效
+        let two = db.list_history(&sid, 2).unwrap();
+        assert_eq!(two.len(), 2);
+
+        // 其他会话的历史不影响
+        let other = db.create_session(session_input("other")).unwrap();
+        assert!(db.list_history(&other, 50).unwrap().is_empty());
+
+        db.clear_history(&sid).unwrap();
+        assert!(db.list_history(&sid, 50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_session_cascades_history() {
+        let db = test_db();
+        let sid = db.create_session(session_input("h")).unwrap();
+        db.add_history(&sid, "top").unwrap();
+        db.delete_session(&sid).unwrap();
+        assert!(db.list_history(&sid, 50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn snippet_crud() {
+        let db = test_db();
+        let id = db
+            .create_snippet(SnippetInput {
+                title: "重启服务".into(),
+                command: "sudo systemctl restart nginx".into(),
+                variables: None,
+                group_id: None,
+            })
+            .unwrap();
+        let list = db.list_snippets().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].title, "重启服务");
+        // variables 默认存 "[]"
+        assert_eq!(list[0].variables, "[]");
+
+        db.update_snippet(
+            &id,
+            SnippetInput {
+                title: "重启服务v2".into(),
+                command: "sudo systemctl restart nginx && echo done".into(),
+                variables: Some("[{\"k\":\"port\",\"v\":\"8080\"}]".into()),
+                group_id: None,
+            },
+        )
+        .unwrap();
+        let list = db.list_snippets().unwrap();
+        assert_eq!(list[0].title, "重启服务v2");
+        assert!(list[0].variables.contains("8080"));
+
+        db.delete_snippet(&id).unwrap();
+        assert!(db.list_snippets().unwrap().is_empty());
+    }
+
+    #[test]
+    fn forward_crud_and_enabled() {
+        let db = test_db();
+        let id = db
+            .create_forward(ForwardRuleInput {
+                rtype: "local".into(),
+                name: "pg 转发".into(),
+                local_host: None,
+                local_port: 5432,
+                remote_host: Some("db.internal".into()),
+                remote_port: 5432,
+                session_id: None,
+            })
+            .unwrap();
+        let list = db.list_forwards().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "pg 转发");
+        // 默认 host 与 enabled
+        assert_eq!(list[0].local_host, "127.0.0.1");
+        assert!(!list[0].enabled);
+
+        db.set_forward_enabled(&id, true).unwrap();
+        assert!(db.list_forwards().unwrap()[0].enabled);
+
+        db.set_forward_enabled(&id, false).unwrap();
+        assert!(!db.list_forwards().unwrap()[0].enabled);
+
+        db.delete_forward(&id).unwrap();
+        assert!(db.list_forwards().unwrap().is_empty());
+    }
 }

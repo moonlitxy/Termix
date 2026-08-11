@@ -1,6 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
+import type { SearchAddon } from "@xterm/addon-search";
 
 const terms = new Map<string, Terminal>();
+const searches = new Map<string, SearchAddon>();
 const buffers = new Map<string, string>();
 const MAX_BUF = 400_000;
 
@@ -14,6 +16,14 @@ export const terminalRegistry = {
   },
   remove(tabId: string): void {
     terms.delete(tabId);
+    searches.delete(tabId);
+  },
+
+  setSearch(tabId: string, s: SearchAddon): void {
+    searches.set(tabId, s);
+  },
+  getSearch(tabId: string): SearchAddon | undefined {
+    return searches.get(tabId);
   },
 
   append(tabId: string, data: string): void {

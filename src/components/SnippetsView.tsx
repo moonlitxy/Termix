@@ -6,6 +6,27 @@ import type { Snippet, SnippetInput } from "../types";
 
 const EMPTY: SnippetInput = { title: "", command: "", groupId: undefined };
 
+interface VarDef {
+  name: string;
+  defaultValue: string;
+}
+
+export function parseVariables(raw?: string): VarDef[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((v) => ({
+        name: String(v?.name ?? ""),
+        defaultValue: v?.default != null ? String(v.default) : "",
+      }))
+      .filter((v) => v.name);
+  } catch {
+    return [];
+  }
+}
+
 export function SnippetsView() {
   const groups = useApp((s) => s.groups);
   const tabs = useApp((s) => s.tabs);
@@ -14,6 +35,9 @@ export function SnippetsView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<SnippetInput>(EMPTY);
+  // 变量填充弹窗
+  const [varModal, setVarModal] = useState<{ snippet: Snippet; vars: VarDef[] } | null>(null);
+  const [varValues, setVarValues] = useState<Record<string, string>>({});
 
   const load = async () => {
     try {
@@ -61,17 +85,43 @@ export function SnippetsView() {
     }
   };
 
-  const insert = async (s: Snippet) => {
+  const send = async (command: string) => {
     const tab = tabs.find((t) => t.id === activeTabId);
     if (!tab?.connectionId || !tab.shellId) {
       window.alert("请先打开一个已连接的终端标签页");
       return;
     }
     try {
-      await ipc.terminalWrite(tab.connectionId, tab.shellId, s.command + "\n");
+      await ipc.terminalWrite(tab.connectionId, tab.shellId, command + "\n");
     } catch (e) {
       window.alert(String(e));
     }
+  };
+
+  const insert = async (s: Snippet) => {
+    // 扫描命令中的 {{var}} 占位符，存在则弹窗让用户填写变量
+    const placeholders = [...s.command.matchAll(/\{\{\s*([\w-]+)\s*\}\}/g)].map((m) => m[1]);
+    const declared = parseVariables(s.variables);
+    if (placeholders.length > 0) {
+      const vars = placeholders.map((name) => ({
+        name,
+        defaultValue: declared.find((d) => d.name === name)?.defaultValue ?? "",
+      }));
+      setVarValues(Object.fromEntries(vars.map((v) => [v.name, v.defaultValue])));
+      setVarModal({ snippet: s, vars });
+      return;
+    }
+    await send(s.command);
+  };
+
+  const applyVars = async () => {
+    if (!varModal) return;
+    let cmd = varModal.snippet.command;
+    for (const v of varModal.vars) {
+      cmd = cmd.replaceAll(`{{${v.name}}}`, varValues[v.name] ?? "");
+    }
+    setVarModal(null);
+    await send(cmd);
   };
 
   return (
@@ -177,6 +227,44 @@ export function SnippetsView() {
               </button>
               <button className="ds-btn ds-btn--brand" type="button" onClick={() => void save()}>
                 保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {varModal && (
+        <div className="modal-overlay" onClick={() => setVarModal(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span>填写变量：{varModal.snippet.title}</span>
+              <button
+                className="ds-btn ds-btn--tertiary ds-btn--icon"
+                type="button"
+                onClick={() => setVarModal(null)}
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+            <div className="sn-var-preview">{varModal.snippet.command}</div>
+            {varModal.vars.map((v) => (
+              <div className="form-row" key={v.name}>
+                <label>{v.name}</label>
+                <input
+                  className="ds-input"
+                  value={varValues[v.name] ?? ""}
+                  onChange={(e) =>
+                    setVarValues((prev) => ({ ...prev, [v.name]: e.target.value }))
+                  }
+                  placeholder={`默认: ${v.defaultValue || "（空）"}`}
+                />
+              </div>
+            ))}
+            <div className="modal-actions">
+              <button className="ds-btn ds-btn--secondary" type="button" onClick={() => setVarModal(null)}>
+                取消
+              </button>
+              <button className="ds-btn ds-btn--brand" type="button" onClick={() => void applyVars()}>
+                插入
               </button>
             </div>
           </div>

@@ -35,10 +35,6 @@ export function TitleBar() {
         </div>
       </div>
       <div className="titlebar__right">
-        <span className="titlebar__pro-tag">
-          <Icon name="sparkles" size={12} />
-          免费
-        </span>
         <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="设置">
           <Icon name="settings" size={16} />
         </button>

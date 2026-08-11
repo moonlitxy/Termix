@@ -4,14 +4,49 @@ use std::time::Duration;
 
 use russh::client;
 use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
-use russh::{ChannelMsg, Disconnect};
+use russh::{Channel, ChannelOpenFailure, ChannelMsg, Disconnect};
 use tauri::{AppHandle, Emitter};
+use tokio::io::copy_bidirectional;
+use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::models::Session;
 
+/// 远程端口转发注册表：服务端监听端口 → 本地目标 (host, port)。
+/// handler 收到 forwarded-tcpip 连接时按监听端口查表转发到本地。
+pub struct ForwardRegistry {
+    targets: std::sync::Mutex<HashMap<u32, (String, u16)>>,
+}
+
+impl ForwardRegistry {
+    pub fn new() -> Self {
+        Self {
+            targets: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+    pub fn register(&self, bind_port: u32, host: &str, port: u16) {
+        log::info!("remote-forward: register bind port {bind_port} -> {host}:{port}");
+        self.targets.lock().unwrap().insert(bind_port, (host.to_string(), port));
+    }
+    pub fn unregister(&self, bind_port: u32) {
+        log::info!("remote-forward: unregister bind port {bind_port}");
+        self.targets.lock().unwrap().remove(&bind_port);
+    }
+    pub fn target(&self, bind_port: u32) -> Option<(String, u16)> {
+        self.targets.lock().unwrap().get(&bind_port).cloned()
+    }
+}
+
 /// Accept any host key. (MVP: TODO: known_hosts verification)
-pub struct SshClient;
+pub struct SshClient {
+    forwards: Arc<ForwardRegistry>,
+}
+
+impl SshClient {
+    fn new(forwards: Arc<ForwardRegistry>) -> Self {
+        Self { forwards }
+    }
+}
 
 impl client::Handler for SshClient {
     type Error = russh::Error;
@@ -21,6 +56,49 @@ impl client::Handler for SshClient {
         _server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
+    }
+
+    /// 服务端推送的远程转发连接：按监听端口查表，连本地目标后双向转发。
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<client::Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        log::debug!(
+            "remote-forward: server opened forwarded-tcpip {}:{}",
+            connected_address,
+            connected_port
+        );
+        let target = self.forwards.target(connected_port);
+        tokio::spawn(async move {
+            let Some((host, port)) = target else {
+                log::warn!("remote-forward: no local target for bind port {connected_port}, reject");
+                let _ = reply.reject(ChannelOpenFailure::ConnectFailed).await;
+                return;
+            };
+            let addr = format!("{host}:{port}");
+            let mut local = match TcpStream::connect(&addr).await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("remote-forward: connect local {addr} failed: {e}");
+                    let _ = reply.reject(ChannelOpenFailure::ConnectFailed).await;
+                    return;
+                }
+            };
+            reply.accept().await;
+            log::debug!("remote-forward: tunnel established to local {addr}");
+            let mut stream = channel.into_stream();
+            match copy_bidirectional(&mut local, &mut stream).await {
+                Ok(_) => log::debug!("remote-forward: tunnel to {addr} closed"),
+                Err(e) => log::debug!("remote-forward: tunnel to {addr} error: {e}"),
+            }
+        });
+        Ok(())
     }
 }
 
@@ -37,22 +115,27 @@ pub struct Connection {
 
 pub struct SshManager {
     connections: Mutex<HashMap<String, Connection>>,
+    forwards: Arc<ForwardRegistry>,
 }
 
 impl SshManager {
     pub fn new() -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
+            forwards: Arc::new(ForwardRegistry::new()),
         }
     }
 
     pub async fn connect(&self, s: Session) -> Result<String, String> {
         let config = Arc::new(client::Config {
             inactivity_timeout: Some(Duration::from_secs(30)),
+            // SSH 心跳保活：30s 无数据则发送 keepalive，连续 3 次无响应才断开
+            keepalive_interval: Some(Duration::from_secs(30)),
+            keepalive_max: 3,
             ..<_>::default()
         });
         let addr = format!("{}:{}", s.host, s.port);
-        let mut session = client::connect(config, addr.as_str(), SshClient)
+        let mut session = client::connect(config, addr.as_str(), SshClient::new(self.forwards.clone()))
             .await
             .map_err(|e| format!("connect failed: {e}"))?;
 
@@ -121,6 +204,58 @@ impl SshManager {
         cons.get(connection_id).map(|c| c.handle.clone())
     }
 
+    // ---- 远程端口转发 ----
+
+    /// 注册远程转发目标（bind_port = 服务端监听端口）。
+    pub fn register_remote_forward(&self, bind_port: u32, host: &str, port: u16) {
+        self.forwards.register(bind_port, host, port);
+    }
+
+    pub fn unregister_remote_forward(&self, bind_port: u32) {
+        self.forwards.unregister(bind_port);
+    }
+
+    /// 请求服务端开启远程端口转发，返回实际绑定的端口。
+    pub async fn request_remote_forward(
+        &self,
+        connection_id: &str,
+        bind_host: &str,
+        bind_port: u32,
+    ) -> Result<u32, String> {
+        let handle = self
+            .get_handle(connection_id)
+            .await
+            .ok_or_else(|| "connection not found".to_string())?;
+        log::info!(
+            "remote-forward: request server to bind {bind_host}:{bind_port} on connection {connection_id}"
+        );
+        handle
+            .tcpip_forward(bind_host, bind_port)
+            .await
+            .map_err(|e| {
+                log::error!("remote-forward: tcpip-forward request failed: {e}");
+                format!("服务端开启远程转发失败: {e}")
+            })
+    }
+
+    /// 取消服务端远程端口转发。
+    pub async fn cancel_remote_forward(
+        &self,
+        connection_id: &str,
+        bind_host: &str,
+        bind_port: u32,
+    ) -> Result<(), String> {
+        let handle = self
+            .get_handle(connection_id)
+            .await
+            .ok_or_else(|| "connection not found".to_string())?;
+        log::info!("remote-forward: cancel server bind {bind_host}:{bind_port}");
+        handle
+            .cancel_tcpip_forward(bind_host, bind_port)
+            .await
+            .map_err(|e| format!("取消远程转发失败: {e}"))
+    }
+
     /// 在连接上执行一次性命令并返回完整输出（用于监控等）。
     pub async fn exec_command(&self, connection_id: &str, command: &str) -> Result<String, String> {
         let handle = self
@@ -184,6 +319,7 @@ impl SshManager {
         let shells2 = shells.clone();
 
         tokio::spawn(async move {
+            let mut user_closed = false;
             loop {
                 tokio::select! {
                     cmd = rx.recv() => match cmd {
@@ -194,6 +330,7 @@ impl SshManager {
                             let _ = channel.window_change(c, r, 0, 0).await;
                         }
                         Some(ShellCmd::Close) | None => {
+                            user_closed = true;
                             let _ = channel.close().await;
                             break;
                         }
@@ -219,6 +356,13 @@ impl SshManager {
                         _ => {}
                     },
                 }
+            }
+            // 兜底：被动断开（网络中断等）时确保通知前端，便于自动重连
+            if !user_closed {
+                let _ = app2.emit(
+                    "connection-status",
+                    serde_json::json!({ "shellId": sid, "tabId": tab_id, "status": "closed" }),
+                );
             }
             shells2.lock().await.remove(&sid);
         });

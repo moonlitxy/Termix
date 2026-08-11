@@ -31,6 +31,12 @@ export interface SessionInput {
   encoding?: string;
 }
 
+export interface SessionImportResult {
+  groupsCreated: number;
+  sessionsCreated: number;
+  sessionsSkipped: number;
+}
+
 export interface Group {
   id: string;
   name: string;
@@ -61,6 +67,10 @@ export interface Tab {
   title: string;
   status: "connecting" | "connected" | "disconnected" | "error";
   error?: string;
+  /** 分屏 pane 标签：不在标签栏显示 */
+  hidden?: boolean;
+  /** 分屏 pane 标签：所属主标签 id */
+  splitOf?: string;
 }
 
 // ---- v0.2: SFTP ----
@@ -81,10 +91,11 @@ export interface TransferTask {
   direction: "upload" | "download";
   localPath: string;
   remotePath: string;
-  status: "running" | "completed" | "failed" | "cancelled";
+  status: "running" | "paused" | "completed" | "failed" | "cancelled";
   progress: number;
   speed: number;
   error?: string;
+  isDir?: boolean;
 }
 
 export interface TransferProgressEvent {
@@ -152,6 +163,13 @@ export interface SnippetInput {
 
 // ---- v0.3: 系统监控 ----
 
+export interface DiskInfo {
+  mount: string;
+  total: number;
+  used: number;
+  pct: number;
+}
+
 export interface Metrics {
   cpu: number;
   memUsed: number;
@@ -159,6 +177,8 @@ export interface Metrics {
   diskUsedPct: number;
   netRx: number;
   netTx: number;
+  netConns: number;
+  disks: DiskInfo[];
 }
 
 export interface ProcInfo {
@@ -167,4 +187,11 @@ export interface ProcInfo {
   cpu: number;
   mem: number;
   cmd: string;
+}
+
+// ---- 安全（主密码） ----
+
+export interface MasterStatus {
+  hasMaster: boolean;
+  unlocked: boolean;
 }

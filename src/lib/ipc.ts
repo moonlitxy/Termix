@@ -6,9 +6,11 @@ import type {
   ForwardRuleInput,
   Group,
   GroupInput,
+  MasterStatus,
   Metrics,
   ProcInfo,
   Session,
+  SessionImportResult,
   SessionInput,
   SftpItem,
   Snippet,
@@ -24,6 +26,9 @@ export const ipc = {
   sessionUpdate: (id: string, input: SessionInput) =>
     invoke<void>("session_update", { id, input }),
   sessionDelete: (id: string) => invoke<void>("session_delete", { id }),
+  sessionsExport: () => invoke<string>("sessions_export"),
+  sessionsImport: (content: string) =>
+    invoke<SessionImportResult>("sessions_import", { content }),
 
   // groups
   groupList: () => invoke<Group[]>("group_list"),
@@ -75,10 +80,24 @@ export const ipc = {
     remotePath: string,
     localPath: string
   ) => invoke<string>("sftp_download", { connectionId, sessionId, remotePath, localPath }),
+  sftpUploadDir: (
+    connectionId: string,
+    sessionId: string,
+    localPath: string,
+    remotePath: string
+  ) => invoke<string>("sftp_upload_dir", { connectionId, sessionId, localPath, remotePath }),
+  sftpDownloadDir: (
+    connectionId: string,
+    sessionId: string,
+    remotePath: string,
+    localPath: string
+  ) => invoke<string>("sftp_download_dir", { connectionId, sessionId, remotePath, localPath }),
 
   // transfers
   transferList: () => invoke<TransferTask[]>("transfer_list"),
   transferCancel: (taskId: string) => invoke<void>("transfer_cancel", { taskId }),
+  transferPause: (taskId: string) => invoke<void>("transfer_pause", { taskId }),
+  transferResume: (taskId: string) => invoke<void>("transfer_resume", { taskId }),
 
   // local fs
   localList: (path: string) => invoke<SftpItem[]>("local_list", { path }),
@@ -106,6 +125,14 @@ export const ipc = {
     invoke<Metrics>("monitor_metrics", { connectionId }),
   monitorProcesses: (connectionId: string, limit = 20) =>
     invoke<ProcInfo[]>("monitor_processes", { connectionId, limit }),
+
+  // ---- 安全（主密码） ----
+  masterStatus: () => invoke<MasterStatus>("master_status"),
+  masterSet: (master: string, oldMaster?: string) =>
+    invoke<void>("master_set", { master, oldMaster }),
+  masterUnlock: (master: string) => invoke<void>("master_unlock", { master }),
+  masterLock: () => invoke<void>("master_lock"),
+  masterClear: (master: string) => invoke<void>("master_clear", { master }),
 };
 
 export interface TerminalOutputEvent {

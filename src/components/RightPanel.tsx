@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import type { Metrics, TransferTask } from "../types";
 
 function formatBytes(n: number): string {
@@ -20,6 +21,8 @@ function taskStatusText(t: TransferTask): string {
       return "失败";
     case "cancelled":
       return "已取消";
+    case "paused":
+      return "已暂停";
     case "running":
       return formatBytes(t.speed) + "/s";
     default:
@@ -66,9 +69,17 @@ export function RightPanel() {
     }
     console.log("[transfer] retry", t.id, t.direction, { local: t.localPath, remote: t.remotePath });
     if (t.direction === "upload") {
-      void ipc.sftpUpload(conn.connectionId, t.sessionId, t.localPath, t.remotePath);
+      if (t.isDir) {
+        void ipc.sftpUploadDir(conn.connectionId, t.sessionId, t.localPath, t.remotePath);
+      } else {
+        void ipc.sftpUpload(conn.connectionId, t.sessionId, t.localPath, t.remotePath);
+      }
     } else {
-      void ipc.sftpDownload(conn.connectionId, t.sessionId, t.remotePath, t.localPath);
+      if (t.isDir) {
+        void ipc.sftpDownloadDir(conn.connectionId, t.sessionId, t.remotePath, t.localPath);
+      } else {
+        void ipc.sftpDownload(conn.connectionId, t.sessionId, t.remotePath, t.localPath);
+      }
     }
   };
 
@@ -84,33 +95,45 @@ export function RightPanel() {
       return;
     }
     let stopped = false;
-    const tick = async () => {
-      try {
-        const m = await ipc.monitorMetrics(connectionId);
-        if (stopped) return;
-        if (lastSample.current) {
-          setNetSpeed({
-            rx: Math.max(0, m.netRx - lastSample.current.netRx) / 2,
-            tx: Math.max(0, m.netTx - lastSample.current.netTx) / 2,
-          });
+    let iv: number | undefined;
+
+    const startTimers = () => {
+      clearInterval(iv);
+      const interval = loadSettings().monitorInterval;
+      const tick = async () => {
+        try {
+          const m = await ipc.monitorMetrics(connectionId);
+          if (stopped) return;
+          if (lastSample.current) {
+            setNetSpeed({
+              rx: Math.max(0, m.netRx - lastSample.current.netRx) / (interval / 1000),
+              tx: Math.max(0, m.netTx - lastSample.current.netTx) / (interval / 1000),
+            });
+          }
+          lastSample.current = m;
+          setMetrics(m);
+        } catch {
+          /* ignore */
         }
-        lastSample.current = m;
-        setMetrics(m);
-      } catch {
-        /* ignore */
-      }
+      };
+      void tick();
+      iv = setInterval(() => void tick(), interval);
     };
-    void tick();
-    const iv = setInterval(() => void tick(), 2000);
+
+    startTimers();
+    const onSettings = () => startTimers();
+    window.addEventListener(SETTINGS_CHANGE_EVENT, onSettings);
     return () => {
       stopped = true;
+      window.removeEventListener(SETTINGS_CHANGE_EVENT, onSettings);
       clearInterval(iv);
     };
   }, [connectionId]);
 
-  const cpu = metrics ? Math.round(metrics.cpu) : 24;
-  const memPct = metrics && metrics.memTotal > 0 ? Math.round((metrics.memUsed / metrics.memTotal) * 100) : 26;
-  const disk = metrics ? Math.round(metrics.diskUsedPct) : 38;
+  const connected = !!connectionId;
+  const cpu = metrics ? Math.round(metrics.cpu) : 0;
+  const memPct = metrics && metrics.memTotal > 0 ? Math.round((metrics.memUsed / metrics.memTotal) * 100) : 0;
+  const disk = metrics ? Math.round(metrics.diskUsedPct) : 0;
 
   return (
     <div className="right-panel">
@@ -121,6 +144,14 @@ export function RightPanel() {
         </button>
       </div>
       <div className="right-panel__body">
+        {!connected ? (
+          <div className="right-panel__empty">
+            <Icon name="plug" size={20} />
+            <span className="right-panel__empty-text">未连接服务器</span>
+            <span className="right-panel__empty-sub">连接会话后在此查看实时资源占用</span>
+          </div>
+        ) : (
+          <>
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
@@ -143,7 +174,7 @@ export function RightPanel() {
             <span className="res-card__value">
               {metrics
                 ? formatBytes(metrics.memUsed) + " / " + formatBytes(metrics.memTotal)
-                : "4.2G / 16G"}
+                : "--"}
             </span>
           </div>
           <div className="res-bar">
@@ -184,8 +215,14 @@ export function RightPanel() {
               <span className="net-row__label">↓ 下行</span>
               <span className="net-row__value">{formatBytes(netSpeed.rx)}/s</span>
             </div>
+            <div className="net-row">
+              <span className="net-row__label">连接数</span>
+              <span className="net-row__value">{metrics?.netConns ?? 0}</span>
+            </div>
           </div>
         </div>
+          </>
+        )}
 
         <div className="right-panel__section-title">传输队列</div>
         <div className="ds-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -212,7 +249,30 @@ export function RightPanel() {
                       重试
                     </button>
                   )}
-                  {t.status === "running" && (
+                  {(t.status === "running" || t.status === "paused") && (
+                    <button
+                      className="ds-btn ds-btn--tertiary ds-btn--icon"
+                      type="button"
+                      title={t.status === "running" ? "暂停" : "恢复"}
+                      style={{ width: 18, height: 18, marginLeft: 2 }}
+                      onClick={() => {
+                        if (t.status === "running") {
+                          console.log("[transfer] pause task", t.id);
+                          ipc
+                            .transferPause(t.id)
+                            .catch((e) => console.warn("[transfer] pause failed:", e));
+                        } else {
+                          console.log("[transfer] resume task", t.id);
+                          ipc
+                            .transferResume(t.id)
+                            .catch((e) => console.warn("[transfer] resume failed:", e));
+                        }
+                      }}
+                    >
+                      <Icon name={t.status === "running" ? "pause" : "play"} size={12} />
+                    </button>
+                  )}
+                  {(t.status === "running" || t.status === "paused") && (
                     <button
                       className="ds-btn ds-btn--tertiary ds-btn--icon"
                       type="button"

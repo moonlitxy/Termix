@@ -28,6 +28,8 @@ export function NewConnectionDialog() {
   const [form, setForm] = useState<SessionInput>(EMPTY);
   const [saving, setSaving] = useState(false);
 
+  const isEnc = (s?: string) => !!s && s.startsWith("enc:v1:");
+
   useEffect(() => {
     if (!open) return;
     if (editing) {
@@ -37,9 +39,12 @@ export function NewConnectionDialog() {
         port: editing.port,
         username: editing.username,
         authType: editing.authType,
-        password: editing.password ?? "",
+        // 已加密的密码不回显，留空表示保持不变
+        password: isEnc(editing.password) ? "" : (editing.password ?? ""),
         privateKeyPath: editing.privateKeyPath ?? "",
-        privateKeyPassphrase: editing.privateKeyPassphrase ?? "",
+        privateKeyPassphrase: isEnc(editing.privateKeyPassphrase)
+          ? ""
+          : (editing.privateKeyPassphrase ?? ""),
         groupId: editing.groupId ?? "",
         memo: editing.memo ?? "",
         encoding: editing.encoding,
@@ -67,10 +72,20 @@ export function NewConnectionDialog() {
         port: Number(form.port) || 22,
         groupId: form.groupId || undefined,
         memo: form.memo || undefined,
-        password: form.authType === "password" ? form.password : undefined,
+        // 密码/私钥密码留空时保留原值（含密文），避免编辑其他字段时丢失密码
+        password:
+          form.authType === "password"
+            ? form.password ||
+              (editing && isEnc(editing.password) ? editing.password : undefined)
+            : undefined,
         privateKeyPath: form.authType === "key" ? form.privateKeyPath : undefined,
         privateKeyPassphrase:
-          form.authType === "key" ? form.privateKeyPassphrase : undefined,
+          form.authType === "key"
+            ? form.privateKeyPassphrase ||
+              (editing && isEnc(editing.privateKeyPassphrase)
+                ? editing.privateKeyPassphrase
+                : undefined)
+            : undefined,
       };
       if (editing) {
         await ipc.sessionUpdate(editing.id, input);

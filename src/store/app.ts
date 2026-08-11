@@ -115,13 +115,21 @@ export const useApp = create<AppState>((set, get) => ({
   },
   setSearch: (kw) => set({ searchKeyword: kw }),
 
-  addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id })),
+  addTab: (tab) =>
+    set((s) => ({
+      tabs: [...s.tabs, tab],
+      // 分屏 pane 标签不改变当前激活标签
+      activeTabId: tab.hidden ? s.activeTabId : tab.id,
+    })),
   setActiveTab: (id) => set({ activeTabId: id }),
   closeTab: (id) =>
     set((s) => {
-      const tabs = s.tabs.filter((t) => t.id !== id);
+      // 关闭标签时级联关闭其分屏 pane 标签
+      const tabs = s.tabs.filter((t) => t.id !== id && t.splitOf !== id);
       const activeTabId =
-        s.activeTabId === id ? (tabs[tabs.length - 1]?.id ?? null) : s.activeTabId;
+        s.activeTabId === id
+          ? (tabs.filter((t) => !t.hidden).pop()?.id ?? null)
+          : s.activeTabId;
       return { tabs, activeTabId };
     }),
   updateTab: (id, patch) =>
@@ -162,6 +170,7 @@ export const useApp = create<AppState>((set, get) => ({
           progress: e.progress ?? 0,
           speed: e.speed ?? 0,
           error: e.error,
+          isDir: false,
         });
       }
       return { transfers: tasks };

@@ -14,6 +14,7 @@ export function ForwardView() {
   const sessions = useApp((s) => s.sessions);
   const [rules, setRules] = useState<ForwardRule[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ForwardRuleInput>({
     type: "local",
     name: "",
@@ -35,13 +36,49 @@ export function ForwardView() {
     void load();
   }, []);
 
+  const openNew = () => {
+    setEditingId(null);
+    setForm({
+      type: "local",
+      name: "",
+      localHost: "127.0.0.1",
+      localPort: 3306,
+      remoteHost: "127.0.0.1",
+      remotePort: 3306,
+      sessionId: undefined,
+    });
+    setModalOpen(true);
+  };
+
+  const openEdit = (r: ForwardRule) => {
+    setEditingId(r.id);
+    setForm({
+      type: r.type,
+      name: r.name,
+      localHost: r.localHost,
+      localPort: r.localPort,
+      remoteHost: r.remoteHost,
+      remotePort: r.remotePort,
+      sessionId: r.sessionId,
+    });
+    setModalOpen(true);
+  };
+
   const save = async () => {
-    if (!form.name || !form.localPort || !form.remotePort) {
-      window.alert("请填写名称、本地端口、远程端口");
+    if (!form.name || !form.localPort) {
+      window.alert("请填写名称与本地端口");
+      return;
+    }
+    if (form.type !== "dynamic" && !form.remotePort) {
+      window.alert(form.type === "remote" ? "远程转发需要填写服务端监听端口" : "本地转发需要填写远程端口");
       return;
     }
     try {
-      await ipc.forwardCreate(form);
+      if (editingId) {
+        await ipc.forwardUpdate(editingId, form);
+      } else {
+        await ipc.forwardCreate(form);
+      }
       setModalOpen(false);
       void load();
     } catch (e) {
@@ -59,7 +96,7 @@ export function ForwardView() {
         <button
           className="ds-btn ds-btn--brand ds-btn--sm"
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={openNew}
         >
           <Icon name="plus" size={12} />新建规则
         </button>
@@ -72,7 +109,11 @@ export function ForwardView() {
               <span className="fw-row__name">{r.name}</span>
               <span className="ds-tag ds-tag--neutral">{TYPE_LABEL[r.type] ?? r.type}</span>
               <span className="fw-row__path">
-                {r.localHost}:{r.localPort} → {r.remoteHost}:{r.remotePort}
+                {r.type === "dynamic"
+                  ? `${r.localHost}:${r.localPort} → SOCKS5`
+                  : r.type === "remote"
+                  ? `${r.remoteHost || "0.0.0.0"}:${r.remotePort} → ${r.localHost || "127.0.0.1"}:${r.localPort}`
+                  : `${r.localHost}:${r.localPort} → ${r.remoteHost}:${r.remotePort}`}
               </span>
               <span className="fw-row__session">绑定：{sessionName(r.sessionId)}</span>
             </div>
@@ -96,6 +137,14 @@ export function ForwardView() {
                 {r.enabled ? "停用" : "启用"}
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                onClick={() => openEdit(r)}
+              >
+                <Icon name="edit" size={12} />
+                编辑
+              </button>
+              <button
                 className="ds-btn ds-btn--danger-subtle ds-btn--sm"
                 type="button"
                 onClick={() => {
@@ -115,7 +164,7 @@ export function ForwardView() {
         <div className="modal-overlay" onClick={() => setModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <span>新建转发规则</span>
+              <span>{editingId ? "编辑转发规则" : "新建转发规则"}</span>
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
@@ -132,12 +181,9 @@ export function ForwardView() {
                 onChange={(e) => setForm({ ...form, type: e.target.value as ForwardRuleInput["type"] })}
               >
                 <option value="local">本地端口转发</option>
-                <option value="remote">远程端口转发</option>
                 <option value="dynamic">动态 SOCKS 代理</option>
+                <option value="remote">远程端口转发</option>
               </select>
-              {form.type !== "local" && (
-                <div className="form-hint">当前版本仅支持本地端口转发</div>
-              )}
             </div>
             <div className="form-row">
               <label>规则名称</label>
@@ -165,23 +211,38 @@ export function ForwardView() {
                 onChange={(e) => setForm({ ...form, localPort: Number(e.target.value) })}
               />
             </div>
-            <div className="form-row">
-              <label>远程地址</label>
-              <input
-                className="ds-input"
-                value={form.remoteHost ?? ""}
-                onChange={(e) => setForm({ ...form, remoteHost: e.target.value })}
-              />
-            </div>
-            <div className="form-row">
-              <label>远程端口</label>
-              <input
-                className="ds-input"
-                type="number"
-                value={form.remotePort}
-                onChange={(e) => setForm({ ...form, remotePort: Number(e.target.value) })}
-              />
-            </div>
+            {form.type === "remote" && (
+              <div className="form-hint" style={{ marginBottom: 8 }}>
+                远程转发：远程端口为服务端监听端口，收到的连接将转发到本地地址/端口
+              </div>
+            )}
+            {form.type !== "dynamic" && (
+              <>
+                <div className="form-row">
+                  <label>{form.type === "remote" ? "服务端监听地址" : "远程地址"}</label>
+                  <input
+                    className="ds-input"
+                    value={form.remoteHost ?? ""}
+                    onChange={(e) => setForm({ ...form, remoteHost: e.target.value })}
+                    placeholder={form.type === "remote" ? "留空默认 0.0.0.0" : "如 127.0.0.1"}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>{form.type === "remote" ? "服务端监听端口" : "远程端口"}</label>
+                  <input
+                    className="ds-input"
+                    type="number"
+                    value={form.remotePort}
+                    onChange={(e) => setForm({ ...form, remotePort: Number(e.target.value) })}
+                  />
+                </div>
+              </>
+            )}
+            {form.type === "dynamic" && (
+              <div className="form-hint" style={{ marginBottom: 8 }}>
+                本机监听端口将作为 SOCKS5 代理，目标地址由连接时动态指定
+              </div>
+            )}
             <div className="form-row">
               <label>绑定会话</label>
               <select
@@ -204,7 +265,6 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--brand"
                 type="button"
-                disabled={form.type !== "local"}
                 onClick={() => void save()}
               >
                 保存

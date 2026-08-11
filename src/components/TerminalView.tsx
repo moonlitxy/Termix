@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
@@ -37,7 +38,10 @@ export function TerminalView({ tab }: { tab: Tab }) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const tabRef = useRef<Tab>(tab);
+  const hasSelectionRef = useRef(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [pastePending, setPastePending] = useState<string | null>(null);
 
   const updateTab = useApp((s) => s.updateTab);
 
@@ -62,10 +66,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    const searchAddon = new SearchAddon();
+    terminal.loadAddon(searchAddon);
     terminal.open(container);
     termRef.current = terminal;
     fitRef.current = fitAddon;
     terminalRegistry.set(tab.id, terminal);
+    terminalRegistry.setSearch(tab.id, searchAddon);
     terminalRegistry.clearBuffer(tab.id);
 
     try {
@@ -85,10 +92,51 @@ export function TerminalView({ tab }: { tab: Tab }) {
       else unlisteners.push(un);
     });
 
+    // 自动重连：意外断开后最多重试 3 次（主动断开不会触发）
+    let reconnectCount = 0;
+    let reconnecting = false;
+    const doReconnect = async () => {
+      if (cancelled || reconnecting) return;
+      if (reconnectCount >= 3) {
+        terminal.write("\r\n\x1b[31m自动重连失败，请手动重连\x1b[0m\r\n");
+        return;
+      }
+      reconnecting = true;
+      reconnectCount += 1;
+      terminal.write(`\r\n连接断开，2 秒后自动重连（第 ${reconnectCount}/3 次）...\r\n`);
+      await new Promise((r) => setTimeout(r, 2000));
+      if (cancelled) {
+        reconnecting = false;
+        return;
+      }
+      const cur = tabRef.current;
+      try {
+        const connId = await ipc.sessionConnect(cur.sessionId);
+        const shellId = await ipc.terminalCreate(
+          connId,
+          cur.id,
+          terminal.cols,
+          terminal.rows
+        );
+        updateTab(cur.id, {
+          connectionId: connId,
+          shellId,
+          status: "connected",
+        });
+        reconnectCount = 0;
+        terminal.write("\x1b[32m重连成功\x1b[0m\r\n");
+      } catch (e) {
+        terminal.write(`\x1b[31m重连失败: ${String(e)}\x1b[0m\r\n`);
+        reconnecting = false;
+        void doReconnect();
+      }
+    };
+
     // 订阅连接状态
     onConnectionStatus((e) => {
       if (e.tabId === tab.id && e.status === "closed" && !cancelled) {
         updateTab(tab.id, { status: "disconnected" });
+        void doReconnect();
       }
     }).then((un) => {
       if (cancelled) un();
@@ -101,6 +149,11 @@ export function TerminalView({ tab }: { tab: Tab }) {
       if (t.connectionId && t.shellId) {
         ipc.terminalWrite(t.connectionId, t.shellId, data);
       }
+    });
+
+    // 跟踪选中状态，供右键菜单判断"复制"是否可用
+    const selDisp = terminal.onSelectionChange(() => {
+      hasSelectionRef.current = terminal.hasSelection();
     });
 
     // 容器尺寸变化
@@ -166,6 +219,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     return () => {
       cancelled = true;
       dataDisp.dispose();
+      selDisp.dispose();
       unlisteners.forEach((un) => un());
       if (ro) ro.disconnect();
       // 仅销毁终端；连接断开由 EditorTabs/Toolbar 负责
@@ -191,9 +245,166 @@ export function TerminalView({ tab }: { tab: Tab }) {
     setRetryKey((k) => k + 1);
   };
 
+  // ---- 右键菜单 ----
+  const sendText = async (text: string) => {
+    const cur = tabRef.current;
+    if (!cur.connectionId || !cur.shellId) return;
+    try {
+      await ipc.terminalWrite(cur.connectionId, cur.shellId, text);
+    } catch (e) {
+      console.error("terminal write failed:", e);
+    }
+  };
+
+  const openCtxMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const menuW = 140;
+    const menuH = 112;
+    setCtxMenu({
+      x: Math.max(4, Math.min(e.clientX - rect.left, rect.width - menuW - 4)),
+      y: Math.max(4, Math.min(e.clientY - rect.top, rect.height - menuH - 4)),
+    });
+  };
+
+  const closeCtxMenu = () => setCtxMenu(null);
+
+  const handleCopy = async () => {
+    const t = termRef.current;
+    const sel = t ? t.getSelection() : "";
+    if (sel) {
+      try {
+        await navigator.clipboard.writeText(sel);
+      } catch (e) {
+        console.error("copy failed:", e);
+      }
+    }
+    closeCtxMenu();
+    t?.focus();
+  };
+
+  const handlePaste = async () => {
+    const t = termRef.current;
+    closeCtxMenu();
+    t?.focus();
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (e) {
+      console.error("read clipboard failed:", e);
+      return;
+    }
+    if (!text) return;
+    // 多行内容需要用户确认，避免误粘贴破坏终端状态
+    if (text.includes("\n")) {
+      setPastePending(text);
+    } else {
+      void sendText(text);
+    }
+  };
+
+  const handleClear = () => {
+    const t = termRef.current;
+    if (t) {
+      t.clear();
+      t.clearSelection();
+      t.focus();
+    }
+    closeCtxMenu();
+  };
+
+  const confirmPaste = () => {
+    if (pastePending) void sendText(pastePending);
+    setPastePending(null);
+  };
+
+  const cancelPaste = () => setPastePending(null);
+
+  // 分屏 pane 关闭按钮：销毁连接并关闭该 pane 标签
+  const closePane = async () => {
+    const t = tabRef.current;
+    try {
+      if (t.connectionId && t.shellId) {
+        await ipc.terminalDestroy(t.connectionId, t.shellId);
+      }
+      if (t.connectionId) {
+        await ipc.sessionDisconnect(t.connectionId);
+      }
+    } catch {
+      // 忽略关闭时的错误
+    }
+    useApp.getState().closeTab(t.id);
+  };
+
   return (
     <div className="terminal-view">
-      <div className="terminal-view__container" ref={containerRef} />
+      <div
+        className="terminal-view__container"
+        ref={containerRef}
+        onContextMenu={openCtxMenu}
+      />
+      {tab.hidden && (
+        <button
+          type="button"
+          className="terminal-view__close-pane"
+          title="关闭分屏"
+          onClick={() => void closePane()}
+        >
+          <Icon name="x" size={12} />
+        </button>
+      )}
+      {ctxMenu && (
+        <div
+          className="terminal-view__ctx-backdrop"
+          onClick={closeCtxMenu}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            closeCtxMenu();
+          }}
+        >
+          <div
+            className="terminal-view__ctx-menu"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="terminal-view__ctx-item"
+              disabled={!hasSelectionRef.current}
+              onClick={handleCopy}
+            >
+              复制
+            </button>
+            <button type="button" className="terminal-view__ctx-item" onClick={handlePaste}>
+              粘贴
+            </button>
+            <div className="terminal-view__ctx-sep" />
+            <button type="button" className="terminal-view__ctx-item" onClick={handleClear}>
+              清屏
+            </button>
+          </div>
+        </div>
+      )}
+      {pastePending && (
+        <div className="terminal-view__paste-confirm">
+          <div className="terminal-view__paste-title">剪贴板包含多行内容</div>
+          <pre className="terminal-view__paste-preview">{pastePending}</pre>
+          <div className="terminal-view__paste-actions">
+            <button type="button" className="ds-btn" onClick={cancelPaste}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="ds-btn ds-btn--brand"
+              onClick={confirmPaste}
+            >
+              粘贴到终端
+            </button>
+          </div>
+        </div>
+      )}
       {tab.status === "error" && (
         <div className="terminal-view__error">
           <span className="terminal-view__error-icon">

@@ -18,11 +18,47 @@ export function SessionSidebar() {
   const openNewConnection = useApp((s) => s.openNewConnection);
   const addTab = useApp((s) => s.addTab);
   const loadSessions = useApp((s) => s.loadSessions);
+  const loadGroups = useApp((s) => s.loadGroups);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [groupsOpen, setGroupsOpen] = useState(true);
+  const [groupsOpen, setGroupsOpen] = useState<Record<string, boolean>>({});
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // 导出会话（JSON 备份下载）
+  const handleExport = async () => {
+    try {
+      const json = await ipc.sessionsExport();
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const name = `termix-sessions-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.json`;
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      window.alert("导出失败：" + String(e));
+    }
+  };
+
+  // 导入会话（选择 JSON 备份）
+  const handleImport = async (file: File) => {
+    try {
+      const content = await file.text();
+      const res = await ipc.sessionsImport(content);
+      void loadSessions();
+      void loadGroups();
+      window.alert(
+        `导入完成：新增 ${res.sessionsCreated} 个会话、${res.groupsCreated} 个分组，跳过 ${res.sessionsSkipped} 个同名会话`
+      );
+    } catch (e) {
+      window.alert("导入失败：" + String(e));
+    }
+  };
 
   const openSession = (session: Session) => {
     addTab({
@@ -98,21 +134,91 @@ export function SessionSidebar() {
           { id: "g-test", name: "测试环境", order: 1 },
         ];
 
-  const countByGroup = (gid: string) =>
-    sessions.filter((s) => s.groupId === gid).length || 0;
+  // 分组默认展开，折叠状态按分组独立记录
+  const isGroupOpen = (id: string) => groupsOpen[id] !== false;
+
+  const renderSessionRow = (s: Session, child = false) => {
+    const online = isOnline(s.id);
+    return (
+      <div
+        key={s.id}
+        className={
+          "session-row" +
+          (child ? " session-row--child" : "") +
+          (selectedId === s.id ? " is-active" : "")
+        }
+        onClick={() => handleClick(s)}
+        onDoubleClick={() => openSession(s)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setSelectedId(s.id);
+          setCtx({ x: e.clientX, y: e.clientY, session: s });
+        }}
+        title={s.host + ":" + s.port}
+      >
+        {!child && (
+          <span className="session-row__chevron">
+            <Icon name="chevron-down" size={12} />
+          </span>
+        )}
+        <span
+          className={
+            "ds-dot " + (online ? "ds-dot--success-glow" : "ds-dot--muted")
+          }
+        />
+        <span className="session-row__name">{s.name}</span>
+        <span className="session-row__status">
+          {online ? (
+            <span className="ds-tag ds-tag--success">在线</span>
+          ) : (
+            <span className="ds-tag ds-tag--neutral">离线</span>
+          )}
+        </span>
+      </div>
+    );
+  };
 
   return (
     <div className="session-sidebar">
       <div className="session-sidebar__header">
         <span>会话列表</span>
-        <button
-          className="ds-btn ds-btn--tertiary ds-btn--icon"
-          type="button"
-          title="新建连接"
-          onClick={() => openNewConnection()}
-        >
-          <Icon name="plus" size={14} />
-        </button>
+        <div className="session-sidebar__header-actions">
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title="导入会话（JSON）"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Icon name="upload" size={14} />
+          </button>
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title="导出会话（JSON）"
+            onClick={() => void handleExport()}
+          >
+            <Icon name="download" size={14} />
+          </button>
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title="新建连接"
+            onClick={() => openNewConnection()}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleImport(f);
+            e.target.value = "";
+          }}
+        />
       </div>
       <div className="session-sidebar__body">
         <div className="session-sidebar__section-title">最近连接</div>
@@ -127,62 +233,35 @@ export function SessionSidebar() {
             暂无会话，点击 + 新建
           </div>
         ) : (
-          sessions.map((s) => {
-            const online = isOnline(s.id);
-            return (
-              <div
-                key={s.id}
-                className={
-                  "session-row" + (selectedId === s.id ? " is-active" : "")
-                }
-                onClick={() => handleClick(s)}
-                onDoubleClick={() => openSession(s)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setSelectedId(s.id);
-                  setCtx({ x: e.clientX, y: e.clientY, session: s });
-                }}
-                title={s.host + ":" + s.port}
-              >
-                <span className="session-row__chevron">
-                  <Icon name="chevron-down" size={12} />
-                </span>
-                <span
-                  className={
-                    "ds-dot " + (online ? "ds-dot--success-glow" : "ds-dot--muted")
-                  }
-                />
-                <span className="session-row__name">{s.name}</span>
-                <span className="session-row__status">
-                  {online ? (
-                    <span className="ds-tag ds-tag--success">在线</span>
-                  ) : (
-                    <span className="ds-tag ds-tag--neutral">离线</span>
-                  )}
-                </span>
-              </div>
-            );
-          })
+          sessions.map((s) => renderSessionRow(s))
         )}
 
         <div className="session-sidebar__section-title">分组</div>
-        {displayGroups.map((g) => (
-          <div
-            key={g.id}
-            className="group-row"
-            onClick={() => setGroupsOpen((v) => !v)}
-            title={g.name}
-          >
-            <span className="session-row__chevron">
-              <Icon name={groupsOpen ? "chevron-down" : "chevron-right"} size={12} />
-            </span>
-            <span style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
-              <Icon name="folder" size={14} />
-            </span>
-            <span className="group-row__name">{g.name}</span>
-            <span className="ds-tag ds-tag--count">{countByGroup(g.id)}</span>
-          </div>
-        ))}
+        {displayGroups.map((g) => {
+          const open = isGroupOpen(g.id);
+          const groupSessions = sessions.filter((s) => s.groupId === g.id);
+          return (
+            <div key={g.id}>
+              <div
+                className="group-row"
+                onClick={() =>
+                  setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
+                }
+                title={g.name}
+              >
+                <span className="session-row__chevron">
+                  <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+                </span>
+                <span style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
+                  <Icon name="folder" size={14} />
+                </span>
+                <span className="group-row__name">{g.name}</span>
+                <span className="ds-tag ds-tag--count">{groupSessions.length}</span>
+              </div>
+              {open && groupSessions.map((s) => renderSessionRow(s, true))}
+            </div>
+          );
+        })}
       </div>
 
       {ctx && (

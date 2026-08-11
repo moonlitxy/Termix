@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod crypto;
 mod db;
 mod forward;
 mod models;
@@ -27,6 +28,8 @@ fn main() {
             commands::session_create,
             commands::session_update,
             commands::session_delete,
+            commands::sessions_export,
+            commands::sessions_import,
             commands::group_list,
             commands::group_create,
             commands::group_delete,
@@ -46,8 +49,12 @@ fn main() {
             commands::sftp_chmod,
             commands::sftp_upload,
             commands::sftp_download,
+            commands::sftp_upload_dir,
+            commands::sftp_download_dir,
             commands::transfer_list,
             commands::transfer_cancel,
+            commands::transfer_pause,
+            commands::transfer_resume,
             commands::local_list,
             commands::local_home,
             commands::snippet_list,
@@ -62,6 +69,11 @@ fn main() {
             commands::forward_stop,
             commands::monitor_metrics,
             commands::monitor_processes,
+            commands::master_status,
+            commands::master_set,
+            commands::master_unlock,
+            commands::master_lock,
+            commands::master_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

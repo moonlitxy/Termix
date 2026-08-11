@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp, joinPath } from "../store/app";
 import { ipc, onTransferProgress } from "../lib/ipc";
+import { sftpContextMenu, type SftpMenuItem } from "../lib/sftpMenu";
 import type { SftpItem } from "../types";
 
 function formatSize(n: number): string {
@@ -33,6 +34,8 @@ interface PaneProps {
   onPathSubmit: () => void;
   onTargetHover: (side: "remote" | "local" | null) => void;
   onPaneDrop: (e: React.DragEvent) => void;
+  onRowContextMenu: (e: React.MouseEvent, item: SftpItem) => void;
+  onBlankContextMenu: (e: React.MouseEvent) => void;
 }
 
 function FsPane({
@@ -49,6 +52,8 @@ function FsPane({
   onPathSubmit,
   onTargetHover,
   onPaneDrop,
+  onRowContextMenu,
+  onBlankContextMenu,
 }: PaneProps) {
   return (
     <div
@@ -82,7 +87,13 @@ function FsPane({
           spellCheck={false}
         />
       </div>
-      <div className="sftp-list">
+      <div
+        className="sftp-list"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onBlankContextMenu(e);
+        }}
+      >
         {items.map((it) => (
           <div
             key={it.path}
@@ -100,6 +111,11 @@ function FsPane({
             }}
             onClick={() => onSelect(it)}
             onDoubleClick={() => onOpen(it)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRowContextMenu(e, it);
+            }}
             title={it.path}
           >
             <span className="sftp-row__icon">
@@ -138,9 +154,73 @@ export function SftpView() {
   const [localDraft, setLocalDraft] = useState(localPath);
   const [dropHover, setDropHover] = useState<"remote" | "local" | null>(null);
   const hoverRef = useRef<"remote" | "local" | null>(null);
+  const [ctx, setCtx] = useState<{
+    x: number;
+    y: number;
+    side: "remote" | "local";
+    item: SftpItem | null;
+  } | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
   const sessionName = sftpContext
     ? sessions.find((s) => s.id === sftpContext.sessionId)?.name ?? "已连接会话"
     : null;
+
+  // 右键菜单：点击外部 / Esc 关闭
+  useEffect(() => {
+    if (!ctx) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
+        setCtx(null);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtx(null);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [ctx]);
+
+  const copyPath = async (p: string) => {
+    try {
+      await navigator.clipboard.writeText(p);
+    } catch (e) {
+      console.error("[sftp] copy path failed:", e);
+    }
+  };
+
+  // 右键菜单项分发
+  const runMenuAction = (m: SftpMenuItem) => {
+    if (!ctx) return;
+    const item = ctx.item;
+    switch (m.id) {
+      case "download":
+        if (item) void (item.isDir ? doDownloadDir(item) : doDownload(item));
+        break;
+      case "upload":
+        if (item) void (item.isDir ? doUploadDir(item) : doUpload(item));
+        break;
+      case "rename":
+        if (item) void handleRename(item);
+        break;
+      case "delete":
+        if (item) void handleDelete(item);
+        break;
+      case "copyPath":
+        if (item) void copyPath(item.path);
+        break;
+      case "mkdir":
+        void handleMkdir();
+        break;
+      case "refresh":
+        handleRefresh();
+        break;
+    }
+    setCtx(null);
+  };
 
   useEffect(() => {
     setRemoteDraft(remotePath);
@@ -284,6 +364,50 @@ export function SftpView() {
     }
   };
 
+  const doUploadDir = async (local: SftpItem) => {
+    const st = useApp.getState();
+    if (!st.sftpContext) {
+      window.alert("请先在左侧选择一个已连接的会话，再上传目录");
+      return;
+    }
+    const dest = joinPath(st.remotePath, local.name);
+    console.log("[sftp] upload-dir", { local: local.path, remote: dest, conn: st.sftpContext.connectionId });
+    try {
+      const taskId = await ipc.sftpUploadDir(
+        st.sftpContext.connectionId,
+        st.sftpContext.sessionId,
+        local.path,
+        dest
+      );
+      console.log("[sftp] upload-dir task started:", taskId);
+    } catch (e) {
+      console.error("[sftp] upload-dir failed:", e);
+      window.alert(`上传目录 ${local.name} 失败：${String(e)}`);
+    }
+  };
+
+  const doDownloadDir = async (remote: SftpItem) => {
+    const st = useApp.getState();
+    if (!st.sftpContext) {
+      window.alert("请先在左侧选择一个已连接的会话，再下载目录");
+      return;
+    }
+    const dest = joinPath(st.localPath, remote.name);
+    console.log("[sftp] download-dir", { remote: remote.path, local: dest, conn: st.sftpContext.connectionId });
+    try {
+      const taskId = await ipc.sftpDownloadDir(
+        st.sftpContext.connectionId,
+        st.sftpContext.sessionId,
+        remote.path,
+        dest
+      );
+      console.log("[sftp] download-dir task started:", taskId);
+    } catch (e) {
+      console.error("[sftp] download-dir failed:", e);
+      window.alert(`下载目录 ${remote.name} 失败：${String(e)}`);
+    }
+  };
+
   const handleOpen = (side: "remote" | "local", item: SftpItem) => {
     const st = useApp.getState();
     if (item.isDir) {
@@ -401,18 +525,28 @@ export function SftpView() {
             <button
               className="ds-btn ds-btn--secondary ds-btn--sm"
               type="button"
-              onClick={() => void doUpload(localSelected)}
+              onClick={() =>
+                void (localSelected.isDir
+                  ? doUploadDir(localSelected)
+                  : doUpload(localSelected))
+              }
             >
-              <Icon name="upload" size={12} />上传
+              <Icon name="upload" size={12} />
+              {localSelected.isDir ? "上传目录" : "上传"}
             </button>
           )}
           {remoteSelected && (
             <button
               className="ds-btn ds-btn--secondary ds-btn--sm"
               type="button"
-              onClick={() => void doDownload(remoteSelected)}
+              onClick={() =>
+                void (remoteSelected.isDir
+                  ? doDownloadDir(remoteSelected)
+                  : doDownload(remoteSelected))
+              }
             >
-              <Icon name="download" size={12} />下载
+              <Icon name="download" size={12} />
+              {remoteSelected.isDir ? "下载目录" : "下载"}
             </button>
           )}
         </div>
@@ -435,6 +569,13 @@ export function SftpView() {
           }}
           onTargetHover={setHover}
           onPaneDrop={handlePaneDrop("remote")}
+          onRowContextMenu={(e, it) => {
+            useApp.getState().selectRemote(it);
+            setCtx({ x: e.clientX, y: e.clientY, side: "remote", item: it });
+          }}
+          onBlankContextMenu={(e) =>
+            setCtx({ x: e.clientX, y: e.clientY, side: "remote", item: null })
+          }
         />
         <FsPane
           title="本地"
@@ -453,8 +594,40 @@ export function SftpView() {
           }}
           onTargetHover={setHover}
           onPaneDrop={handlePaneDrop("local")}
+          onRowContextMenu={(e, it) => {
+            useApp.getState().selectLocal(it);
+            setCtx({ x: e.clientX, y: e.clientY, side: "local", item: it });
+          }}
+          onBlankContextMenu={(e) =>
+            setCtx({ x: e.clientX, y: e.clientY, side: "local", item: null })
+          }
         />
       </div>
+
+      {ctx && (
+        <div
+          className="ctx-menu"
+          ref={ctxRef}
+          style={{ left: ctx.x, top: ctx.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {sftpContextMenu(ctx.side, ctx.item).map((m) => (
+            <Fragment key={m.id}>
+              {m.dividerBefore && <div className="ctx-menu__sep" />}
+              <button
+                type="button"
+                className={
+                  "ctx-menu__item" + (m.dangerous ? " ctx-menu__item--danger" : "")
+                }
+                onClick={() => runMenuAction(m)}
+              >
+                <Icon name={m.icon} size={12} />
+                {m.label}
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

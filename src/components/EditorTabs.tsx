@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { useApp } from "../store/app";
+import { useApp, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { canSplitMore, paneTitle } from "../lib/split";
 
 interface CtxMenu {
   x: number;
@@ -14,18 +15,25 @@ export function EditorTabs() {
   const activeTabId = useApp((s) => s.activeTabId);
   const setActiveTab = useApp((s) => s.setActiveTab);
   const closeTab = useApp((s) => s.closeTab);
+  const addTab = useApp((s) => s.addTab);
+  const updateTab = useApp((s) => s.updateTab);
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const destroyAndClose = async (tabId: string) => {
-    const t = tabs.find((x) => x.id === tabId);
+    // 分屏 pane 标签随主标签一起销毁
+    const related = tabs.filter((x) => x.id === tabId || x.splitOf === tabId);
     try {
-      if (t?.connectionId && t.shellId) {
-        await ipc.terminalDestroy(t.connectionId, t.shellId);
-      }
-      if (t?.connectionId) {
-        await ipc.sessionDisconnect(t.connectionId);
-      }
+      await Promise.all(
+        related.map(async (x) => {
+          if (x.connectionId && x.shellId) {
+            await ipc.terminalDestroy(x.connectionId, x.shellId);
+          }
+          if (x.connectionId) {
+            await ipc.sessionDisconnect(x.connectionId);
+          }
+        })
+      );
     } catch {
       // 忽略关闭时的错误
     }
@@ -45,6 +53,57 @@ export function EditorTabs() {
     void Promise.all(
       tabs.filter((_, i) => i > idx).map((t) => destroyAndClose(t.id))
     );
+  };
+
+  // 分屏：基于当前活动标签的会话新建一个独立终端（pane 标签，不在标签栏显示）
+  const splitActive = () => {
+    const tab = tabs.find((t) => t.id === activeTabId);
+    if (!tab || tab.hidden) return;
+    if (tab.status === "connecting") {
+      window.alert("请等待当前连接完成后再分屏");
+      return;
+    }
+    const panes = tabs.filter((t) => t.splitOf === tab.id);
+    const limit = canSplitMore(panes.length);
+    if (!limit.ok) {
+      window.alert(limit.reason);
+      return;
+    }
+    addTab({
+      id: nextTabId(),
+      kind: "terminal",
+      sessionId: tab.sessionId,
+      title: paneTitle(tab.title, panes.length + 2),
+      status: "connecting",
+      hidden: true,
+      splitOf: tab.id,
+    });
+  };
+
+  // 复制标签：基于同一会话新建一个独立连接的新标签
+  const duplicateTab = () => {
+    if (!ctx) return;
+    const t = tabs.find((x) => x.id === ctx.tabId);
+    if (!t) return;
+    console.log("[tab] duplicate", t.id, "session", t.sessionId);
+    addTab({
+      id: nextTabId(),
+      kind: t.kind,
+      sessionId: t.sessionId,
+      title: t.title + "（副本）",
+      status: "connecting",
+    });
+  };
+
+  // 重命名标签：仅修改标题
+  const renameTab = () => {
+    if (!ctx) return;
+    const t = tabs.find((x) => x.id === ctx.tabId);
+    if (!t) return;
+    const name = window.prompt("重命名标签", t.title);
+    if (name && name.trim()) {
+      updateTab(ctx.tabId, { title: name.trim() });
+    }
   };
 
   useEffect(() => {
@@ -72,7 +131,7 @@ export function EditorTabs() {
 
   return (
     <div className="editor-tabs">
-      {tabs.map((tab) => (
+      {tabs.filter((t) => !t.hidden).map((tab) => (
         <div
           key={tab.id}
           className={"ds-editortab" + (tab.id === activeTabId ? " is-active" : "")}
@@ -97,7 +156,12 @@ export function EditorTabs() {
       ))}
       <div className="editor-tabs__spacer" />
       <div className="editor-tabs__actions">
-        <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="分屏">
+        <button
+          className="ds-btn ds-btn--tertiary ds-btn--icon"
+          type="button"
+          title="分屏（同会话新开一个终端）"
+          onClick={splitActive}
+        >
           <Icon name="columns" size={15} />
         </button>
         <button
@@ -151,6 +215,29 @@ export function EditorTabs() {
           >
             <Icon name="chevron-right" size={12} />
             关闭右侧
+          </button>
+          <div className="ctx-menu__sep" />
+          <button
+            type="button"
+            className="ctx-menu__item"
+            onClick={() => {
+              duplicateTab();
+              setCtx(null);
+            }}
+          >
+            <Icon name="copy" size={12} />
+            复制标签
+          </button>
+          <button
+            type="button"
+            className="ctx-menu__item"
+            onClick={() => {
+              renameTab();
+              setCtx(null);
+            }}
+          >
+            <Icon name="edit" size={12} />
+            重命名标签
           </button>
         </div>
       )}

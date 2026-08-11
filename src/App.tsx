@@ -31,8 +31,13 @@ function adjustFontSize(delta: number) {
     const next = Math.min(18, Math.max(11, (settings.fontSize ?? 13) + delta));
     settings.fontSize = next;
     localStorage.setItem("termix.settings", JSON.stringify(settings));
-    document.documentElement.style.setProperty("--code-terminal-font-size", next + "px");
-    document.documentElement.style.setProperty("--body-base-font-size", next + "px");
+    // 以用户字号为基准，叠加视口自适应（窗口变化时字体随之缩放）
+    const ui = (n: number) => `clamp(${n}px, calc(${n}px + 0.15vw), ${n + 4}px)`;
+    document.documentElement.style.setProperty("--body-xs-font-size", ui(next - 3));
+    document.documentElement.style.setProperty("--body-sm-font-size", ui(next - 2));
+    document.documentElement.style.setProperty("--body-md-font-size", ui(next - 1));
+    document.documentElement.style.setProperty("--body-base-font-size", ui(next));
+    document.documentElement.style.setProperty("--code-terminal-font-size", ui(next - 1));
     terminalRegistry.setFontSize(next);
   } catch {
     // ignore
@@ -115,6 +120,9 @@ export default function App() {
       } else if (e.key === "-") {
         e.preventDefault();
         adjustFontSize(-1);
+      } else if (e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent("termix:search"));
       }
     };
     document.addEventListener("keydown", onKey);
@@ -127,17 +135,44 @@ export default function App() {
         <>
           <EditorTabs />
           <div className="workspace__main">
-            {tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={
-                  "workspace__terminal-slot" +
-                  (tab.id === activeTabId ? " is-active" : "")
+            {tabs
+              .filter((t) => !t.hidden)
+              .map((tab) => {
+                // 分屏：主标签 + 其 pane 标签并排渲染
+                const panes = tabs.filter((p) => p.splitOf === tab.id);
+                const isActive = tab.id === activeTabId;
+                if (panes.length === 0) {
+                  return (
+                    <div
+                      key={tab.id}
+                      className={
+                        "workspace__terminal-slot" + (isActive ? " is-active" : "")
+                      }
+                    >
+                      <TerminalView tab={tab} />
+                    </div>
+                  );
                 }
-              >
-                <TerminalView tab={tab} />
-              </div>
-            ))}
+                return (
+                  <div
+                    key={tab.id}
+                    className={
+                      "workspace__terminal-slot" + (isActive ? " is-active" : "")
+                    }
+                  >
+                    <div className="workspace__split">
+                      <div className="workspace__split-pane">
+                        <TerminalView tab={tab} />
+                      </div>
+                      {panes.map((p) => (
+                        <div className="workspace__split-pane" key={p.id}>
+                          <TerminalView tab={p} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
           </div>
           <Toolbar />
           <CommandInput />
