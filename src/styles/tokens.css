@@ -1,0 +1,72 @@
+:root {
+  /* radius */
+  --radius-2: 2px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-10: 10px;
+  --radius-full: 9999px;
+
+  /* spacers */
+  --spacer-4: 4px;
+  --spacer-6: 6px;
+  --spacer-8: 8px;
+  --spacer-12: 12px;
+  --spacer-16: 16px;
+  --spacer-24: 24px;
+  --spacer-32: 32px;
+  --spacer-40: 40px;
+
+  /* font */
+  --font-family-default: "SF Pro Text", system-ui, -apple-system, sans-serif;
+  --font-family-heading: "SF Pro", system-ui, sans-serif;
+  --font-family-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  --body-xs-font-size: 10px;
+  --body-sm-font-size: 11px;
+  --body-md-font-size: 12px;
+  --body-base-font-size: 13px;
+
+  /* code */
+  --code-editor-font-family: var(--font-family-mono);
+  --code-terminal-font-family: var(--font-family-mono);
+  --code-terminal-font-size: 12px;
+  --code-terminal-line-height: 18px;
+  --code-text: #e0e3ee;
+  --code-doc: #7f838c;
+  --code-link: #3c7eff;
+  --code-number: #f48cca;
+  --code-instruction: #f0d8ff;
+  --code-parameter: #82d99f;
+  --code-attribute: #ded47e;
+
+  /* bg */
+  --bg-base-default: #1a1b1d;
+  --bg-base-secondary: #222427;
+  --bg-base-tertiary: #2a2d31;
+  --bg-overlay-l1: rgba(224, 226, 242, 0.04);
+  --bg-overlay-l2: rgba(224, 226, 242, 0.06);
+  --bg-overlay-l3: rgba(224, 226, 242, 0.08);
+  --bg-overlay-l4: rgba(224, 226, 242, 0.12);
+  --bg-brand: #32f08c;
+  --bg-brand-hover: #0fdc78;
+  --bg-brand-popup: rgba(50, 240, 140, 0.12);
+
+  /* text */
+  --text-default: #d1d3db;
+  --text-secondary: #9599a6;
+  --text-tertiary: #666b75;
+  --text-onbrand: #0c0c0d;
+
+  /* border */
+  --border-neutral-l1: rgba(224, 226, 242, 0.1);
+  --border-neutral-l2: rgba(224, 226, 242, 0.16);
+  --border-neutral-l3: rgba(224, 226, 242, 0.2);
+  --border-brand: #32f08c;
+
+  /* status */
+  --status-primary-default: #387bff;
+  --status-success-default: #33c192;
+  --status-warning-default: #d27e24;
+  --status-error-default: #f65a5a;
+}
