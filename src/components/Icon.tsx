@@ -12,6 +12,8 @@ import copy from "../assets/icons/copy.svg?raw";
 import cpu from "../assets/icons/cpu.svg?raw";
 import download from "../assets/icons/download.svg?raw";
 import edit from "../assets/icons/edit.svg?raw";
+import eye from "../assets/icons/eye.svg?raw";
+import eyeOff from "../assets/icons/eye-off.svg?raw";
 import file from "../assets/icons/file.svg?raw";
 import folder from "../assets/icons/folder.svg?raw";
 import grid2x2 from "../assets/icons/grid-2x2.svg?raw";
@@ -50,6 +52,8 @@ const ICONS: Record<string, string> = {
   cpu,
   download,
   edit,
+  eye,
+  "eye-off": eyeOff,
   file,
   folder,
   "grid-2x2": grid2x2,

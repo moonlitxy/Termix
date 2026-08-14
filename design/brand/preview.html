@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Termix 图标预览</title>
+<style>
+  body { margin: 0; padding: 32px; font-family: -apple-system, "PingFang SC", sans-serif; background: #17181b; color: #d1d3db; }
+  h1 { font-size: 18px; margin: 0 0 24px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; max-width: 960px; }
+  .tile { background: #222427; border: 1px solid #34373c; border-radius: 12px; padding: 16px; text-align: center; }
+  .tile h3 { margin: 0 0 12px; font-size: 13px; font-weight: 500; color: #9599a6; }
+  .stage { display: flex; gap: 16px; justify-content: center; align-items: center; padding: 12px; border-radius: 8px; }
+  .stage--dark { background: #101113; }
+  .stage--light { background: #f5f6f8; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .cell span { font-size: 11px; color: #666b75; font-family: monospace; }
+  .cell img { image-rendering: auto; display: block; }
+  .note { margin-top: 24px; max-width: 960px; font-size: 13px; color: #9599a6; line-height: 1.7; }
+  code { background: #2a2d31; padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Termix 应用图标 — 各尺寸预览</h1>
+<div class="tiles">
+  <div class="tile"><h3>深色背景</h3><div class="stage stage--dark" id="dark"></div></div>
+  <div class="tile"><h3>浅色背景</h3><div class="stage stage--light" id="light"></div></div>
+  <div class="tile"><h3>文件管理器（透明背景）</h3><div class="stage" style="background:#222427" id="plain"></div></div>
+  <div class="tile"><h3>Dock / 任务栏</h3><div class="stage stage--dark" id="dock"></div></div>
+</div>
+<div class="note">
+  符号说明：深色圆角面板（终端工作台面）+ 品牌绿 <code>#32F08C</code> 命令提示符 <code>&gt;_</code>（连接与输入就绪）+ 顶部玻璃高光。
+  设计源文件与说明见 <code>design/brand/</code>。
+</div>
+<script>
+  const sizes = [16, 32, 48, 64, 128, 256, 512];
+  function cell(s, scale) {
+    return `<div class="cell"><img src="icon-${s}.png" width="${s * (scale || 1)}" height="${s * (scale || 1)}" alt="${s}px"><span>${s}px</span></div>`;
+  }
+  document.getElementById('dark').innerHTML = sizes.map(s => cell(s, 1.5)).join('');
+  document.getElementById('light').innerHTML = sizes.map(s => cell(s, 1.5)).join('');
+  document.getElementById('plain').innerHTML = sizes.map(s => cell(s, 1)).join('');
+  document.getElementById('dock').innerHTML = [32, 64, 128].map(s => cell(s, 1.5)).join('');
+</script>
+</body>
+</html>

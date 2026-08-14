@@ -5,6 +5,7 @@ const terms = new Map<string, Terminal>();
 const searches = new Map<string, SearchAddon>();
 const buffers = new Map<string, string>();
 const MAX_BUF = 400_000;
+let focusedTabId: string | null = null;
 
 /** 终端实例与输出缓冲注册表（按 tabId），供工具栏/快捷键跨组件访问。 */
 export const terminalRegistry = {
@@ -17,6 +18,15 @@ export const terminalRegistry = {
   remove(tabId: string): void {
     terms.delete(tabId);
     searches.delete(tabId);
+    if (focusedTabId === tabId) focusedTabId = null;
+  },
+
+  /** 记录最近获得焦点的终端（分屏 pane 无法被激活，搜索等操作以此为目标） */
+  setFocus(tabId: string): void {
+    focusedTabId = tabId;
+  },
+  getFocus(): string | null {
+    return focusedTabId;
   },
 
   setSearch(tabId: string, s: SearchAddon): void {

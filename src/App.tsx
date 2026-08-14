@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useApp } from "./store/app";
 import { TitleBar } from "./components/TitleBar";
 import { ActivityRail } from "./components/ActivityRail";
@@ -10,14 +10,25 @@ import { CommandInput } from "./components/CommandInput";
 import { RightPanel } from "./components/RightPanel";
 import { StatusBar } from "./components/StatusBar";
 import { NewConnectionDialog } from "./components/NewConnectionDialog";
-import { SftpView } from "./components/SftpView";
-import { ForwardView } from "./components/ForwardView";
-import { SnippetsView } from "./components/SnippetsView";
-import { MonitorView } from "./components/MonitorView";
-import { SettingsView } from "./components/SettingsView";
 import { Icon } from "./components/Icon";
 import { ipc, onTransferProgress } from "./lib/ipc";
 import { terminalRegistry } from "./lib/terminalRegistry";
+
+// 非终端视图按需加载（首屏不下载，减小初始 bundle）
+// 组件为命名导出，转换为 default 供 lazy 使用
+const SftpView = lazy(() => import("./components/SftpView").then((m) => ({ default: m.SftpView })));
+const ForwardView = lazy(() =>
+  import("./components/ForwardView").then((m) => ({ default: m.ForwardView }))
+);
+const SnippetsView = lazy(() =>
+  import("./components/SnippetsView").then((m) => ({ default: m.SnippetsView }))
+);
+const MonitorView = lazy(() =>
+  import("./components/MonitorView").then((m) => ({ default: m.MonitorView }))
+);
+const SettingsView = lazy(() =>
+  import("./components/SettingsView").then((m) => ({ default: m.SettingsView }))
+);
 
 const PLACEHOLDERS: Record<string, { icon: string; title: string }> = {
   plugins: { icon: "grid-2x2", title: "插件" },
@@ -53,6 +64,15 @@ function Placeholder({ id }: { id: string }) {
       </span>
       <div className="workspace__empty-text">{p.title}</div>
       <div className="workspace__empty-sub">该功能即将上线</div>
+    </div>
+  );
+}
+
+/** 懒加载视图的加载占位 */
+function ViewLoading() {
+  return (
+    <div className="workspace__empty">
+      <span className="workspace__empty-text">加载中…</span>
     </div>
   );
 }
@@ -187,19 +207,39 @@ export default function App() {
       );
     }
     if (activity === "sftp") {
-      return <SftpView />;
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <SftpView />
+        </Suspense>
+      );
     }
     if (activity === "forward") {
-      return <ForwardView />;
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <ForwardView />
+        </Suspense>
+      );
     }
     if (activity === "snippets") {
-      return <SnippetsView />;
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <SnippetsView />
+        </Suspense>
+      );
     }
     if (activity === "monitor") {
-      return <MonitorView />;
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <MonitorView />
+        </Suspense>
+      );
     }
     if (activity === "settings") {
-      return <SettingsView />;
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <SettingsView />
+        </Suspense>
+      );
     }
     return <Placeholder id={activity} />;
   };

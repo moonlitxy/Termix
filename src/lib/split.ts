@@ -4,10 +4,10 @@
 export const MAX_SPLIT_PANES = 4;
 
 /**
- * 分屏 pane 的标题。paneIndex 从 2 开始（2 屏、3 屏、4 屏）。
+ * 分屏 pane 的标题。screenNo 表示屏序号（第 2 屏、第 3 屏、第 4 屏）。
  */
-export function paneTitle(base: string, paneIndex: number): string {
-  return `${base} (${paneIndex})`;
+export function paneTitle(base: string, screenNo: number): string {
+  return `${base} (${screenNo})`;
 }
 
 /**

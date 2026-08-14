@@ -176,7 +176,7 @@ export function ForwardView() {
             <div className="form-row">
               <label>类型</label>
               <select
-                className="ds-input"
+                className="ds-select"
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value as ForwardRuleInput["type"] })}
               >
@@ -246,7 +246,7 @@ export function ForwardView() {
             <div className="form-row">
               <label>绑定会话</label>
               <select
-                className="ds-input"
+                className="ds-select"
                 value={form.sessionId ?? ""}
                 onChange={(e) => setForm({ ...form, sessionId: e.target.value || undefined })}
               >

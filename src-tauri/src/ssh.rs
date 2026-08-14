@@ -37,14 +37,33 @@ impl ForwardRegistry {
     }
 }
 
-/// Accept any host key. (MVP: TODO: known_hosts verification)
+/// 主机密钥校验结果（TOFU：首次信任、后续校验，变更则拒绝）。
+#[derive(Debug, Clone)]
+pub enum HostKeyStatus {
+    /// 首次连接，主机密钥尚未信任（需用户确认后重连）。
+    Unverified { fingerprint: String },
+    /// 主机密钥与已信任记录不一致（可能中间人攻击）。
+    Mismatch { fingerprint: String, expected: String },
+}
+
+/// SshClient 持有已知指纹与校验结果，`check_server_key` 据此决定是否接受连接。
 pub struct SshClient {
     forwards: Arc<ForwardRegistry>,
+    known_fingerprint: Option<String>,
+    pending: Arc<Mutex<Option<HostKeyStatus>>>,
 }
 
 impl SshClient {
-    fn new(forwards: Arc<ForwardRegistry>) -> Self {
-        Self { forwards }
+    fn new(
+        forwards: Arc<ForwardRegistry>,
+        known_fingerprint: Option<String>,
+        pending: Arc<Mutex<Option<HostKeyStatus>>>,
+    ) -> Self {
+        Self {
+            forwards,
+            known_fingerprint,
+            pending,
+        }
     }
 }
 
@@ -53,9 +72,34 @@ impl client::Handler for SshClient {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let fingerprint = ssh_key::Fingerprint::new(
+            ssh_key::HashAlg::Sha256,
+            server_public_key.key_data(),
+        )
+        .to_string();
+        match &self.known_fingerprint {
+            Some(expected) if expected == &fingerprint => {
+                log::debug!("host key verified: {fingerprint}");
+                Ok(true)
+            }
+            Some(expected) => {
+                log::warn!(
+                    "host key MISMATCH! got {fingerprint}, expected {expected}"
+                );
+                *self.pending.lock().await = Some(HostKeyStatus::Mismatch {
+                    fingerprint,
+                    expected: expected.clone(),
+                });
+                Ok(false)
+            }
+            None => {
+                log::info!("host key unverified (first connect): {fingerprint}");
+                *self.pending.lock().await = Some(HostKeyStatus::Unverified { fingerprint });
+                Ok(false)
+            }
+        }
     }
 
     /// 服务端推送的远程转发连接：按监听端口查表，连本地目标后双向转发。
@@ -116,6 +160,8 @@ pub struct Connection {
 pub struct SshManager {
     connections: Mutex<HashMap<String, Connection>>,
     forwards: Arc<ForwardRegistry>,
+    /// 最近一次 connect 的主机密钥校验结果（连接失败时由调用方读取）。
+    pending_key: std::sync::Mutex<Option<Arc<Mutex<Option<HostKeyStatus>>>>>,
 }
 
 impl SshManager {
@@ -123,10 +169,15 @@ impl SshManager {
         Self {
             connections: Mutex::new(HashMap::new()),
             forwards: Arc::new(ForwardRegistry::new()),
+            pending_key: std::sync::Mutex::new(None),
         }
     }
 
-    pub async fn connect(&self, s: Session) -> Result<String, String> {
+    pub async fn connect(
+        &self,
+        s: Session,
+        known_fingerprint: Option<String>,
+    ) -> Result<String, String> {
         let config = Arc::new(client::Config {
             inactivity_timeout: Some(Duration::from_secs(30)),
             // SSH 心跳保活：30s 无数据则发送 keepalive，连续 3 次无响应才断开
@@ -135,9 +186,15 @@ impl SshManager {
             ..<_>::default()
         });
         let addr = format!("{}:{}", s.host, s.port);
-        let mut session = client::connect(config, addr.as_str(), SshClient::new(self.forwards.clone()))
-            .await
-            .map_err(|e| format!("connect failed: {e}"))?;
+        let pending = Arc::new(Mutex::new(None));
+        *self.pending_key.lock().unwrap() = Some(pending.clone());
+        let mut session = client::connect(
+            config,
+            addr.as_str(),
+            SshClient::new(self.forwards.clone(), known_fingerprint, pending),
+        )
+        .await
+        .map_err(|e| format!("connect failed: {e}"))?;
 
         let ok = match s.auth_type.as_str() {
             "key" => {
@@ -179,7 +236,19 @@ impl SshManager {
             .lock()
             .await
             .insert(connection_id.clone(), conn);
+        // 连接成功：清除未决的主机密钥校验状态
+        *self.pending_key.lock().unwrap() = None;
         Ok(connection_id)
+    }
+
+    /// 取走最近一次 connect 的主机密钥校验结果（用于连接失败时区分
+    /// 未信任 / 密钥变更），取走后自动清空。
+    pub async fn take_pending_key(&self) -> Option<HostKeyStatus> {
+        let arc = self.pending_key.lock().unwrap().take();
+        match arc {
+            Some(a) => a.lock().await.take(),
+            None => None,
+        }
     }
 
     pub async fn disconnect(&self, connection_id: &str) -> Result<(), String> {

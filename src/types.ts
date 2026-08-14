@@ -35,6 +35,8 @@ export interface SessionImportResult {
   groupsCreated: number;
   sessionsCreated: number;
   sessionsSkipped: number;
+  /** 因密文无法用当前主密钥解密而被清空的密码字段数量 */
+  secretsCleared: number;
 }
 
 export interface Group {

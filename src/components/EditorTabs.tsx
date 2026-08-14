@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
-import { canSplitMore, paneTitle } from "../lib/split";
 
 interface CtxMenu {
   x: number;
@@ -55,30 +54,7 @@ export function EditorTabs() {
     );
   };
 
-  // 分屏：基于当前活动标签的会话新建一个独立终端（pane 标签，不在标签栏显示）
-  const splitActive = () => {
-    const tab = tabs.find((t) => t.id === activeTabId);
-    if (!tab || tab.hidden) return;
-    if (tab.status === "connecting") {
-      window.alert("请等待当前连接完成后再分屏");
-      return;
-    }
-    const panes = tabs.filter((t) => t.splitOf === tab.id);
-    const limit = canSplitMore(panes.length);
-    if (!limit.ok) {
-      window.alert(limit.reason);
-      return;
-    }
-    addTab({
-      id: nextTabId(),
-      kind: "terminal",
-      sessionId: tab.sessionId,
-      title: paneTitle(tab.title, panes.length + 2),
-      status: "connecting",
-      hidden: true,
-      splitOf: tab.id,
-    });
-  };
+  // 分屏按钮在 Toolbar 工具栏（基于当前活动标签的会话新建独立终端 pane）
 
   // 复制标签：基于同一会话新建一个独立连接的新标签
   const duplicateTab = () => {
@@ -156,14 +132,6 @@ export function EditorTabs() {
       ))}
       <div className="editor-tabs__spacer" />
       <div className="editor-tabs__actions">
-        <button
-          className="ds-btn ds-btn--tertiary ds-btn--icon"
-          type="button"
-          title="分屏（同会话新开一个终端）"
-          onClick={splitActive}
-        >
-          <Icon name="columns" size={15} />
-        </button>
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"

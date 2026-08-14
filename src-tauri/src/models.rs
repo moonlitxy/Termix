@@ -70,6 +70,8 @@ pub struct SessionImportResult {
     pub groups_created: usize,
     pub sessions_created: usize,
     pub sessions_skipped: usize,
+    /// 因密文无法用当前主密钥解密而被清空的密码字段数量
+    pub secrets_cleared: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

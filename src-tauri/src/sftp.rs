@@ -41,6 +41,12 @@ pub struct TransferTask {
     pub is_dir: bool,
 }
 
+/// 传输任务的取消/暂停标志（与全局注册表共享的 Arc 句柄）。
+struct TransferFlags {
+    cancel: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+}
+
 pub struct SftpService {
     ssh: Arc<SshManager>,
     sessions: Mutex<HashMap<String, Arc<SftpSession>>>,
@@ -190,6 +196,89 @@ impl SftpService {
             })
     }
 
+    /// 传输任务的取消/暂停标志（与全局注册表共享的 Arc 句柄）。
+    async fn register_flags(&self, task_id: &str) -> TransferFlags {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let pause = Arc::new(AtomicBool::new(false));
+        self.cancels.lock().await.insert(task_id.to_string(), cancel.clone());
+        self.pauses.lock().await.insert(task_id.to_string(), pause.clone());
+        TransferFlags { cancel, pause }
+    }
+
+    /// 启动传输后台任务：注册标志、spawn、统一处理完成/失败/暂停/取消的结果状态与进度推送。
+    async fn spawn_transfer<F, Fut>(
+        &self,
+        sftp: Arc<SftpSession>,
+        mut task: TransferTask,
+        app: AppHandle,
+        run: F,
+    ) -> Result<String, String>
+    where
+        F: FnOnce(Arc<SftpSession>, Arc<AtomicBool>, Arc<AtomicBool>, AppHandle) -> Fut
+            + Send
+            + 'static,
+        Fut: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    {
+        let tid = task.id.clone();
+        let fname = task.file_name.clone();
+        let dir = task.direction.clone();
+        task.status = "running".into();
+        task.error = None;
+        self.tasks.lock().await.insert(tid.clone(), task);
+
+        let flags = self.register_flags(&tid).await;
+        let tasks = self.tasks.clone();
+        let cancels = self.cancels.clone();
+        let pauses = self.pauses.clone();
+        let emit_app = app.clone();
+        let tid_inner = tid.clone();
+        let cancel_inner = flags.cancel.clone();
+        let pause_inner = flags.pause.clone();
+        tokio::spawn(async move {
+            let result = run(sftp, cancel_inner.clone(), pause_inner.clone(), app).await;
+            match result {
+                Ok(()) => {
+                    log::info!("sftp: {dir} task {tid_inner} completed");
+                    set_task(&tasks, &tid_inner, |t| {
+                        t.status = "completed".into();
+                        t.progress = 100.0;
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let status = if pause_inner.load(Ordering::Relaxed) {
+                        "paused"
+                    } else if cancel_inner.load(Ordering::Relaxed) {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    let msg = format!("{dir} {status}: {e}");
+                    if status == "failed" {
+                        log::error!("sftp: {dir} task {tid_inner} failed: {e}");
+                    } else {
+                        log::info!("sftp: {dir} task {tid_inner} {status}");
+                    }
+                    set_task(&tasks, &tid_inner, |t| {
+                        t.status = status.into();
+                        t.error = Some(msg.clone());
+                    })
+                    .await;
+                    let _ = emit_app.emit(
+                        "transfer-progress",
+                        serde_json::json!({
+                            "taskId": tid_inner, "fileName": fname, "direction": dir,
+                            "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
+                        }),
+                    );
+                }
+            }
+            cancels.lock().await.remove(&tid_inner);
+            pauses.lock().await.remove(&tid_inner);
+        });
+        Ok(tid)
+    }
+
     pub async fn upload(
         &self,
         app: AppHandle,
@@ -221,63 +310,12 @@ impl SftpService {
             error: None,
             is_dir: false,
         };
-        self.tasks.lock().await.insert(task_id.clone(), task);
-
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels.lock().await.insert(task_id.clone(), cancel.clone());
-        let pause = Arc::new(AtomicBool::new(false));
-        self.pauses.lock().await.insert(task_id.clone(), pause.clone());
-
-        let tasks = self.tasks.clone();
-        let cancels = self.cancels.clone();
-        let pauses = self.pauses.clone();
-        let app2 = app.clone();
         let local = local_path.to_string();
         let remote = remote_path.to_string();
-        let tid = task_id.clone();
-        let fname = file_name.clone();
-        tokio::spawn(async move {
-            match transfer_upload(&sftp, &local, &remote, &tid, &cancel, &pause, &app2).await {
-                Ok(()) => {
-                    log::info!("sftp: upload task {tid} completed");
-                    set_task(&tasks, &tid, |t| {
-                        t.status = "completed".into();
-                        t.progress = 100.0;
-                    })
-                    .await;
-                }
-                Err(e) => {
-                    let status = if pause.load(Ordering::Relaxed) {
-                        "paused"
-                    } else if cancel.load(Ordering::Relaxed) {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    };
-                    let msg = format!("upload {status}: {e}");
-                    if status == "failed" {
-                        log::error!("sftp: upload task {tid} failed: {e}");
-                    } else {
-                        log::info!("sftp: upload task {tid} {status}");
-                    }
-                    set_task(&tasks, &tid, |t| {
-                        t.status = status.into();
-                        t.error = Some(msg.clone());
-                    })
-                    .await;
-                    let _ = app2.emit(
-                        "transfer-progress",
-                        serde_json::json!({
-                            "taskId": tid, "fileName": fname, "direction": "upload",
-                            "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
-                        }),
-                    );
-                }
-            }
-            cancels.lock().await.remove(&tid);
-            pauses.lock().await.remove(&tid);
-        });
-        Ok(task_id)
+        self.spawn_transfer(sftp, task, app, move |sftp, cancel, pause, app| async move {
+            transfer_upload(&sftp, &local, &remote, &task_id, &cancel, &pause, &app).await
+        })
+        .await
     }
 
     pub async fn download(
@@ -311,67 +349,24 @@ impl SftpService {
             error: None,
             is_dir: false,
         };
-        self.tasks.lock().await.insert(task_id.clone(), task);
-
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels.lock().await.insert(task_id.clone(), cancel.clone());
-        let pause = Arc::new(AtomicBool::new(false));
-        self.pauses.lock().await.insert(task_id.clone(), pause.clone());
-
-        let tasks = self.tasks.clone();
-        let cancels = self.cancels.clone();
-        let pauses = self.pauses.clone();
-        let app2 = app.clone();
         let local = local_path.to_string();
         let remote = remote_path.to_string();
-        let tid = task_id.clone();
-        let fname = file_name.clone();
-        tokio::spawn(async move {
-            match transfer_download(&sftp, &remote, &local, &tid, &cancel, &pause, &app2).await {
-                Ok(()) => {
-                    log::info!("sftp: download task {tid} completed");
-                    set_task(&tasks, &tid, |t| {
-                        t.status = "completed".into();
-                        t.progress = 100.0;
-                    })
-                    .await;
-                }
-                Err(e) => {
-                    let status = if pause.load(Ordering::Relaxed) {
-                        "paused"
-                    } else if cancel.load(Ordering::Relaxed) {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    };
-                    let msg = format!("download {status}: {e}");
-                    if status == "failed" {
-                        log::error!("sftp: download task {tid} failed: {e}");
-                    } else {
-                        log::info!("sftp: download task {tid} {status}");
-                    }
-                    set_task(&tasks, &tid, |t| {
-                        t.status = status.into();
-                        t.error = Some(msg.clone());
-                    })
-                    .await;
-                    let _ = app2.emit(
-                        "transfer-progress",
-                        serde_json::json!({
-                            "taskId": tid, "fileName": fname, "direction": "download",
-                            "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
-                        }),
-                    );
-                }
-            }
-            cancels.lock().await.remove(&tid);
-            pauses.lock().await.remove(&tid);
-        });
-        Ok(task_id)
+        self.spawn_transfer(sftp, task, app, move |sftp, cancel, pause, app| async move {
+            transfer_download(&sftp, &remote, &local, &task_id, &cancel, &pause, &app).await
+        })
+        .await
     }
 
     /// 暂停任务：置位暂停标志，传输循环会尽快退出并保留半成品文件。
+    /// 目录传输不支持暂停（无断点续传语义），明确拒绝。
     pub async fn transfer_pause(&self, task_id: &str) -> Result<(), String> {
+        let task = self.tasks.lock().await.get(task_id).cloned();
+        if let Some(t) = &task {
+            if t.is_dir {
+                log::warn!("sftp: pause task {task_id} is a directory transfer, unsupported");
+                return Err("目录传输不支持暂停".into());
+            }
+        }
         let mut paused = false;
         if let Some(p) = self.pauses.lock().await.get(task_id) {
             p.store(true, Ordering::Relaxed);
@@ -405,69 +400,19 @@ impl SftpService {
         }
         // 复用原任务的连接与会话
         let sftp = self.session(&task.connection_id).await?;
-        let cancel = Arc::new(AtomicBool::new(false));
-        let pause = Arc::new(AtomicBool::new(false));
-        self.cancels.lock().await.insert(task_id.to_string(), cancel.clone());
-        self.pauses.lock().await.insert(task_id.to_string(), pause.clone());
-        set_task(&self.tasks, task_id, |t| {
-            t.status = "running".into();
-            t.error = None;
-        })
-        .await;
         log::info!("sftp: resume task {task_id} ({})", task.direction);
-
-        let tasks = self.tasks.clone();
-        let cancels = self.cancels.clone();
-        let pauses = self.pauses.clone();
+        let direction = task.direction.clone();
+        let local = task.local_path.clone();
+        let remote = task.remote_path.clone();
         let tid = task_id.to_string();
-        let fname = task.file_name.clone();
-        tokio::spawn(async move {
-            let result = if task.direction == "upload" {
-                transfer_upload(&sftp, &task.local_path, &task.remote_path, &tid, &cancel, &pause, &app).await
+        self.spawn_transfer(sftp, task, app, move |sftp, cancel, pause, app| async move {
+            if direction == "upload" {
+                transfer_upload(&sftp, &local, &remote, &tid, &cancel, &pause, &app).await
             } else {
-                transfer_download(&sftp, &task.remote_path, &task.local_path, &tid, &cancel, &pause, &app).await
-            };
-            match result {
-                Ok(()) => {
-                    log::info!("sftp: resume task {tid} completed");
-                    set_task(&tasks, &tid, |t| {
-                        t.status = "completed".into();
-                        t.progress = 100.0;
-                    })
-                    .await;
-                }
-                Err(e) => {
-                    let status = if pause.load(Ordering::Relaxed) {
-                        "paused"
-                    } else if cancel.load(Ordering::Relaxed) {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    };
-                    let dir = if task.direction == "upload" { "upload" } else { "download" };
-                    let msg = format!("{dir} {status}: {e}");
-                    if status == "failed" {
-                        log::error!("sftp: resume task {tid} failed: {e}");
-                    } else {
-                        log::info!("sftp: resume task {tid} {status}");
-                    }
-                    set_task(&tasks, &tid, |t| {
-                        t.status = status.into();
-                        t.error = Some(msg.clone());
-                    })
-                    .await;
-                    let _ = app.emit(
-                        "transfer-progress",
-                        serde_json::json!({
-                            "taskId": tid, "fileName": fname, "direction": task.direction,
-                            "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
-                        }),
-                    );
-                }
+                transfer_download(&sftp, &remote, &local, &tid, &cancel, &pause, &app).await
             }
-            cancels.lock().await.remove(&tid);
-            pauses.lock().await.remove(&tid);
-        });
+        })
+        .await?;
         Ok(())
     }
 
@@ -511,53 +456,12 @@ impl SftpService {
             error: None,
             is_dir: true,
         };
-        self.tasks.lock().await.insert(task_id.clone(), task);
-
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels.lock().await.insert(task_id.clone(), cancel.clone());
-
-        let tasks = self.tasks.clone();
-        let cancels = self.cancels.clone();
-        let app2 = app.clone();
         let local = local_dir.to_string();
         let remote = remote_dir.to_string();
-        let tid = task_id.clone();
-        let fname = file_name.clone();
-        tokio::spawn(async move {
-            match transfer_upload_dir(&sftp, &local, &remote, &tid, &cancel, &app2).await {
-                Ok(()) => {
-                    log::info!("sftp: upload-dir task {tid} completed");
-                    set_task(&tasks, &tid, |t| {
-                        t.status = "completed".into();
-                        t.progress = 100.0;
-                    })
-                    .await;
-                }
-                Err(e) => {
-                    let status = if cancel.load(Ordering::Relaxed) { "cancelled" } else { "failed" };
-                    let msg = format!("upload-dir {status}: {e}");
-                    if status == "failed" {
-                        log::error!("sftp: upload-dir task {tid} failed: {e}");
-                    } else {
-                        log::info!("sftp: upload-dir task {tid} cancelled");
-                    }
-                    set_task(&tasks, &tid, |t| {
-                        t.status = status.into();
-                        t.error = Some(msg.clone());
-                    })
-                    .await;
-                    let _ = app2.emit(
-                        "transfer-progress",
-                        serde_json::json!({
-                            "taskId": tid, "fileName": fname, "direction": "upload",
-                            "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
-                        }),
-                    );
-                }
-            }
-            cancels.lock().await.remove(&tid);
-        });
-        Ok(task_id)
+        self.spawn_transfer(sftp, task, app, move |sftp, cancel, _pause, app| async move {
+            transfer_upload_dir(&sftp, &local, &remote, &task_id, &cancel, &app).await
+        })
+        .await
     }
 
     /// 递归下载整个目录。
@@ -592,53 +496,12 @@ impl SftpService {
             error: None,
             is_dir: true,
         };
-        self.tasks.lock().await.insert(task_id.clone(), task);
-
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels.lock().await.insert(task_id.clone(), cancel.clone());
-
-        let tasks = self.tasks.clone();
-        let cancels = self.cancels.clone();
-        let app2 = app.clone();
         let local = local_dir.to_string();
         let remote = remote_dir.to_string();
-        let tid = task_id.clone();
-        let fname = file_name.clone();
-        tokio::spawn(async move {
-            match transfer_download_dir(&sftp, &remote, &local, &tid, &cancel, &app2).await {
-                Ok(()) => {
-                    log::info!("sftp: download-dir task {tid} completed");
-                    set_task(&tasks, &tid, |t| {
-                        t.status = "completed".into();
-                        t.progress = 100.0;
-                    })
-                    .await;
-                }
-                Err(e) => {
-                    let status = if cancel.load(Ordering::Relaxed) { "cancelled" } else { "failed" };
-                    let msg = format!("download-dir {status}: {e}");
-                    if status == "failed" {
-                        log::error!("sftp: download-dir task {tid} failed: {e}");
-                    } else {
-                        log::info!("sftp: download-dir task {tid} cancelled");
-                    }
-                    set_task(&tasks, &tid, |t| {
-                        t.status = status.into();
-                        t.error = Some(msg.clone());
-                    })
-                    .await;
-                    let _ = app2.emit(
-                        "transfer-progress",
-                        serde_json::json!({
-                            "taskId": tid, "fileName": fname, "direction": "download",
-                            "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
-                        }),
-                    );
-                }
-            }
-            cancels.lock().await.remove(&tid);
-        });
-        Ok(task_id)
+        self.spawn_transfer(sftp, task, app, move |sftp, cancel, _pause, app| async move {
+            transfer_download_dir(&sftp, &remote, &local, &task_id, &cancel, &app).await
+        })
+        .await
     }
 
     /// 会话断开时释放 SFTP 会话缓存。

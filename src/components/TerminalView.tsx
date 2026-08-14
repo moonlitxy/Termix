@@ -124,6 +124,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           status: "connected",
         });
         reconnectCount = 0;
+        reconnecting = false;
         terminal.write("\x1b[32m重连成功\x1b[0m\r\n");
       } catch (e) {
         terminal.write(`\x1b[31m重连失败: ${String(e)}\x1b[0m\r\n`);
@@ -150,6 +151,12 @@ export function TerminalView({ tab }: { tab: Tab }) {
         ipc.terminalWrite(t.connectionId, t.shellId, data);
       }
     });
+
+    // 记录最近聚焦的终端（分屏 pane 无法被激活，搜索等操作以此为目标）
+    const onContainerDown = () => terminalRegistry.setFocus(tab.id);
+    const onContainerFocusIn = () => terminalRegistry.setFocus(tab.id);
+    container.addEventListener("pointerdown", onContainerDown);
+    container.addEventListener("focusin", onContainerFocusIn);
 
     // 跟踪选中状态，供右键菜单判断"复制"是否可用
     const selDisp = terminal.onSelectionChange(() => {
@@ -210,6 +217,70 @@ export function TerminalView({ tab }: { tab: Tab }) {
         });
       } catch (e) {
         if (cancelled) return;
+        const msg = String(e);
+        const session = useApp
+          .getState()
+          .sessions.find((s) => s.id === tab.sessionId);
+
+        // 首次连接：主机密钥未信任，请求用户确认指纹后重试
+        const unverified = msg.match(/^HOST_KEY_UNVERIFIED:(.+)$/);
+        if (unverified && session) {
+          const fingerprint = unverified[1];
+          const ok = window.confirm(
+            `首次连接到 ${session.host}:${session.port}\n\n` +
+              `主机密钥指纹：\n${fingerprint}\n\n` +
+              `是否信任该密钥并继续连接？`
+          );
+          if (ok) {
+            try {
+              await ipc.hostKeyAccept(session.host, session.port, fingerprint);
+              void connect();
+            } catch (e2) {
+              updateTab(tab.id, {
+                status: "error",
+                error: "保存主机密钥失败：" + String(e2),
+              });
+            }
+            return;
+          }
+          updateTab(tab.id, {
+            status: "error",
+            error: "已取消连接（未信任主机密钥）",
+          });
+          return;
+        }
+
+        // 主机密钥变更：可能中间人攻击，需二次确认才允许覆盖信任
+        const changed = msg.match(/^HOST_KEY_CHANGED:(.+):(.+)$/);
+        if (changed && session) {
+          updateTab(tab.id, { status: "error", error: "主机密钥变更，已阻止连接" });
+          const warn = window.confirm(
+            `警告：${session.host}:${session.port} 的主机密钥已变更！\n\n` +
+              `当前指纹：${changed[1]}\n已信任指纹：${changed[2]}\n\n` +
+              `这可能是中间人攻击，也可能是服务器已重装系统。\n` +
+              `是否仍要继续连接？`
+          );
+          if (warn) {
+            const sure = window.confirm(
+              "再次确认：信任新的主机密钥并重新连接？"
+            );
+            if (sure) {
+              try {
+                await ipc.hostKeyAccept(session.host, session.port, changed[1]);
+                void connect();
+                return;
+              } catch (e2) {
+                updateTab(tab.id, { status: "error", error: String(e2) });
+                return;
+              }
+            }
+          }
+          terminal.write(
+            "主机密钥校验失败：密钥与之前信任的不一致，连接已拒绝。\r\n"
+          );
+          return;
+        }
+
         updateTab(tab.id, { status: "error", error: String(e) });
         terminal.write("Error: " + String(e) + "\r\n");
       }
@@ -219,6 +290,8 @@ export function TerminalView({ tab }: { tab: Tab }) {
     return () => {
       cancelled = true;
       dataDisp.dispose();
+      container.removeEventListener("pointerdown", onContainerDown);
+      container.removeEventListener("focusin", onContainerFocusIn);
       selDisp.dispose();
       unlisteners.forEach((un) => un());
       if (ro) ro.disconnect();

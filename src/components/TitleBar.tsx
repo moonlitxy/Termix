@@ -4,15 +4,12 @@ import { useApp } from "../store/app";
 export function TitleBar() {
   const searchKeyword = useApp((s) => s.searchKeyword);
   const setSearch = useApp((s) => s.setSearch);
+  const activity = useApp((s) => s.activity);
+  const setActivity = useApp((s) => s.setActivity);
 
   return (
     <div className="titlebar">
       <div className="titlebar__left">
-        <div className="titlebar__traffic">
-          <span className="titlebar__traffic-light titlebar__traffic-light--close" />
-          <span className="titlebar__traffic-light titlebar__traffic-light--min" />
-          <span className="titlebar__traffic-light titlebar__traffic-light--max" />
-        </div>
         <span className="titlebar__brand">
           <Icon name="terminal" size={14} />
           Termix
@@ -35,7 +32,15 @@ export function TitleBar() {
         </div>
       </div>
       <div className="titlebar__right">
-        <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="设置">
+        <button
+          className={
+            "ds-btn ds-btn--tertiary ds-btn--icon" +
+            (activity === "settings" ? " is-active" : "")
+          }
+          type="button"
+          title="设置"
+          onClick={() => setActivity("settings")}
+        >
           <Icon name="settings" size={16} />
         </button>
         <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="通知">

@@ -23,6 +23,8 @@ interface AppState {
   searchKeyword: string;
   newConnOpen: boolean;
   editingSession: Session | null;
+  /** 新建连接对话框打开时预选的分组 id（来自分组快捷入口） */
+  newConnPresetGroupId: string | null;
 
   // v0.2
   activity: Activity;
@@ -44,7 +46,7 @@ interface AppState {
   closeTab: (id: string) => void;
   updateTab: (id: string, patch: Partial<Tab>) => void;
 
-  openNewConnection: (session?: Session) => void;
+  openNewConnection: (session?: Session, presetGroupId?: string) => void;
   closeNewConnection: () => void;
 
   setActivity: (a: Activity) => void;
@@ -86,6 +88,7 @@ export const useApp = create<AppState>((set, get) => ({
   searchKeyword: "",
   newConnOpen: false,
   editingSession: null,
+  newConnPresetGroupId: null,
 
   activity: "terminal",
   transfers: [],
@@ -137,9 +140,14 @@ export const useApp = create<AppState>((set, get) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)),
     })),
 
-  openNewConnection: (session) =>
-    set({ newConnOpen: true, editingSession: session ?? null }),
-  closeNewConnection: () => set({ newConnOpen: false, editingSession: null }),
+  openNewConnection: (session, presetGroupId) =>
+    set({
+      newConnOpen: true,
+      editingSession: session ?? null,
+      newConnPresetGroupId: presetGroupId ?? null,
+    }),
+  closeNewConnection: () =>
+    set({ newConnOpen: false, editingSession: null, newConnPresetGroupId: null }),
 
   setActivity: (a) => set({ activity: a }),
   setTransfers: (list) => set({ transfers: list }),

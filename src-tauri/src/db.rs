@@ -36,6 +36,10 @@ impl Db {
             );
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY, value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS host_keys (
+                host_port TEXT PRIMARY KEY, host TEXT NOT NULL, port INTEGER NOT NULL,
+                fingerprint TEXT NOT NULL, trusted_at INTEGER
             );",
         )
         .map_err(|e| e.to_string())?;
@@ -347,6 +351,40 @@ impl Db {
         let c = self.conn.lock().unwrap();
         c.execute("DELETE FROM app_settings WHERE key=?", params![key])
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ---- 主机密钥（TOFU：首次信任后校验指纹） ----
+
+    /// 查询已信任的主机密钥指纹；未信任返回 None。
+    pub fn get_host_key(&self, host: &str, port: u16) -> Result<Option<String>, String> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT fingerprint FROM host_keys WHERE host=? AND port=?",
+            params![host, port],
+            |r| r.get(0),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            _ => Err(e.to_string()),
+        })
+    }
+
+    /// 记录信任的主机密钥指纹（首次连接确认后写入）。
+    pub fn set_host_key(&self, host: &str, port: u16, fingerprint: &str) -> Result<(), String> {
+        let c = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        c.execute(
+            "INSERT INTO host_keys (host_port,host,port,fingerprint,trusted_at)
+             VALUES (?,?,?,?,?)
+             ON CONFLICT(host_port) DO UPDATE SET fingerprint=excluded.fingerprint, trusted_at=excluded.trusted_at",
+            params![format!("{host}:{port}"), host, port, fingerprint, now],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 }

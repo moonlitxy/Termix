@@ -16,8 +16,16 @@ fn main() {
         .init();
     tauri::Builder::default()
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir).ok();
+            // 开发模式：使用项目内数据目录（调试/沙箱环境下 ~/Library 可能不可写）；
+            // release 构建保持系统标准数据目录。
+            let data_dir = if cfg!(debug_assertions) {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join(".termix-data")
+            } else {
+                app.path().app_data_dir()?
+            };
+            std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("termix.db");
             let db = db::Db::open(db_path.to_str().ok_or("invalid db path")?)?;
             app.manage(commands::AppState::new(db));
@@ -35,6 +43,7 @@ fn main() {
             commands::group_delete,
             commands::session_connect,
             commands::session_disconnect,
+            commands::host_key_accept,
             commands::terminal_create,
             commands::terminal_write,
             commands::terminal_resize,

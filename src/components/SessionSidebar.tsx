@@ -2,12 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp, selectFilteredSessions, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
-import type { Session } from "../types";
+import type { Group, Session } from "../types";
 
 interface CtxMenu {
   x: number;
   y: number;
   session: Session;
+}
+
+interface GroupCtxMenu {
+  x: number;
+  y: number;
+  group: Group;
 }
 
 export function SessionSidebar() {
@@ -23,6 +29,9 @@ export function SessionSidebar() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [groupsOpen, setGroupsOpen] = useState<Record<string, boolean>>({});
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
+  const [groupCtx, setGroupCtx] = useState<GroupCtxMenu | null>(null);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -52,9 +61,11 @@ export function SessionSidebar() {
       const res = await ipc.sessionsImport(content);
       void loadSessions();
       void loadGroups();
-      window.alert(
-        `导入完成：新增 ${res.sessionsCreated} 个会话、${res.groupsCreated} 个分组，跳过 ${res.sessionsSkipped} 个同名会话`
-      );
+      const msg =
+        res.secretsCleared > 0
+          ? `导入完成：新增 ${res.sessionsCreated} 个会话、${res.groupsCreated} 个分组，跳过 ${res.sessionsSkipped} 个同名会话；${res.secretsCleared} 个密码字段无法解密已清空（可能来自其他设备，请重新填写）`
+          : `导入完成：新增 ${res.sessionsCreated} 个会话、${res.groupsCreated} 个分组，跳过 ${res.sessionsSkipped} 个同名会话`;
+      window.alert(msg);
     } catch (e) {
       window.alert("导入失败：" + String(e));
     }
@@ -105,14 +116,18 @@ export function SessionSidebar() {
   };
 
   useEffect(() => {
-    if (!ctx) return;
+    if (!ctx && !groupCtx) return;
     const onDocClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setCtx(null);
+        setGroupCtx(null);
       }
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCtx(null);
+      if (e.key === "Escape") {
+        setCtx(null);
+        setGroupCtx(null);
+      }
     };
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
@@ -120,19 +135,34 @@ export function SessionSidebar() {
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onEsc);
     };
-  }, [ctx]);
+  }, [ctx, groupCtx]);
 
   const isOnline = (sessionId: string) =>
     tabs.some((t) => t.sessionId === sessionId && t.status === "connected");
 
-  // 分组占位（store.groups 可能为空）
-  const displayGroups =
-    groups.length > 0
-      ? groups
-      : [
-          { id: "g-prod", name: "生产环境", order: 0 },
-          { id: "g-test", name: "测试环境", order: 1 },
-        ];
+  // ---- 分组管理 ----
+  const submitGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+    try {
+      await ipc.groupCreate({ name });
+      await loadGroups();
+      setAddingGroup(false);
+      setNewGroupName("");
+    } catch (e) {
+      window.alert("新建分组失败：" + String(e));
+    }
+  };
+
+  const handleDeleteGroup = async (g: Group) => {
+    if (!window.confirm(`删除分组「${g.name}」？组内会话将保留，但不再归入该分组。`)) return;
+    try {
+      await ipc.groupDelete(g.id);
+      await loadGroups();
+    } catch (e) {
+      window.alert(String(e));
+    }
+  };
 
   // 分组默认展开，折叠状态按分组独立记录
   const isGroupOpen = (id: string) => groupsOpen[id] !== false;
@@ -236,32 +266,98 @@ export function SessionSidebar() {
           sessions.map((s) => renderSessionRow(s))
         )}
 
-        <div className="session-sidebar__section-title">分组</div>
-        {displayGroups.map((g) => {
-          const open = isGroupOpen(g.id);
-          const groupSessions = sessions.filter((s) => s.groupId === g.id);
-          return (
-            <div key={g.id}>
-              <div
-                className="group-row"
-                onClick={() =>
-                  setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
-                }
-                title={g.name}
+        <div className="session-sidebar__section-head">
+          <span className="session-sidebar__section-title">分组</span>
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title="新建分组"
+            onClick={() => {
+              setAddingGroup(true);
+              setNewGroupName("");
+            }}
+          >
+            <Icon name="plus" size={13} />
+          </button>
+        </div>
+        {addingGroup && (
+          <div className="group-add">
+            <input
+              className="ds-input group-add__input"
+              type="text"
+              value={newGroupName}
+              placeholder="分组名称"
+              autoFocus
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submitGroup();
+                if (e.key === "Escape") setAddingGroup(false);
+              }}
+            />
+            <div className="group-add__actions">
+              <button
+                className="ds-btn ds-btn--brand ds-btn--sm"
+                type="button"
+                onClick={() => void submitGroup()}
+                disabled={!newGroupName.trim()}
               >
-                <span className="session-row__chevron">
-                  <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
-                </span>
-                <span style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
-                  <Icon name="folder" size={14} />
-                </span>
-                <span className="group-row__name">{g.name}</span>
-                <span className="ds-tag ds-tag--count">{groupSessions.length}</span>
-              </div>
-              {open && groupSessions.map((s) => renderSessionRow(s, true))}
+                确定
+              </button>
+              <button
+                className="ds-btn ds-btn--tertiary ds-btn--sm"
+                type="button"
+                onClick={() => setAddingGroup(false)}
+              >
+                取消
+              </button>
             </div>
-          );
-        })}
+          </div>
+        )}
+        {groups.length === 0 ? (
+          <div className="session-sidebar__empty-hint">暂无分组，点击 + 新建</div>
+        ) : (
+          groups.map((g) => {
+            const open = isGroupOpen(g.id);
+            const groupSessions = sessions.filter((s) => s.groupId === g.id);
+            return (
+              <div key={g.id}>
+                <div
+                  className="group-row"
+                  onClick={() =>
+                    setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
+                  }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setGroupCtx({ x: e.clientX, y: e.clientY, group: g });
+                  }}
+                  title={g.name}
+                >
+                  <span className="session-row__chevron">
+                    <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+                  </span>
+                  <span style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
+                    <Icon name="folder" size={14} />
+                  </span>
+                  <span className="group-row__name">{g.name}</span>
+                  <span className="ds-tag ds-tag--count">{groupSessions.length}</span>
+                  <button
+                    className="group-row__add"
+                    type="button"
+                    title={`在「${g.name}」下新建连接`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openNewConnection(undefined, g.id);
+                    }}
+                  >
+                    <Icon name="plus" size={12} />
+                  </button>
+                </div>
+                {open && groupSessions.map((s) => renderSessionRow(s, true))}
+              </div>
+            );
+          })
+        )}
       </div>
 
       {ctx && (
@@ -314,6 +410,39 @@ export function SessionSidebar() {
           >
             <Icon name="trash" size={12} />
             删除
+          </button>
+        </div>
+      )}
+
+      {groupCtx && (
+        <div
+          className="ctx-menu"
+          ref={menuRef}
+          style={{ left: groupCtx.x, top: groupCtx.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="ctx-menu__item"
+            onClick={() => {
+              openNewConnection(undefined, groupCtx.group.id);
+              setGroupCtx(null);
+            }}
+          >
+            <Icon name="plus" size={12} />
+            新建 SSH 连接
+          </button>
+          <div className="ctx-menu__sep" />
+          <button
+            type="button"
+            className="ctx-menu__item ctx-menu__item--danger"
+            onClick={() => {
+              void handleDeleteGroup(groupCtx.group);
+              setGroupCtx(null);
+            }}
+          >
+            <Icon name="trash" size={12} />
+            删除分组
           </button>
         </div>
       )}

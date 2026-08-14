@@ -39,6 +39,9 @@ export const ipc = {
   sessionConnect: (id: string) => invoke<string>("session_connect", { id }),
   sessionDisconnect: (connectionId: string) =>
     invoke<void>("session_disconnect", { connectionId }),
+  // 主机密钥（TOFU）：信任并保存指纹
+  hostKeyAccept: (host: string, port: number, fingerprint: string) =>
+    invoke<void>("host_key_accept", { host, port, fingerprint }),
 
   // terminal
   terminalCreate: (connectionId: string, tabId: string, cols: number, rows: number) =>

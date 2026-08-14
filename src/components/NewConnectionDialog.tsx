@@ -22,16 +22,24 @@ export function NewConnectionDialog() {
   const open = useApp((s) => s.newConnOpen);
   const editing = useApp((s) => s.editingSession);
   const groups = useApp((s) => s.groups);
+  const sessions = useApp((s) => s.sessions);
+  const presetGroupId = useApp((s) => s.newConnPresetGroupId);
   const closeNewConnection = useApp((s) => s.closeNewConnection);
   const loadSessions = useApp((s) => s.loadSessions);
+  const loadGroups = useApp((s) => s.loadGroups);
 
   const [form, setForm] = useState<SessionInput>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassphrase, setShowPassphrase] = useState(false);
 
   const isEnc = (s?: string) => !!s && s.startsWith("enc:v1:");
 
   useEffect(() => {
     if (!open) return;
+    // 打开时刷新分组，确保能选择到最新创建的分组
+    void loadGroups();
     if (editing) {
       setForm({
         name: editing.name,
@@ -50,9 +58,11 @@ export function NewConnectionDialog() {
         encoding: editing.encoding,
       });
     } else {
-      setForm(EMPTY);
+      // 从分组快捷入口打开时预选该分组
+      setForm({ ...EMPTY, groupId: presetGroupId ?? "" });
     }
-  }, [open, editing]);
+    setSaveError("");
+  }, [open, editing, presetGroupId]);
 
   if (!open) return null;
 
@@ -60,12 +70,31 @@ export function NewConnectionDialog() {
     setForm((f) => ({ ...f, [key]: val }));
   };
 
+  // 同一分组内连接名称唯一性校验（无分组视为同一组）
+  const checkNameUnique = (name: string, groupId: string, excludeId?: string): string => {
+    const n = name.trim();
+    if (!n) return "";
+    const dup = sessions.some(
+      (s) =>
+        s.name === n &&
+        (s.groupId ?? "") === (groupId || "") &&
+        s.id !== excludeId
+    );
+    return dup ? `同一分组下已存在名为「${n}」的连接` : "";
+  };
+
   const canSave =
     form.name.trim() && form.host.trim() && form.username.trim() && !saving;
 
   const handleSave = async () => {
     if (!canSave) return;
+    const nameErr = checkNameUnique(form.name, form.groupId ?? "", editing?.id);
+    if (nameErr) {
+      setSaveError(nameErr);
+      return;
+    }
     setSaving(true);
+    setSaveError("");
     try {
       const input: SessionInput = {
         ...form,
@@ -95,8 +124,8 @@ export function NewConnectionDialog() {
       await loadSessions();
       closeNewConnection();
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("save session failed:", e);
+      // 后端校验失败（如名称唯一性冲突）时展示给用户
+      setSaveError(String(e));
     } finally {
       setSaving(false);
     }
@@ -125,10 +154,14 @@ export function NewConnectionDialog() {
             <input
               type="text"
               value={form.name}
-              onChange={(e) => set("name", e.target.value)}
+              onChange={(e) => {
+                set("name", e.target.value);
+                if (saveError) setSaveError("");
+              }}
               placeholder="例如：生产服务器"
             />
           </div>
+          {saveError && <div className="dialog__field-error">{saveError}</div>}
         </div>
 
         <div className="dialog__field-row">
@@ -175,7 +208,7 @@ export function NewConnectionDialog() {
         <div className="dialog__field">
           <label className="dialog__field-label">认证方式</label>
           <select
-            className="dialog__select"
+            className="ds-select ds-select--block"
             value={form.authType}
             onChange={(e) => set("authType", e.target.value as AuthType)}
           >
@@ -189,11 +222,19 @@ export function NewConnectionDialog() {
             <label className="dialog__field-label">密码</label>
             <div className="ds-input ds-input--block">
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={form.password}
                 onChange={(e) => set("password", e.target.value)}
                 placeholder="输入密码"
               />
+              <button
+                className="ds-input__action"
+                type="button"
+                title={showPassword ? "隐藏密码" : "显示密码"}
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                <Icon name={showPassword ? "eye-off" : "eye"} size={13} />
+              </button>
             </div>
           </div>
         ) : (
@@ -213,23 +254,34 @@ export function NewConnectionDialog() {
               <label className="dialog__field-label">私钥密码</label>
               <div className="ds-input ds-input--block">
                 <input
-                  type="password"
+                  type={showPassphrase ? "text" : "password"}
                   value={form.privateKeyPassphrase}
                   onChange={(e) => set("privateKeyPassphrase", e.target.value)}
-                  placeholder="可选"
+                  placeholder="（可选）"
                 />
+                <button
+                  className="ds-input__action"
+                  type="button"
+                  title={showPassphrase ? "隐藏密码" : "显示密码"}
+                  onClick={() => setShowPassphrase((v) => !v)}
+                >
+                  <Icon name={showPassphrase ? "eye-off" : "eye"} size={13} />
+                </button>
               </div>
             </div>
           </>
         )}
 
         <div className="dialog__field">
-          <label className="dialog__field-label">备注</label>
+          <div className="dialog__field-label dialog__field-label--row">
+            <span>备注</span>
+            <span className="dialog__field-optional">（可选）</span>
+          </div>
           <div className="ds-input ds-input--block">
             <textarea
               value={form.memo}
               onChange={(e) => set("memo", e.target.value)}
-              placeholder="可选"
+              placeholder="填写备注说明"
               rows={2}
             />
           </div>
@@ -238,7 +290,7 @@ export function NewConnectionDialog() {
         <div className="dialog__field">
           <label className="dialog__field-label">分组</label>
           <select
-            className="dialog__select"
+            className="ds-select ds-select--block"
             value={form.groupId}
             onChange={(e) => set("groupId", e.target.value)}
           >

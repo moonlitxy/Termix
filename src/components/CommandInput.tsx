@@ -4,11 +4,26 @@ import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import type { CommandHistory } from "../types";
 
+/** 历史列表最大条数（完整展示当前会话输入过的所有命令） */
+const HIST_LIMIT = 200;
+
 function formatTime(ts: number): string {
   const d = new Date(ts);
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return hh + ":" + mm;
+}
+
+/** 按最近时间去重：同一条命令只保留最近一次（列表已按 executedAt 降序） */
+function dedupHistory(list: CommandHistory[]): CommandHistory[] {
+  const seen = new Set<string>();
+  const out: CommandHistory[] = [];
+  for (const h of list) {
+    if (seen.has(h.command)) continue;
+    seen.add(h.command);
+    out.push(h);
+  }
+  return out;
 }
 
 export function CommandInput() {
@@ -18,6 +33,9 @@ export function CommandInput() {
   const [history, setHistory] = useState<CommandHistory[]>([]);
   const [histOpen, setHistOpen] = useState(false);
   const [histIdx, setHistIdx] = useState(-1);
+  const [histQuery, setHistQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const histSearchRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const tab = tabs.find((t) => t.id === activeTabId);
@@ -36,15 +54,27 @@ export function CommandInput() {
   };
 
   const toggleHistory = async () => {
-    if (!histOpen && tab?.sessionId) {
+    const next = !histOpen;
+    if (next && tab?.sessionId) {
       try {
-        const list = await ipc.historyList(tab.sessionId);
-        setHistory(list);
+        const list = await ipc.historyList(tab.sessionId, HIST_LIMIT);
+        setHistory(dedupHistory(list));
       } catch {
         setHistory([]);
       }
+      setHistQuery("");
+      setTimeout(() => histSearchRef.current?.focus(), 30);
     }
-    setHistOpen((v) => !v);
+    setHistOpen(next);
+  };
+
+  // 点选历史命令：填入输入框供确认/修改后复用，而非立即执行
+  const reuseCommand = (cmd: string) => {
+    setValue(cmd);
+    setHistIdx(-1);
+    setHistOpen(false);
+    setHistQuery("");
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   // 外部点击关闭 popover
@@ -85,6 +115,10 @@ export function CommandInput() {
 
   const disabled = !tab?.connectionId || !tab?.shellId;
 
+  const filtered = histQuery.trim()
+    ? history.filter((h) => h.command.includes(histQuery.trim()))
+    : history;
+
   return (
     <div className="command-input">
       <div className="ds-input command-input__field">
@@ -92,6 +126,7 @@ export function CommandInput() {
           <Icon name="terminal" size={14} />
         </span>
         <input
+          ref={inputRef}
           type="text"
           placeholder="输入命令..."
           value={value}
@@ -121,18 +156,38 @@ export function CommandInput() {
         </button>
         {histOpen && (
           <div className="command-input__popover" ref={popoverRef}>
-            <div className="command-input__popover-title">历史命令</div>
-            {history.length === 0 ? (
-              <div className="command-input__popover-empty">暂无历史记录</div>
+            <div className="command-input__popover-head">
+              <span className="command-input__popover-title">
+                历史命令（{history.length}）
+              </span>
+            </div>
+            <div className="ds-input command-input__popover-search">
+              <span className="ds-input__icon">
+                <Icon name="search" size={12} />
+              </span>
+              <input
+                ref={histSearchRef}
+                type="text"
+                placeholder="搜索历史命令…"
+                value={histQuery}
+                spellCheck={false}
+                onChange={(e) => setHistQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setHistOpen(false);
+                }}
+              />
+            </div>
+            {filtered.length === 0 ? (
+              <div className="command-input__popover-empty">
+                {histQuery.trim() ? "无匹配的历史命令" : "暂无历史记录"}
+              </div>
             ) : (
-              history.map((h) => (
+              filtered.map((h) => (
                 <div
                   key={h.id}
                   className="command-input__history-item"
-                  onClick={() => {
-                    setHistOpen(false);
-                    execute(h.command);
-                  }}
+                  onClick={() => reuseCommand(h.command)}
+                  title="点击填入输入框复用"
                 >
                   <span className="command-input__history-cmd">{h.command}</span>
                   <span className="command-input__history-time">

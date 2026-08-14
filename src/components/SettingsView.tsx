@@ -130,7 +130,7 @@ export function SettingsView() {
           </div>
           <div className="st-row">
             <label>主题</label>
-            <div className="seg-control" role="group" aria-label="主题">
+            <div className="st-radio-group" role="radiogroup" aria-label="主题">
               {(
                 [
                   ["dark", "深色"],
@@ -138,14 +138,16 @@ export function SettingsView() {
                   ["system", "跟随系统"],
                 ] as const
               ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={settings.theme === value ? "is-active" : ""}
-                  onClick={() => set({ theme: value })}
-                >
+                <label className="ds-radio" key={value}>
+                  <input
+                    type="radio"
+                    name="settings-theme"
+                    checked={settings.theme === value}
+                    onChange={() => set({ theme: value })}
+                  />
+                  <span className="ds-radio__dot" />
                   {label}
-                </button>
+                </label>
               ))}
             </div>
           </div>
@@ -171,7 +173,7 @@ export function SettingsView() {
           <div className="st-row">
             <label>光标样式</label>
             <select
-              className="ds-input st-input"
+              className="ds-select st-input"
               value={settings.cursorStyle}
               onChange={(e) => set({ cursorStyle: e.target.value as Settings["cursorStyle"] })}
             >
@@ -183,7 +185,7 @@ export function SettingsView() {
           <div className="st-row">
             <label>滚动缓冲区</label>
             <select
-              className="ds-input st-input"
+              className="ds-select st-input"
               value={settings.scrollback}
               onChange={(e) => set({ scrollback: Number(e.target.value) })}
             >
@@ -203,7 +205,7 @@ export function SettingsView() {
           <div className="st-row">
             <label>刷新间隔</label>
             <select
-              className="ds-input st-input"
+              className="ds-select st-input"
               value={settings.monitorInterval}
               onChange={(e) => set({ monitorInterval: Number(e.target.value) })}
             >

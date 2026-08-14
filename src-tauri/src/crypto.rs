@@ -5,8 +5,9 @@ use std::num::NonZeroU32;
 
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
 use ring::pbkdf2;
+use ring::rand::{SecureRandom, SystemRandom};
 
-const PBKDF2_ITER: u32 = 120_000;
+const PBKDF2_ITER: u32 = 600_000;
 const PREFIX: &str = "enc:v1:";
 const VERIFY_PLAINTEXT: &str = "termix-master-verify";
 
@@ -25,13 +26,12 @@ pub fn derive_key(master: &str, salt: &[u8]) -> MasterKey {
     key
 }
 
-/// 基于 uuid v4 生成随机字节（无额外 RNG 依赖）
+/// 使用操作系统 CSPRNG（SystemRandom）生成随机字节
 fn rand_bytes(len: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(len);
-    while out.len() < len {
-        out.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-    }
-    out.truncate(len);
+    let mut out = vec![0u8; len];
+    SystemRandom::new()
+        .fill(&mut out)
+        .expect("OS CSPRNG should be available");
     out
 }
 
@@ -150,5 +150,44 @@ mod tests {
         assert!(verify_master(&key, &v));
         let other = derive_key("q", b"s");
         assert!(!verify_master(&other, &v));
+    }
+
+    #[test]
+    fn gen_salt_length_and_uniqueness() {
+        let a = gen_salt();
+        let b = gen_salt();
+        assert_eq!(a.len(), 16);
+        assert_eq!(b.len(), 16);
+        // CSPRNG 生成的盐应互不相同
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn encrypt_uses_random_nonce() {
+        // 相同明文与密钥的两次加密应产生不同密文（nonce 随机）
+        let key = derive_key("p", b"s");
+        let c1 = encrypt(&key, "same");
+        let c2 = encrypt(&key, "same");
+        assert_ne!(c1, c2);
+        // 两者都应可解密回原文
+        assert_eq!(decrypt(&key, &c1).unwrap(), "same");
+        assert_eq!(decrypt(&key, &c2).unwrap(), "same");
+    }
+
+    #[test]
+    fn derive_key_deterministic_per_salt() {
+        // 同密码同盐 → 同密钥；同密码不同盐 → 不同密钥
+        let k1 = derive_key("pass", b"salt-a");
+        let k2 = derive_key("pass", b"salt-a");
+        let k3 = derive_key("pass", b"salt-b");
+        assert_eq!(k1, k2);
+        assert_ne!(k1, k3);
+    }
+
+    #[test]
+    fn derive_key_differs_by_password() {
+        let k1 = derive_key("pass-a", b"s");
+        let k2 = derive_key("pass-b", b"s");
+        assert_ne!(k1, k2);
     }
 }

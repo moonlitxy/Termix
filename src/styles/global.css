@@ -181,6 +181,11 @@ a {
   padding: 0;
 }
 
+.ds-btn.is-active {
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
+}
+
 .ds-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -234,8 +239,172 @@ a {
   border-color: var(--border-brand);
 }
 
+/* ds-input 容器内的动作按钮（如密码显示/隐藏） */
+.ds-input__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-4);
+  color: var(--text-tertiary);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ds-input__action:hover {
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
+}
+
 .ds-input--block {
   width: 100%;
+}
+
+/* =========================================================================
+   ds-select（与 ds-input 视觉统一的原生 Select）
+   ========================================================================= */
+.ds-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  padding: 0 30px 0 10px;
+  background-color: var(--bg-base-default);
+  border: 1px solid var(--border-neutral-l2);
+  border-radius: var(--radius-6);
+  color: var(--text-default);
+  font-size: var(--body-sm-font-size);
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239599a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.ds-select:hover {
+  border-color: var(--border-neutral-l3);
+}
+
+.ds-select:focus-visible,
+.ds-select:focus {
+  outline: none;
+  border-color: var(--border-brand);
+  box-shadow: 0 0 0 3px var(--bg-brand-popup);
+}
+
+.ds-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ds-select--block {
+  width: 100%;
+}
+
+/* =========================================================================
+   ds-check / ds-radio（原生隐藏输入 + 自定义视觉，参照主流桌面设计）
+   ========================================================================= */
+.ds-check,
+.ds-radio {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacer-8);
+  font-size: var(--body-sm-font-size);
+  color: var(--text-default);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ds-check input,
+.ds-radio input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.ds-check__box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-neutral-l3);
+  background: var(--bg-overlay-l1);
+  border-radius: var(--radius-4);
+  color: var(--text-onbrand);
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ds-check:hover .ds-check__box {
+  border-color: var(--text-secondary);
+}
+
+.ds-check input:checked + .ds-check__box {
+  background: var(--bg-brand);
+  border-color: var(--bg-brand);
+}
+
+.ds-check input:checked + .ds-check__box::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid var(--text-onbrand);
+  border-bottom: 2px solid var(--text-onbrand);
+  transform: rotate(-45deg) translate(0.5px, -1px);
+}
+
+.ds-check input:focus-visible + .ds-check__box,
+.ds-radio input:focus-visible + .ds-radio__dot {
+  box-shadow: 0 0 0 3px var(--bg-brand-popup);
+}
+
+.ds-check input:disabled + .ds-check__box,
+.ds-radio input:disabled + .ds-radio__dot {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ds-radio__dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-neutral-l3);
+  background: var(--bg-overlay-l1);
+  border-radius: var(--radius-full);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ds-radio:hover .ds-radio__dot {
+  border-color: var(--text-secondary);
+}
+
+.ds-radio input:checked + .ds-radio__dot {
+  border-color: var(--bg-brand);
+}
+
+.ds-radio input:checked + .ds-radio__dot::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand);
+  transition: transform 0.15s ease;
+}
+
+.ds-radio input:not(:checked) + .ds-radio__dot::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand);
+  transform: scale(0);
 }
 
 /* =========================================================================
@@ -361,31 +530,6 @@ a {
 
 .titlebar__right {
   margin-left: auto;
-}
-
-.titlebar__traffic {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 4px;
-}
-
-.titlebar__traffic-light {
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-full);
-}
-
-.titlebar__traffic-light--close {
-  background: #ff5f57;
-}
-
-.titlebar__traffic-light--min {
-  background: #febc2e;
-}
-
-.titlebar__traffic-light--max {
-  background: #28c840;
 }
 
 .titlebar__brand {
@@ -533,6 +677,41 @@ a {
   color: var(--text-tertiary);
 }
 
+.session-sidebar__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+
+.session-sidebar__section-head .session-sidebar__section-title {
+  flex: 1;
+}
+
+/* 新建分组：内联输入行 */
+.group-add {
+  padding: 4px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-add__input {
+  width: 100%;
+}
+
+.group-add__actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.session-sidebar__empty-hint {
+  padding: 6px 12px;
+  font-size: var(--body-sm-font-size);
+  color: var(--text-tertiary);
+}
+
 .session-row {
   display: flex;
   align-items: center;
@@ -594,6 +773,29 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.group-row__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-4);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.group-row:hover .group-row__add,
+.group-row__add:focus-visible {
+  opacity: 1;
+}
+
+.group-row__add:hover {
+  background: var(--bg-overlay-l3);
+  color: var(--text-default);
 }
 
 /* 分组内会话行：缩进以区分层级 */
@@ -1317,12 +1519,28 @@ a {
 }
 
 .command-input__popover-title {
-  padding: 6px 8px 4px;
+  padding: 4px 8px 2px;
   font-size: var(--body-xs-font-size);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-tertiary);
   font-weight: 600;
+}
+
+.command-input__popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0 4px;
+}
+
+.command-input__popover-search {
+  height: 26px;
+  margin: 0 0 6px;
+}
+
+.command-input__popover-search input {
+  font-size: var(--body-sm-font-size);
 }
 
 .command-input__popover-empty {
@@ -1625,53 +1843,50 @@ a {
 }
 
 .dialog__field {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .dialog__field-label {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   font-size: var(--body-sm-font-size);
   color: var(--text-secondary);
 }
 
+.dialog__field-label--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dialog__field-optional {
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+}
+
+.dialog__field-error {
+  margin-top: 6px;
+  font-size: var(--body-xs-font-size);
+  color: var(--status-error-default);
+}
+
 .dialog__field-row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .dialog__field-row > .dialog__field {
   flex: 1;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .dialog__actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 16px;
-}
-
-.dialog__select {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 100%;
-  height: 30px;
-  padding: 0 28px 0 8px;
-  background: var(--bg-base-default);
-  border: 1px solid var(--border-neutral-l2);
-  border-radius: var(--radius-6);
-  color: var(--text-default);
-  font-size: var(--body-sm-font-size);
-  cursor: pointer;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666b75' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-}
-
-.dialog__select:focus {
-  outline: none;
-  border-color: var(--border-brand);
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-neutral-l1);
 }
 
 /* =========================================================================
@@ -1682,6 +1897,7 @@ a {
 .st-view {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-base-default);
@@ -1973,41 +2189,17 @@ a {
   color: var(--text-secondary);
 }
 
+/* 设置项右侧的 radio 组（垂直排列） */
+.st-radio-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
 .st-input {
   width: 220px;
   height: 30px;
-}
-
-/* 苹果风格分段控件 */
-.seg-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  background: var(--bg-overlay-l3);
-  border: 1px solid var(--border-neutral-l1);
-  border-radius: 9px;
-}
-
-.seg-control button {
-  height: 24px;
-  padding: 0 14px;
-  border-radius: 7px;
-  font-size: var(--body-sm-font-size);
-  color: var(--text-secondary);
-  white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.seg-control button:hover {
-  color: var(--text-default);
-}
-
-.seg-control button.is-active {
-  background: var(--bg-base-tertiary);
-  color: var(--text-default);
-  font-weight: 500;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .st-kbd {

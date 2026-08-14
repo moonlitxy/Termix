@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { useApp } from "../store/app";
+import { useApp, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { terminalRegistry } from "../lib/terminalRegistry";
-import { parseVariables } from "./SnippetsView";
+import { applyVariables, buildVarDefs } from "../lib/variables";
+import { canSplitMore, paneTitle } from "../lib/split";
 import type { Snippet } from "../types";
 
 interface QuickCmdEditing {
@@ -18,6 +19,7 @@ export function Toolbar() {
   const tabs = useApp((s) => s.tabs);
   const sessions = useApp((s) => s.sessions);
   const updateTab = useApp((s) => s.updateTab);
+  const addTab = useApp((s) => s.addTab);
 
   const tab = tabs.find((t) => t.id === activeTabId);
   const session = tab ? sessions.find((s) => s.id === tab.sessionId) : undefined;
@@ -45,7 +47,9 @@ export function Toolbar() {
 
   const doFind = (dir: "next" | "prev") => {
     if (!tab) return;
-    const s = terminalRegistry.getSearch(tab.id);
+    // 优先搜索最近聚焦的终端（分屏 pane 无法被激活，用聚焦终端而非活动标签）
+    const targetId = terminalRegistry.getFocus() ?? tab.id;
+    const s = terminalRegistry.getSearch(targetId);
     if (!s || !query) return;
     if (dir === "next") s.findNext(query, { caseSensitive: false });
     else s.findPrevious(query, { caseSensitive: false });
@@ -110,6 +114,39 @@ export function Toolbar() {
     terminalRegistry.clearBuffer(tab.id);
   };
 
+  // 分屏：基于当前活动标签的会话新建一个独立终端 pane（不在标签栏显示）
+  const handleSplit = () => {
+    const cur = tabs.find((t) => t.id === activeTabId);
+    if (!cur || cur.hidden) return;
+    if (cur.status === "connecting") {
+      window.alert("请等待当前连接完成后再分屏");
+      return;
+    }
+    const panes = tabs.filter((t) => t.splitOf === cur.id);
+    const limit = canSplitMore(panes.length);
+    if (!limit.ok) {
+      window.alert(limit.reason);
+      return;
+    }
+    // 取已有 pane 的最大序号 + 1，避免关闭中间 pane 后重名；
+    // 用「base 标题 + (」前缀匹配，避免 base 标题本身以数字结尾时误读。
+    const prefix = `${cur.title} (`;
+    const maxNo = panes.reduce((max, p) => {
+      if (!p.title.startsWith(prefix)) return max;
+      const m = p.title.slice(prefix.length).match(/^(\d+)\)$/);
+      return m ? Math.max(max, Number(m[1])) : max;
+    }, 1);
+    addTab({
+      id: nextTabId(),
+      kind: "terminal",
+      sessionId: cur.sessionId,
+      title: paneTitle(cur.title, maxNo + 1),
+      status: "connecting",
+      hidden: true,
+      splitOf: cur.id,
+    });
+  };
+
   // ---- 快捷命令 ----
   const sendCommand = async (command: string) => {
     if (!tab?.connectionId || !tab.shellId) {
@@ -140,13 +177,8 @@ export function Toolbar() {
 
   const runSnippet = async (s: Snippet) => {
     // 含 {{var}} 占位符时先让用户填写变量
-    const placeholders = [...s.command.matchAll(/\{\{\s*([\w-]+)\s*\}\}/g)].map((m) => m[1]);
-    if (placeholders.length > 0) {
-      const declared = parseVariables(s.variables);
-      const vars = placeholders.map((name) => ({
-        name,
-        defaultValue: declared.find((d) => d.name === name)?.defaultValue ?? "",
-      }));
+    const vars = buildVarDefs(s.command, s.variables);
+    if (vars.length > 0) {
       setCmdEditing({
         title: s.title,
         command: s.command,
@@ -161,10 +193,7 @@ export function Toolbar() {
 
   const confirmQuickCmd = async () => {
     if (!cmdEditing) return;
-    let cmd = cmdEditing.command;
-    for (const v of cmdEditing.vars) {
-      cmd = cmd.replaceAll(`{{${v.name}}}`, cmdEditing.values[v.name] ?? "");
-    }
+    const cmd = applyVariables(cmdEditing.command, cmdEditing.values);
     setCmdEditing(null);
     setCmdOpen(false);
     await sendCommand(cmd);
@@ -244,6 +273,15 @@ export function Toolbar() {
         <button className="ds-btn ds-btn--secondary" type="button" onClick={() => void handleCopy()}>
           <Icon name="copy" size={13} />
           复制
+        </button>
+        <button
+          className="ds-btn ds-btn--secondary"
+          type="button"
+          title="分屏（同会话新开一个终端）"
+          onClick={handleSplit}
+        >
+          <Icon name="columns" size={13} />
+          分屏
         </button>
         <button className="ds-btn ds-btn--secondary" type="button" onClick={() => void toggleQuickCmd()}>
           <Icon name="terminal" size={13} />

@@ -2,30 +2,10 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { applyVariables, buildVarDefs, type VarDef } from "../lib/variables";
 import type { Snippet, SnippetInput } from "../types";
 
 const EMPTY: SnippetInput = { title: "", command: "", groupId: undefined };
-
-interface VarDef {
-  name: string;
-  defaultValue: string;
-}
-
-export function parseVariables(raw?: string): VarDef[] {
-  if (!raw) return [];
-  try {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .map((v) => ({
-        name: String(v?.name ?? ""),
-        defaultValue: v?.default != null ? String(v.default) : "",
-      }))
-      .filter((v) => v.name);
-  } catch {
-    return [];
-  }
-}
 
 export function SnippetsView() {
   const groups = useApp((s) => s.groups);
@@ -100,13 +80,8 @@ export function SnippetsView() {
 
   const insert = async (s: Snippet) => {
     // 扫描命令中的 {{var}} 占位符，存在则弹窗让用户填写变量
-    const placeholders = [...s.command.matchAll(/\{\{\s*([\w-]+)\s*\}\}/g)].map((m) => m[1]);
-    const declared = parseVariables(s.variables);
-    if (placeholders.length > 0) {
-      const vars = placeholders.map((name) => ({
-        name,
-        defaultValue: declared.find((d) => d.name === name)?.defaultValue ?? "",
-      }));
+    const vars = buildVarDefs(s.command, s.variables);
+    if (vars.length > 0) {
       setVarValues(Object.fromEntries(vars.map((v) => [v.name, v.defaultValue])));
       setVarModal({ snippet: s, vars });
       return;
@@ -116,10 +91,7 @@ export function SnippetsView() {
 
   const applyVars = async () => {
     if (!varModal) return;
-    let cmd = varModal.snippet.command;
-    for (const v of varModal.vars) {
-      cmd = cmd.replaceAll(`{{${v.name}}}`, varValues[v.name] ?? "");
-    }
+    const cmd = applyVariables(varModal.snippet.command, varValues);
     setVarModal(null);
     await send(cmd);
   };
@@ -209,7 +181,7 @@ export function SnippetsView() {
             <div className="form-row">
               <label>分组</label>
               <select
-                className="ds-input"
+                className="ds-select"
                 value={form.groupId ?? ""}
                 onChange={(e) => setForm({ ...form, groupId: e.target.value || undefined })}
               >
