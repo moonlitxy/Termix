@@ -558,12 +558,66 @@ a {
   font-size: var(--body-sm-font-size);
 }
 
-.titlebar__conn-select:hover {
+.titlebar__conn-select:hover,
+.titlebar__conn-select.is-active {
   background: var(--bg-overlay-l3);
+}
+
+.titlebar__conn-select-wrap {
+  position: relative;
+}
+
+.titlebar__conn-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar__conn-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 205;
+}
+
+.ctx-menu.titlebar__conn-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 210;
+  min-width: 240px;
+}
+
+.titlebar__conn-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar__conn-item-host {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: var(--body-xs-font-size);
+}
+
+.titlebar__conn-empty {
+  padding: 8px 10px;
+  color: var(--text-tertiary);
+  font-size: var(--body-sm-font-size);
+}
+
+.ctx-menu__item.is-active {
+  background: var(--bg-brand-popup);
 }
 
 .titlebar__search {
   width: 220px;
+}
+
+.titlebar__avatar-wrap {
+  position: relative;
+  display: inline-flex;
 }
 
 .titlebar__avatar {
@@ -572,11 +626,46 @@ a {
   justify-content: center;
   width: 26px;
   height: 26px;
+  padding: 0;
+  border: none;
   border-radius: var(--radius-full);
   background: var(--bg-brand);
   color: var(--text-onbrand);
   font-size: var(--body-sm-font-size);
   font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.titlebar__avatar:hover,
+.titlebar__avatar.is-active {
+  opacity: 0.85;
+}
+
+.ctx-menu.titlebar__avatar-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 210;
+  min-width: 220px;
+}
+
+.titlebar__avatar-info {
+  padding: 8px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.titlebar__avatar-name {
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  color: var(--text-default);
+}
+
+.titlebar__avatar-meta {
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
 }
 
 /* =========================================================================
@@ -875,16 +964,7 @@ a {
   font-weight: 500;
   color: var(--text-default);
   min-width: 0;
-}
-
-.sftp-toolbar__path {
-  font-family: var(--font-family-mono);
-  font-size: var(--body-xs-font-size);
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 280px;
+  flex-shrink: 0;
 }
 
 .sftp-toolbar__actions {
@@ -894,46 +974,13 @@ a {
   flex-shrink: 0;
 }
 
-.sftp-panes {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-.sftp-pane {
+/* 路径栏并入工具栏一行：占据中间剩余宽度 */
+.sftp-pathbar {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border-neutral-l1);
-}
-
-.sftp-pane:last-child {
-  border-right: none;
-}
-
-.sftp-pane__title {
-  height: 30px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  font-size: var(--body-xs-font-size);
-  font-weight: 600;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--border-neutral-l1);
-  background: var(--bg-overlay-l1);
-}
-
-.sftp-pathbar {
-  height: 34px;
-  padding: 4px 8px;
-  display: flex;
   align-items: center;
   gap: 6px;
-  border-bottom: 1px solid var(--border-neutral-l1);
-  flex-shrink: 0;
 }
 
 .sftp-pathbar__input {
@@ -961,12 +1008,53 @@ a {
   padding: 6px;
 }
 
+/* 六列网格：文件名 | 大小 | 类型 | 修改时间 | 权限 | 用户/组 */
+.sftp-head,
 .sftp-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 40px 118px 76px 80px;
   gap: 8px;
-  height: 28px;
+  align-items: center;
   padding: 0 8px;
+}
+
+.sftp-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 24px;
+  margin-bottom: 2px;
+  background: var(--bg-base-secondary);
+  border-bottom: 1px solid var(--border-neutral-l1);
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+}
+
+.sftp-head__cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sftp-head__cell:hover {
+  color: var(--text-default);
+}
+
+.sftp-head__cell.is-sorted {
+  color: var(--text-default);
+  font-weight: 600;
+}
+
+.sftp-row {
+  height: 28px;
   border-radius: var(--radius-6);
   cursor: pointer;
 }
@@ -979,35 +1067,44 @@ a {
   background: var(--bg-overlay-l2);
 }
 
+.sftp-row__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--body-md-font-size);
+  color: var(--text-default);
+}
+
 .sftp-row__icon {
   color: var(--text-tertiary);
   display: inline-flex;
   flex-shrink: 0;
 }
 
-.sftp-row__name {
-  flex: 1;
+.sftp-row__label {
   min-width: 0;
-  font-size: var(--body-md-font-size);
-  color: var(--text-default);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sftp-row__meta {
-  flex-shrink: 0;
+.sftp-row__cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--body-xs-font-size);
   color: var(--text-tertiary);
-  width: 64px;
+}
+
+.sftp-row__cell--num {
   text-align: right;
 }
 
-.sftp-row__mtime {
-  flex-shrink: 0;
+.sftp-row__cell--time,
+.sftp-row__cell--perms {
   font-family: var(--font-family-mono);
-  font-size: var(--body-xs-font-size);
-  color: var(--text-tertiary);
 }
 
 .sftp-empty {
@@ -1017,13 +1114,10 @@ a {
   color: var(--text-tertiary);
 }
 
-.sftp-pane.is-drop-target {
+.sftp-list--remote.is-drop-target {
   background: var(--bg-overlay-l2);
   box-shadow: inset 0 0 0 2px var(--border-brand);
   transition: background 0.12s ease;
-}
-
-.sftp-pane.is-drop-target .sftp-list {
   color: var(--text-secondary);
 }
 
@@ -1134,6 +1228,29 @@ a {
   min-height: 0;
   position: relative;
   display: flex;
+}
+
+/* SFTP 嵌入工作区：终端（3）与远程文件浏览器（2）按比例共享中间区域，
+   终端窗口常驻，仅替换原工具栏（连接信息区）为 SFTP 面板 */
+.workspace__main--sftp {
+  flex: 3;
+  min-height: 120px;
+}
+
+.workspace__sftp {
+  flex: 2;
+  min-height: 140px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-neutral-l1);
+  background: var(--bg-base-default);
+}
+
+/* 收起态：面板收缩为仅工具栏条的高度 */
+.workspace__sftp--collapsed {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .workspace__terminal-slot {
@@ -1248,8 +1365,8 @@ a {
   position: absolute;
   width: 140px;
   padding: 4px;
-  background: var(--bg-panel-default);
-  border: 1px solid var(--border-default);
+  background: var(--bg-base-tertiary);
+  border: 1px solid var(--border-neutral-l2);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
@@ -1268,18 +1385,18 @@ a {
 }
 
 .terminal-view__ctx-item:hover:not(:disabled) {
-  background: var(--bg-fill-hover);
+  background: var(--bg-overlay-l2);
 }
 
 .terminal-view__ctx-item:disabled {
-  color: var(--text-disabled);
+  color: var(--text-tertiary);
   cursor: default;
 }
 
 .terminal-view__ctx-sep {
   height: 1px;
   margin: 4px 6px;
-  background: var(--border-default);
+  background: var(--border-neutral-l1);
 }
 
 .terminal-view__paste-confirm {
@@ -1703,6 +1820,17 @@ a {
   background: var(--bg-brand);
 }
 
+/* 资源卡片下方的用量详情行（小字、弱化，如内存/磁盘的已用/总量） */
+.res-card__detail {
+  margin-top: 6px;
+  font-family: var(--font-family-mono);
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .transfer-row__head {
   display: flex;
   align-items: center;
@@ -2108,6 +2236,40 @@ a {
   gap: 8px;
 }
 
+/* 系统信息面板 */
+.sys-card {
+  padding: 12px;
+}
+
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 16px;
+}
+
+/* 系统信息项：标签与值上下堆叠，避免窄屏下文字重叠/截断 */
+.sys-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sys-item__label {
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+}
+
+.sys-item__value {
+  min-width: 0;
+  font-family: var(--font-family-mono);
+  font-size: var(--body-xs-font-size);
+  color: var(--text-default);
+  /* 长文本（CPU 型号、内存用量等）自动换行完整显示，不截断、不与相邻项重叠 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .mon-chart {
   padding: 12px;
 }
@@ -2152,6 +2314,23 @@ a {
 
 .mon-table__row:hover {
   background: var(--bg-overlay-l1);
+}
+
+/* 磁盘分区表：4 列独立布局（挂载点自适应伸缩，长路径省略展示） */
+.mon-table--disks .mon-table__head,
+.mon-table--disks .mon-table__row {
+  grid-template-columns: minmax(0, 1fr) 88px 88px 56px;
+}
+
+.mon-table--disks .mon-table__row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mon-table--disks .mon-table__head > span:last-child,
+.mon-table--disks .mon-table__row > span:last-child {
+  text-align: right;
 }
 
 .mon-table__cmd {

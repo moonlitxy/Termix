@@ -31,11 +31,16 @@ interface AppState {
   transfers: TransferTask[];
   sftpContext: SftpContext | null;
   remoteItems: SftpItem[];
-  localItems: SftpItem[];
   remotePath: string;
-  localPath: string;
   remoteSelected: SftpItem | null;
-  localSelected: SftpItem | null;
+  /** 本地下载目标目录（无本地文件面板，下载直接落到该目录） */
+  localPath: string;
+  /** 远程目录列表加载中标记（用于展示加载状态，避免重复触发加载） */
+  remoteLoading: boolean;
+  /** 远程目录列表缓存：connectionId|path → 条目与时间戳，短 TTL 内复用避免重复请求 */
+  remoteCache: Record<string, { items: SftpItem[]; ts: number }>;
+  /** SFTP 面板收起状态：收起后仅保留工具栏条 */
+  sftpCollapsed: boolean;
 
   loadSessions: () => Promise<void>;
   loadGroups: () => Promise<void>;
@@ -52,15 +57,15 @@ interface AppState {
   setActivity: (a: Activity) => void;
   setTransfers: (list: TransferTask[]) => void;
   upsertTransfer: (e: TransferProgressEvent) => void;
-  setSftpContext: (sessionId: string, connectionId: string | null) => void;
+  setSftpContext: (sessionId: string, connectionId: string | null) => Promise<void>;
   loadRemote: () => Promise<void>;
-  loadLocal: () => Promise<void>;
   openRemoteDir: (item: SftpItem) => Promise<void>;
-  openLocalDir: (item: SftpItem) => Promise<void>;
   upRemote: () => Promise<void>;
-  upLocal: () => Promise<void>;
   selectRemote: (item: SftpItem | null) => void;
-  selectLocal: (item: SftpItem | null) => void;
+  /** 目录变更（新建/重命名/删除/上传完成）后使缓存失效，下次加载强制重新请求 */
+  invalidateRemoteCache: () => void;
+  /** 切换 SFTP 面板收起/展开状态 */
+  toggleSftpCollapsed: () => void;
 }
 
 let tabSeq = 0;
@@ -68,6 +73,11 @@ export function nextTabId(): string {
   tabSeq += 1;
   return `tab-${Date.now()}-${tabSeq}`;
 }
+
+/** 远程目录列表缓存有效期（毫秒） */
+const REMOTE_CACHE_TTL = 5000;
+/** 远程目录加载 in-flight 集合（key: connectionId|path），防止同路径并发重复请求 */
+const inflightRemote = new Set<string>();
 
 export function joinPath(a: string, b: string): string {
   if (!a) return b;
@@ -94,11 +104,12 @@ export const useApp = create<AppState>((set, get) => ({
   transfers: [],
   sftpContext: null,
   remoteItems: [],
-  localItems: [],
   remotePath: "/",
-  localPath: "",
   remoteSelected: null,
-  localSelected: null,
+  localPath: "",
+  remoteLoading: false,
+  remoteCache: {},
+  sftpCollapsed: false,
 
   loadSessions: async () => {
     try {
@@ -149,7 +160,21 @@ export const useApp = create<AppState>((set, get) => ({
   closeNewConnection: () =>
     set({ newConnOpen: false, editingSession: null, newConnPresetGroupId: null }),
 
-  setActivity: (a) => set({ activity: a }),
+  setActivity: (a) => {
+    set({ activity: a });
+    // 进入 SFTP 时：已有终端 SSH 连接则直接建立 SFTP 会话，无需再手动连接
+    if (a === "sftp") {
+      const st = get();
+      if (!st.sftpContext) {
+        const conn = st.tabs.find(
+          (t) => t.connectionId && t.status === "connected"
+        );
+        if (conn?.connectionId) {
+          void st.setSftpContext(conn.sessionId, conn.connectionId);
+        }
+      }
+    }
+  },
   setTransfers: (list) => set({ transfers: list }),
   upsertTransfer: (e) =>
     set((s) => {
@@ -184,36 +209,44 @@ export const useApp = create<AppState>((set, get) => ({
       return { transfers: tasks };
     }),
 
-  setSftpContext: (sessionId, connectionId) => {
+  setSftpContext: async (sessionId, connectionId) => {
     set({ sftpContext: connectionId ? { sessionId, connectionId } : null });
-    void get().loadRemote();
+    if (connectionId) {
+      // 初始固定展示根目录 "/"：确保进入 SFTP 时根目录下的文件与文件夹
+      // 立即可见，不依赖点击上级目录触发刷新；同时避免复用上一次的残留路径。
+      set({ remotePath: "/", remoteSelected: null });
+    }
+    await get().loadRemote();
   },
   loadRemote: async () => {
     const { sftpContext, remotePath } = get();
     if (!sftpContext) {
-      set({ remoteItems: [] });
+      set({ remoteItems: [], remoteLoading: false });
       return;
     }
+    const key = `${sftpContext.connectionId}|${remotePath}`;
+    // 短 TTL 缓存命中：复用上次结果，避免进入/切换目录时重复发起 SFTP 请求
+    const cached = get().remoteCache[key];
+    if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL) {
+      set({ remoteItems: cached.items, remoteLoading: false });
+      return;
+    }
+    // 并发保护：同一路径已有请求在途时不再重复发起
+    if (inflightRemote.has(key)) return;
+    inflightRemote.add(key);
+    set({ remoteLoading: true });
     try {
       const items = await ipc.sftpList(sftpContext.connectionId, remotePath);
-      set({ remoteItems: items });
+      inflightRemote.delete(key);
+      set((s) => ({
+        remoteItems: items,
+        remoteLoading: false,
+        remoteCache: { ...s.remoteCache, [key]: { items, ts: Date.now() } },
+      }));
     } catch (e) {
+      inflightRemote.delete(key);
       console.warn("loadRemote:", e);
-      set({ remoteItems: [] });
-    }
-  },
-  loadLocal: async () => {
-    const { localPath } = get();
-    if (!localPath) {
-      set({ localItems: [] });
-      return;
-    }
-    try {
-      const items = await ipc.localList(localPath);
-      set({ localItems: items });
-    } catch (e) {
-      console.warn("loadLocal:", e);
-      set({ localItems: [] });
+      set({ remoteItems: [], remoteLoading: false });
     }
   },
   openRemoteDir: async (item) => {
@@ -221,21 +254,13 @@ export const useApp = create<AppState>((set, get) => ({
     set({ remotePath: item.path, remoteSelected: null });
     await get().loadRemote();
   },
-  openLocalDir: async (item) => {
-    if (!item.isDir) return;
-    set({ localPath: item.path, localSelected: null });
-    await get().loadLocal();
-  },
   upRemote: async () => {
     set({ remotePath: dirname(get().remotePath), remoteSelected: null });
     await get().loadRemote();
   },
-  upLocal: async () => {
-    set({ localPath: dirname(get().localPath), localSelected: null });
-    await get().loadLocal();
-  },
   selectRemote: (item) => set({ remoteSelected: item }),
-  selectLocal: (item) => set({ localSelected: item }),
+  invalidateRemoteCache: () => set({ remoteCache: {} }),
+  toggleSftpCollapsed: () => set((s) => ({ sftpCollapsed: !s.sftpCollapsed })),
 }));
 
 // Derived: filtered sessions by keyword

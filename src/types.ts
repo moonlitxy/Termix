@@ -84,6 +84,10 @@ export interface SftpItem {
   size: number;
   mtime: number;
   perms?: number;
+  /** 数值 uid（服务端未返回时缺省） */
+  uid?: number;
+  /** 数值 gid（服务端未返回时缺省） */
+  gid?: number;
 }
 
 export interface TransferTask {
@@ -189,6 +193,19 @@ export interface ProcInfo {
   cpu: number;
   mem: number;
   cmd: string;
+}
+
+/** 服务器系统信息（系统信息模块） */
+export interface SysInfo {
+  osName: string;
+  osVersion: string;
+  kernel: string;
+  arch: string;
+  cpuCores: number;
+  cpuModel: string;
+  memTotal: number;
+  memUsed: number;
+  disks: DiskInfo[];
 }
 
 // ---- 安全（主密码） ----

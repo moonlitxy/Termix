@@ -29,6 +29,12 @@ export const terminalRegistry = {
     return focusedTabId;
   },
 
+  /** 聚焦指定终端（切回终端视图等场景下恢复键盘输入与命令历史） */
+  focus(tabId: string): void {
+    const t = terms.get(tabId);
+    if (t) t.focus();
+  },
+
   setSearch(tabId: string, s: SearchAddon): void {
     searches.set(tabId, s);
   },

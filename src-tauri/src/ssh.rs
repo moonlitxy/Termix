@@ -51,6 +51,11 @@ pub struct SshClient {
     forwards: Arc<ForwardRegistry>,
     known_fingerprint: Option<String>,
     pending: Arc<Mutex<Option<HostKeyStatus>>>,
+    /// 连接终止时据此从 SshManager 移除自身：
+    /// 若不清理，残留连接会让 shell channel 挂起、前端收不到断开事件、
+    /// 监控轮询持续对死连接失败。
+    connections: Arc<Mutex<HashMap<String, Connection>>>,
+    conn_id: String,
 }
 
 impl SshClient {
@@ -58,11 +63,15 @@ impl SshClient {
         forwards: Arc<ForwardRegistry>,
         known_fingerprint: Option<String>,
         pending: Arc<Mutex<Option<HostKeyStatus>>>,
+        connections: Arc<Mutex<HashMap<String, Connection>>>,
+        conn_id: String,
     ) -> Self {
         Self {
             forwards,
             known_fingerprint,
             pending,
+            connections,
+            conn_id,
         }
     }
 }
@@ -144,6 +153,18 @@ impl client::Handler for SshClient {
         });
         Ok(())
     }
+
+    /// 连接终止（正常/异常/超时）时移除残留连接，让 shell task 退出并通知前端。
+    fn disconnected(
+        &mut self,
+        reason: client::DisconnectReason<Self::Error>,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+        async move {
+            log::warn!("ssh: connection {} disconnected: {reason:?}", self.conn_id);
+            self.connections.lock().await.remove(&self.conn_id);
+            Ok(())
+        }
+    }
 }
 
 pub enum ShellCmd {
@@ -158,18 +179,15 @@ pub struct Connection {
 }
 
 pub struct SshManager {
-    connections: Mutex<HashMap<String, Connection>>,
+    connections: Arc<Mutex<HashMap<String, Connection>>>,
     forwards: Arc<ForwardRegistry>,
-    /// 最近一次 connect 的主机密钥校验结果（连接失败时由调用方读取）。
-    pending_key: std::sync::Mutex<Option<Arc<Mutex<Option<HostKeyStatus>>>>>,
 }
 
 impl SshManager {
     pub fn new() -> Self {
         Self {
-            connections: Mutex::new(HashMap::new()),
+            connections: Arc::new(Mutex::new(HashMap::new())),
             forwards: Arc::new(ForwardRegistry::new()),
-            pending_key: std::sync::Mutex::new(None),
         }
     }
 
@@ -177,21 +195,34 @@ impl SshManager {
         &self,
         s: Session,
         known_fingerprint: Option<String>,
+        // 每次连接的独立校验结果容器：由调用方创建并持有，
+        // 并发连接时互不覆盖，失败后调用方据此区分「未信任/密钥变更」。
+        pending: Arc<Mutex<Option<HostKeyStatus>>>,
     ) -> Result<String, String> {
         let config = Arc::new(client::Config {
-            inactivity_timeout: Some(Duration::from_secs(30)),
-            // SSH 心跳保活：30s 无数据则发送 keepalive，连续 3 次无响应才断开
+            // 注意：inactivity_timeout 必须禁用或远大于 keepalive_interval。
+            // russh 主循环中发送 keepalive 的分支不会重置 inactivity 定时器，
+            // 两者取相同值会导致连接在首次保活后被 inactivity 立即断开。
+            // 死连接检测交给 keepalive（30s 一次，3 次无响应断开）。
+            inactivity_timeout: None,
+            // SSH 心跳保活：30s 无数据则发送 keepalive@openssh.com，连续 3 次无响应才断开
             keepalive_interval: Some(Duration::from_secs(30)),
             keepalive_max: 3,
             ..<_>::default()
         });
         let addr = format!("{}:{}", s.host, s.port);
-        let pending = Arc::new(Mutex::new(None));
-        *self.pending_key.lock().unwrap() = Some(pending.clone());
+        // 提前生成连接 id：SshClient 持之用于断线时从 connections 中移除自身
+        let connection_id = uuid::Uuid::new_v4().to_string();
         let mut session = client::connect(
             config,
             addr.as_str(),
-            SshClient::new(self.forwards.clone(), known_fingerprint, pending),
+            SshClient::new(
+                self.forwards.clone(),
+                known_fingerprint,
+                pending.clone(),
+                self.connections.clone(),
+                connection_id.clone(),
+            ),
         )
         .await
         .map_err(|e| format!("connect failed: {e}"))?;
@@ -227,7 +258,6 @@ impl SshManager {
             return Err("authentication failed".into());
         }
 
-        let connection_id = uuid::Uuid::new_v4().to_string();
         let conn = Connection {
             handle: Arc::new(session),
             shells: Arc::new(Mutex::new(HashMap::new())),
@@ -236,19 +266,9 @@ impl SshManager {
             .lock()
             .await
             .insert(connection_id.clone(), conn);
-        // 连接成功：清除未决的主机密钥校验状态
-        *self.pending_key.lock().unwrap() = None;
+        // 连接成功：清除本次连接的主机密钥校验状态
+        *pending.lock().await = None;
         Ok(connection_id)
-    }
-
-    /// 取走最近一次 connect 的主机密钥校验结果（用于连接失败时区分
-    /// 未信任 / 密钥变更），取走后自动清空。
-    pub async fn take_pending_key(&self) -> Option<HostKeyStatus> {
-        let arc = self.pending_key.lock().unwrap().take();
-        match arc {
-            Some(a) => a.lock().await.take(),
-            None => None,
-        }
     }
 
     pub async fn disconnect(&self, connection_id: &str) -> Result<(), String> {
@@ -327,28 +347,41 @@ impl SshManager {
 
     /// 在连接上执行一次性命令并返回完整输出（用于监控等）。
     pub async fn exec_command(&self, connection_id: &str, command: &str) -> Result<String, String> {
-        let handle = self
-            .get_handle(connection_id)
-            .await
-            .ok_or_else(|| "connection not found".to_string())?;
-        let mut channel = handle
-            .channel_open_session()
-            .await
-            .map_err(|e| format!("open channel failed: {e}"))?;
-        channel
-            .exec(true, command)
-            .await
-            .map_err(|e| format!("exec failed: {e}"))?;
+        let handle = self.get_handle(connection_id).await.ok_or_else(|| {
+            log::error!("exec_command: connection not found: {connection_id}");
+            "connection not found".to_string()
+        })?;
+        let mut channel = handle.channel_open_session().await.map_err(|e| {
+            log::error!("exec_command: open channel failed conn={connection_id}: {e}");
+            format!("open channel failed: {e}")
+        })?;
+        channel.exec(true, command).await.map_err(|e| {
+            log::error!("exec_command: exec failed conn={connection_id}: {e}");
+            format!("exec failed: {e}")
+        })?;
         let mut output = String::new();
-        while let Some(msg) = channel.wait().await {
-            match msg {
-                ChannelMsg::Data { data } => {
+        // 麒麟/Dropbear 等服务器执行 exec 后不会主动发送结束信号（无 exit-status/EOF/close），
+        // 必须由客户端在输出结束后主动关闭。策略：
+        // - 收到第一条数据前：给足命令执行宽限（top/df 在部分设备上可达数秒）
+        // - 收到数据后：静默 2s 即认为输出完成，立即关闭，避免 channel 占用过久
+        // 若服务器正常发送 close/EOF，则提前退出。
+        let mut idle = Duration::from_secs(15);
+        loop {
+            match tokio::time::timeout(idle, channel.wait()).await {
+                Ok(Some(ChannelMsg::Data { data })) => {
                     output.push_str(&String::from_utf8_lossy(&data));
+                    idle = Duration::from_secs(2);
                 }
-                ChannelMsg::ExitStatus { .. } | ChannelMsg::Eof | ChannelMsg::Close => break,
-                _ => {}
+                Ok(Some(ChannelMsg::ExitStatus { .. })) => {}
+                Ok(Some(ChannelMsg::Eof)) | Ok(Some(ChannelMsg::Close)) | Ok(None) => break,
+                Ok(_) => {}
+                // 静默超时：认为命令输出完成
+                Err(_) => break,
             }
         }
+        // 显式关闭 channel：russh 的 Channel drop 不会自动发送 CHANNEL_CLOSE，
+        // 不关闭会导致服务器端 channel 累积（监控每 2s 轮询），最终被服务器拒绝打开
+        let _ = channel.close().await;
         Ok(output)
     }
 

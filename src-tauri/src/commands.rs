@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tauri::{AppHandle, State};
+use tokio::sync::Mutex;
 
 use crate::crypto;
 use crate::db::Db;
@@ -8,7 +9,7 @@ use crate::forward::ForwardService;
 use crate::models::{
     CommandHistory, DiskInfo, ForwardRule, ForwardRuleInput, Group, GroupInput, MasterStatus,
     Metrics, ProcInfo, Session, SessionExport, SessionImportResult, SessionInput, Snippet,
-    SnippetInput,
+    SnippetInput, SysInfo,
 };
 use crate::sftp::{SftpItem, SftpService, TransferTask};
 use crate::ssh::{HostKeyStatus, SshManager};
@@ -499,14 +500,20 @@ pub async fn session_connect(
         return Err("会话已加密，请在「设置 → 安全」中输入主密码解锁后重试".into());
     }
     let known_fingerprint = state.db.get_host_key(&session.host, session.port)?;
-    match state.ssh.connect(session.clone(), known_fingerprint).await {
+    // 本次连接独立的主机密钥校验容器：并发连接互不干扰
+    let pending = Arc::new(Mutex::new(None));
+    match state
+        .ssh
+        .connect(session.clone(), known_fingerprint, pending.clone())
+        .await
+    {
         Ok(connection_id) => {
             state.db.touch_session(&id)?;
             Ok(connection_id)
         }
         Err(e) => {
             // 主机密钥校验被拒：区分「首次未信任」与「密钥变更」
-            if let Some(status) = state.ssh.take_pending_key().await {
+            if let Some(status) = pending.lock().await.take() {
                 return Err(match status {
                     HostKeyStatus::Unverified { fingerprint } => {
                         format!("HOST_KEY_UNVERIFIED:{fingerprint}")
@@ -628,6 +635,14 @@ pub async fn sftp_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<SftpItem>, String> {
     state.sftp.list(&connection_id, &path).await
+}
+
+#[tauri::command]
+pub async fn sftp_cwd(
+    connection_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state.sftp.cwd(&connection_id).await
 }
 
 #[tauri::command]
@@ -858,9 +873,16 @@ pub async fn monitor_metrics(
         .ssh
         .exec_command(
             &connection_id,
-            "top -bn1 | sed -n '3p'; echo ---; free -b | sed -n '2p'; echo ---; df -k; echo ---; awk 'NR>2 {rx+=$2;tx+=$10} END {print rx, tx}' /proc/net/dev; echo ---; awk 'FNR>1 {n++} END {print n+0}' /proc/net/tcp /proc/net/tcp6 2>/dev/null",
+            // df 默认遍历所有挂载点，访问不可达的网络文件系统（NFS）会长时间卡住，
+            // 导致命令整体超时、磁盘数据缺失。加 -l（仅本地）避免访问网络挂载点。
+            "top -bn1 | sed -n '3p'; echo ---; free -b | sed -n '2p'; echo ---; df -klP 2>/dev/null; echo ---; awk 'NR>2 {rx+=$2;tx+=$10} END {print rx, tx}' /proc/net/dev; echo ---; awk 'FNR>1 {n++} END {print n+0}' /proc/net/tcp /proc/net/tcp6 2>/dev/null",
         )
         .await?;
+    log::debug!(
+        "monitor: conn={connection_id} raw output ({} bytes): {}",
+        out.len(),
+        out.chars().take(2000).collect::<String>()
+    );
     let parts: Vec<&str> = out.split("---").collect();
     let cpu = parts.first().and_then(|s| parse_first_f64(s)).unwrap_or(0.0);
     let (mem_used, mem_total) = parse_mem(parts.get(1).unwrap_or(&""));
@@ -914,6 +936,44 @@ pub async fn monitor_processes(
         });
     }
     Ok(procs)
+}
+
+/// 服务器系统信息：OS / 内核 / 架构 / CPU / 内存 / 磁盘。
+#[tauri::command]
+pub async fn system_info(
+    connection_id: String,
+    state: State<'_, AppState>,
+) -> Result<SysInfo, String> {
+    let out = state
+        .ssh
+        .exec_command(
+            &connection_id,
+            // df -l 仅本地文件系统，避免网络挂载点卡住
+            "cat /etc/os-release 2>/dev/null | grep -E '^(PRETTY_NAME|VERSION_ID)='; echo ---; uname -r; echo ---; uname -m; echo ---; nproc 2>/dev/null; echo ---; grep -m1 -E 'model name|Processor|Hardware' /proc/cpuinfo 2>/dev/null; echo ---; free -b 2>/dev/null | sed -n '2p'; echo ---; df -klP 2>/dev/null",
+        )
+        .await?;
+    let parts: Vec<&str> = out.split("---").collect();
+    let mut os_name = String::new();
+    let mut os_version = String::new();
+    for line in parts.first().unwrap_or(&"").lines() {
+        if let Some(v) = line.strip_prefix("PRETTY_NAME=") {
+            os_name = v.trim_matches('"').to_string();
+        } else if let Some(v) = line.strip_prefix("VERSION_ID=") {
+            os_version = v.trim_matches('"').to_string();
+        }
+    }
+    let (mem_used, mem_total) = parse_mem(parts.get(5).unwrap_or(&""));
+    Ok(SysInfo {
+        os_name,
+        os_version,
+        kernel: parts.get(1).unwrap_or(&"").trim().to_string(),
+        arch: parts.get(2).unwrap_or(&"").trim().to_string(),
+        cpu_cores: parts.get(3).unwrap_or(&"").trim().parse().unwrap_or(0),
+        cpu_model: parts.get(4).unwrap_or(&"").trim().to_string(),
+        mem_total,
+        mem_used,
+        disks: parse_disks(parts.get(6).unwrap_or(&"")),
+    })
 }
 
 fn parse_first_f64(s: &str) -> Option<f64> {

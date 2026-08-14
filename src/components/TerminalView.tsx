@@ -80,6 +80,8 @@ export function TerminalView({ tab }: { tab: Tab }) {
     } catch {
       // 容器可能尚未布局，忽略
     }
+    // 进入终端视图时立即聚焦，恢复键盘输入（切换自 SFTP 等模块后无需手动点击）
+    terminal.focus();
 
     // 订阅终端输出
     onTerminalOutput((e) => {
@@ -335,7 +337,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const menuW = 140;
-    const menuH = 112;
+    const menuH = 152;
     setCtxMenu({
       x: Math.max(4, Math.min(e.clientX - rect.left, rect.width - menuW - 4)),
       y: Math.max(4, Math.min(e.clientY - rect.top, rect.height - menuH - 4)),
@@ -386,6 +388,12 @@ export function TerminalView({ tab }: { tab: Tab }) {
       t.focus();
     }
     closeCtxMenu();
+  };
+
+  // 查找：复用工具栏的终端内搜索（Ctrl+F 同一入口）
+  const handleFind = () => {
+    closeCtxMenu();
+    document.dispatchEvent(new CustomEvent("termix:search"));
   };
 
   const confirmPaste = () => {
@@ -454,6 +462,9 @@ export function TerminalView({ tab }: { tab: Tab }) {
               粘贴
             </button>
             <div className="terminal-view__ctx-sep" />
+            <button type="button" className="terminal-view__ctx-item" onClick={handleFind}>
+              查找
+            </button>
             <button type="button" className="terminal-view__ctx-item" onClick={handleClear}>
               清屏
             </button>

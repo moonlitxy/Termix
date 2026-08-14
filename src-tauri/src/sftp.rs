@@ -22,6 +22,10 @@ pub struct SftpItem {
     pub size: u64,
     pub mtime: i64,
     pub perms: Option<u32>,
+    /// 数值 uid（服务端未返回时为 None；用户名映射在前端/后续增强中处理）
+    pub uid: Option<u32>,
+    /// 数值 gid
+    pub gid: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +110,16 @@ impl SftpService {
         Ok(sftp)
     }
 
+    pub async fn cwd(&self, connection_id: &str) -> Result<String, String> {
+        let sftp = self.session(connection_id).await?;
+        let cwd = sftp.canonicalize(".").await.map_err(|e| {
+            log::error!("sftp: cwd failed conn={connection_id}: {e}");
+            format!("cwd failed: {e}")
+        })?;
+        log::debug!("sftp: cwd conn={connection_id} -> {cwd}");
+        Ok(cwd)
+    }
+
     pub async fn list(&self, connection_id: &str, path: &str) -> Result<Vec<SftpItem>, String> {
         let sftp = self.session(connection_id).await?;
         let entries = sftp.read_dir(path).await.map_err(|e| {
@@ -123,6 +137,8 @@ impl SftpService {
                 size: meta.len(),
                 mtime: meta.mtime.unwrap_or(0) as i64,
                 perms: meta.permissions,
+                uid: meta.uid,
+                gid: meta.gid,
             });
         }
         sort_items(&mut items);
@@ -840,6 +856,8 @@ pub fn local_list(path: &str) -> Result<Vec<SftpItem>, String> {
             size: meta.len(),
             mtime,
             perms: None,
+            uid: None,
+            gid: None,
         });
     }
     sort_items(&mut items);
@@ -1128,6 +1146,8 @@ mod tests {
             size: 0,
             mtime: 0,
             perms: None,
+            uid: None,
+            gid: None,
         }
     }
 

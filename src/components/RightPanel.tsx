@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
+import { resBarColor, resTextColor } from "../lib/resColor";
 import type { Metrics, TransferTask } from "../types";
 
 function formatBytes(n: number): string {
@@ -96,24 +97,37 @@ export function RightPanel() {
     }
     let stopped = false;
     let iv: number | undefined;
+    // busy 防止并发轮询：monitor 命令执行时间可能长于轮询间隔，
+    // 若并发请求会相互覆盖采样，导致网络速率计算出现天文数字
+    let busy = false;
+    let lastTs = 0;
 
     const startTimers = () => {
       clearInterval(iv);
       const interval = loadSettings().monitorInterval;
       const tick = async () => {
+        if (busy) return;
+        busy = true;
+        const ts = Date.now();
         try {
           const m = await ipc.monitorMetrics(connectionId);
           if (stopped) return;
-          if (lastSample.current) {
-            setNetSpeed({
-              rx: Math.max(0, m.netRx - lastSample.current.netRx) / (interval / 1000),
-              tx: Math.max(0, m.netTx - lastSample.current.netTx) / (interval / 1000),
-            });
+          if (lastSample.current && lastTs > 0) {
+            const dt = (ts - lastTs) / 1000; // 实际采样间隔（秒）
+            if (dt > 0) {
+              setNetSpeed({
+                rx: Math.max(0, m.netRx - lastSample.current.netRx) / dt,
+                tx: Math.max(0, m.netTx - lastSample.current.netTx) / dt,
+              });
+            }
           }
           lastSample.current = m;
+          lastTs = ts;
           setMetrics(m);
         } catch {
           /* ignore */
+        } finally {
+          busy = false;
         }
       };
       void tick();
@@ -134,6 +148,9 @@ export function RightPanel() {
   const cpu = metrics ? Math.round(metrics.cpu) : 0;
   const memPct = metrics && metrics.memTotal > 0 ? Math.round((metrics.memUsed / metrics.memTotal) * 100) : 0;
   const disk = metrics ? Math.round(metrics.diskUsedPct) : 0;
+  // 磁盘详情优先取根分区，其次第一个分区
+  const rootDisk =
+    metrics?.disks.find((d) => d.mount === "/") ?? metrics?.disks[0];
 
   return (
     <div className="right-panel">
@@ -157,11 +174,13 @@ export function RightPanel() {
             <span className="res-card__label">
               <Icon name="cpu" size={14} />CPU
             </span>
-            <span className="res-card__value">{cpu}%</span>
+            <span className="res-card__value" style={{ color: resTextColor(cpu) }}>
+              {cpu}%
+            </span>
           </div>
           <div className="res-bar">
             <div
-              className="res-bar__fill res-bar__fill--success"
+              className={"res-bar__fill " + resBarColor(cpu)}
               style={{ width: Math.min(cpu, 100) + "%" }}
             />
           </div>
@@ -171,31 +190,41 @@ export function RightPanel() {
             <span className="res-card__label">
               <Icon name="bar" size={14} />Memory
             </span>
-            <span className="res-card__value">
-              {metrics
-                ? formatBytes(metrics.memUsed) + " / " + formatBytes(metrics.memTotal)
-                : "--"}
+            <span className="res-card__value" style={{ color: resTextColor(memPct) }}>
+              {memPct}%
             </span>
           </div>
           <div className="res-bar">
             <div
-              className="res-bar__fill res-bar__fill--primary"
+              className={"res-bar__fill " + resBarColor(memPct)}
               style={{ width: Math.min(memPct, 100) + "%" }}
             />
+          </div>
+          <div className="res-card__detail">
+            {metrics
+              ? `${formatBytes(metrics.memUsed)} / ${formatBytes(metrics.memTotal)}`
+              : "--"}
           </div>
         </div>
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="folder" size={14} />Disk /
+              <Icon name="folder" size={14} />Disk
             </span>
-            <span className="res-card__value">{disk}%</span>
+            <span className="res-card__value" style={{ color: resTextColor(disk) }}>
+              {disk}%
+            </span>
           </div>
           <div className="res-bar">
             <div
-              className="res-bar__fill res-bar__fill--warning"
+              className={"res-bar__fill " + resBarColor(disk)}
               style={{ width: Math.min(disk, 100) + "%" }}
             />
+          </div>
+          <div className="res-card__detail">
+            {metrics
+              ? `${formatBytes(rootDisk?.used ?? 0)} / ${formatBytes(rootDisk?.total ?? 0)}`
+              : "--"}
           </div>
         </div>
 

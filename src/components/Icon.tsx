@@ -18,6 +18,7 @@ import file from "../assets/icons/file.svg?raw";
 import folder from "../assets/icons/folder.svg?raw";
 import grid2x2 from "../assets/icons/grid-2x2.svg?raw";
 import help from "../assets/icons/help.svg?raw";
+import infoCircle from "../assets/icons/info-circle.svg?raw";
 import key from "../assets/icons/key.svg?raw";
 import logo from "../assets/icons/logo.svg?raw";
 import moreH from "../assets/icons/more-h.svg?raw";
@@ -34,6 +35,7 @@ import sparkles from "../assets/icons/sparkles.svg?raw";
 import terminalSvg from "../assets/icons/terminal.svg?raw";
 import trash from "../assets/icons/trash.svg?raw";
 import upload from "../assets/icons/upload.svg?raw";
+import user from "../assets/icons/user.svg?raw";
 import x from "../assets/icons/x.svg?raw";
 import xCircle from "../assets/icons/x-circle.svg?raw";
 
@@ -58,6 +60,7 @@ const ICONS: Record<string, string> = {
   folder,
   "grid-2x2": grid2x2,
   help,
+  "info-circle": infoCircle,
   key,
   logo,
   "more-h": moreH,
@@ -74,6 +77,7 @@ const ICONS: Record<string, string> = {
   terminal: terminalSvg,
   trash,
   upload,
+  user,
   x,
   "x-circle": xCircle,
 };

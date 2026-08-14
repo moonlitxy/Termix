@@ -81,6 +81,7 @@ export default function App() {
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const activity = useApp((s) => s.activity);
+  const sftpCollapsed = useApp((s) => s.sftpCollapsed);
 
   useEffect(() => {
     const st = useApp.getState();
@@ -105,7 +106,6 @@ export default function App() {
       try {
         const home = await ipc.localHome();
         useApp.setState({ localPath: home });
-        void useApp.getState().loadLocal();
       } catch {
         /* browser mode */
       }
@@ -149,19 +149,44 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  // 切回终端视图或切换标签时恢复终端焦点：键盘输入与历史命令（↑↓）立即可用
+  useEffect(() => {
+    if (activity !== "terminal" || !activeTabId) return;
+    const id = window.setTimeout(() => terminalRegistry.focus(activeTabId), 30);
+    return () => window.clearTimeout(id);
+  }, [activity, activeTabId]);
+
   const renderMain = () => {
-    if (activity === "terminal") {
-      return hasTabs ? (
-        <>
-          <EditorTabs />
-          <div className="workspace__main">
-            {tabs
-              .filter((t) => !t.hidden)
-              .map((tab) => {
-                // 分屏：主标签 + 其 pane 标签并排渲染
-                const panes = tabs.filter((p) => p.splitOf === tab.id);
-                const isActive = tab.id === activeTabId;
-                if (panes.length === 0) {
+    // 终端 / SFTP 共用工作区：SSH 终端窗口与底部输入框常驻，
+    // SFTP 模式下仅将工具栏（连接信息区）替换为远程文件浏览器，实现无缝切换
+    if (activity === "terminal" || activity === "sftp") {
+      if (hasTabs) {
+        return (
+          <>
+            <EditorTabs />
+            <div
+              className={
+                "workspace__main" + (activity === "sftp" ? " workspace__main--sftp" : "")
+              }
+            >
+              {tabs
+                .filter((t) => !t.hidden)
+                .map((tab) => {
+                  // 分屏：主标签 + 其 pane 标签并排渲染
+                  const panes = tabs.filter((p) => p.splitOf === tab.id);
+                  const isActive = tab.id === activeTabId;
+                  if (panes.length === 0) {
+                    return (
+                      <div
+                        key={tab.id}
+                        className={
+                          "workspace__terminal-slot" + (isActive ? " is-active" : "")
+                        }
+                      >
+                        <TerminalView tab={tab} />
+                      </div>
+                    );
+                  }
                   return (
                     <div
                       key={tab.id}
@@ -169,34 +194,41 @@ export default function App() {
                         "workspace__terminal-slot" + (isActive ? " is-active" : "")
                       }
                     >
-                      <TerminalView tab={tab} />
+                      <div className="workspace__split">
+                        <div className="workspace__split-pane">
+                          <TerminalView tab={tab} />
+                        </div>
+                        {panes.map((p) => (
+                          <div className="workspace__split-pane" key={p.id}>
+                            <TerminalView tab={p} />
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   );
+                })}
+            </div>
+            {activity === "sftp" ? (
+              <div
+                className={
+                  "workspace__sftp" + (sftpCollapsed ? " workspace__sftp--collapsed" : "")
                 }
-                return (
-                  <div
-                    key={tab.id}
-                    className={
-                      "workspace__terminal-slot" + (isActive ? " is-active" : "")
-                    }
-                  >
-                    <div className="workspace__split">
-                      <div className="workspace__split-pane">
-                        <TerminalView tab={tab} />
-                      </div>
-                      {panes.map((p) => (
-                        <div className="workspace__split-pane" key={p.id}>
-                          <TerminalView tab={p} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-          <Toolbar />
-          <CommandInput />
-        </>
+              >
+                <Suspense fallback={<ViewLoading />}>
+                  <SftpView />
+                </Suspense>
+              </div>
+            ) : (
+              <Toolbar />
+            )}
+            <CommandInput />
+          </>
+        );
+      }
+      return activity === "sftp" ? (
+        <Suspense fallback={<ViewLoading />}>
+          <SftpView />
+        </Suspense>
       ) : (
         <div className="workspace__empty">
           <span className="workspace__empty-logo">
@@ -204,13 +236,6 @@ export default function App() {
           </span>
           <div className="workspace__empty-text">双击左侧会话开始连接</div>
         </div>
-      );
-    }
-    if (activity === "sftp") {
-      return (
-        <Suspense fallback={<ViewLoading />}>
-          <SftpView />
-        </Suspense>
       );
     }
     if (activity === "forward") {

@@ -273,21 +273,6 @@ export function NewConnectionDialog() {
         )}
 
         <div className="dialog__field">
-          <div className="dialog__field-label dialog__field-label--row">
-            <span>备注</span>
-            <span className="dialog__field-optional">（可选）</span>
-          </div>
-          <div className="ds-input ds-input--block">
-            <textarea
-              value={form.memo}
-              onChange={(e) => set("memo", e.target.value)}
-              placeholder="填写备注说明"
-              rows={2}
-            />
-          </div>
-        </div>
-
-        <div className="dialog__field">
           <label className="dialog__field-label">分组</label>
           <select
             className="ds-select ds-select--block"
@@ -301,6 +286,21 @@ export function NewConnectionDialog() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="dialog__field">
+          <div className="dialog__field-label dialog__field-label--row">
+            <span>备注</span>
+            <span className="dialog__field-optional">（可选）</span>
+          </div>
+          <div className="ds-input ds-input--block">
+            <textarea
+              value={form.memo}
+              onChange={(e) => set("memo", e.target.value)}
+              placeholder="填写备注说明"
+              rows={2}
+            />
+          </div>
         </div>
 
         <div className="dialog__actions">

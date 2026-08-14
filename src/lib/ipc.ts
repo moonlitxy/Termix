@@ -15,6 +15,7 @@ import type {
   SftpItem,
   Snippet,
   SnippetInput,
+  SysInfo,
   TransferProgressEvent,
   TransferTask,
 } from "../types";
@@ -63,6 +64,8 @@ export const ipc = {
   // ---- v0.2: SFTP ----
   sftpList: (connectionId: string, path: string) =>
     invoke<SftpItem[]>("sftp_list", { connectionId, path }),
+  sftpCwd: (connectionId: string) =>
+    invoke<string>("sftp_cwd", { connectionId }),
   sftpMkdir: (connectionId: string, path: string) =>
     invoke<void>("sftp_mkdir", { connectionId, path }),
   sftpRemove: (connectionId: string, path: string, isDir: boolean) =>
@@ -128,6 +131,8 @@ export const ipc = {
     invoke<Metrics>("monitor_metrics", { connectionId }),
   monitorProcesses: (connectionId: string, limit = 20) =>
     invoke<ProcInfo[]>("monitor_processes", { connectionId, limit }),
+  systemInfo: (connectionId: string) =>
+    invoke<SysInfo>("system_info", { connectionId }),
 
   // ---- 安全（主密码） ----
   masterStatus: () => invoke<MasterStatus>("master_status"),

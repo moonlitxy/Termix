@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp, joinPath } from "../store/app";
 import { ipc, onTransferProgress } from "../lib/ipc";
@@ -20,150 +20,92 @@ function formatMtime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-interface PaneProps {
-  title: string;
-  side: "remote" | "local";
-  path: string;
-  items: SftpItem[];
-  selected: SftpItem | null;
-  dropHover: boolean;
-  onSelect: (item: SftpItem | null) => void;
-  onOpen: (item: SftpItem) => void;
-  onUp: () => void;
-  onPathChange: (p: string) => void;
-  onPathSubmit: () => void;
-  onTargetHover: (side: "remote" | "local" | null) => void;
-  onPaneDrop: (e: React.DragEvent) => void;
-  onRowContextMenu: (e: React.MouseEvent, item: SftpItem) => void;
-  onBlankContextMenu: (e: React.MouseEvent) => void;
+/** 权限数值 → 符号模式（rwxr-xr-x；setuid 等特殊位省略展示） */
+function formatPerms(perms?: number, isDir = false): string {
+  if (perms === undefined) return "-";
+  const mode = perms & 0o7777;
+  let out = isDir ? "d" : "-";
+  for (let i = 2; i >= 0; i--) {
+    out += (mode >> (i * 3)) & 4 ? "r" : "-";
+    out += (mode >> (i * 3)) & 2 ? "w" : "-";
+    out += (mode >> (i * 3)) & 1 ? "x" : "-";
+  }
+  return out;
 }
 
-function FsPane({
-  title,
-  side,
-  path,
-  items,
-  selected,
-  dropHover,
-  onSelect,
-  onOpen,
-  onUp,
-  onPathChange,
-  onPathSubmit,
-  onTargetHover,
-  onPaneDrop,
-  onRowContextMenu,
-  onBlankContextMenu,
-}: PaneProps) {
-  return (
-    <div
-      className={"sftp-pane" + (dropHover ? " is-drop-target" : "")}
-      onDragOver={(e) => {
-        e.preventDefault();
-        onTargetHover(side);
-      }}
-      onDragLeave={() => onTargetHover(null)}
-      onDrop={(e) => {
-        e.preventDefault();
-        onTargetHover(null);
-        onPaneDrop(e);
-      }}
-    >
-      <div className="sftp-pane__title">{title}</div>
-      <div className="sftp-pathbar">
-        <button
-          className="ds-btn ds-btn--tertiary ds-btn--sm"
-          type="button"
-          title="上级目录"
-          onClick={onUp}
-        >
-          <Icon name="arrow-up" size={12} />
-        </button>
-        <input
-          className="sftp-pathbar__input"
-          value={path}
-          onChange={(e) => onPathChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onPathSubmit()}
-          spellCheck={false}
-        />
-      </div>
-      <div
-        className="sftp-list"
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onBlankContextMenu(e);
-        }}
-      >
-        {items.map((it) => (
-          <div
-            key={it.path}
-            className={
-              "sftp-row" + (selected?.path === it.path ? " is-active" : "")
-            }
-            draggable={!it.isDir}
-            onDragStart={(e) => {
-              if (it.isDir) return;
-              e.dataTransfer.setData(
-                side === "remote" ? "termix-remote" : "termix-local",
-                it.path
-              );
-              e.dataTransfer.effectAllowed = "copy";
-            }}
-            onClick={() => onSelect(it)}
-            onDoubleClick={() => onOpen(it)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onRowContextMenu(e, it);
-            }}
-            title={it.path}
-          >
-            <span className="sftp-row__icon">
-              <Icon name={it.isDir ? "folder" : "file"} size={13} />
-            </span>
-            <span className="sftp-row__name">{it.name}</span>
-            <span className="sftp-row__meta">
-              {it.isDir ? "目录" : formatSize(it.size)}
-            </span>
-            <span className="sftp-row__mtime">{formatMtime(it.mtime)}</span>
-          </div>
-        ))}
-        {items.length === 0 && <div className="sftp-empty">空目录</div>}
-        <div className="sftp-pane__hint">
-          {side === "remote"
-            ? "可拖拽本地文件到此处上传"
-            : "可拖拽远程文件到此处下载"}
-        </div>
-      </div>
-    </div>
-  );
+/** 用户/用户组（数值 uid/gid，服务端未返回时显示 -） */
+function formatOwner(uid?: number, gid?: number): string {
+  if (uid === undefined && gid === undefined) return "-";
+  return `${uid ?? "-"}/${gid ?? "-"}`;
+}
+
+type SortKey = "name" | "size" | "mtime" | "perms" | "uid";
+type SortDir = "asc" | "desc";
+
+function cmpField(a: SftpItem, b: SftpItem, key: SortKey): number {
+  switch (key) {
+    case "name":
+      return a.name.localeCompare(b.name, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    case "size":
+      return a.size - b.size;
+    case "mtime":
+      return a.mtime - b.mtime;
+    case "perms":
+      return (a.perms ?? -1) - (b.perms ?? -1);
+    case "uid":
+      return (a.uid ?? -1) - (b.uid ?? -1);
+  }
 }
 
 export function SftpView() {
   const sftpContext = useApp((s) => s.sftpContext);
   const remotePath = useApp((s) => s.remotePath);
-  const localPath = useApp((s) => s.localPath);
   const remoteItems = useApp((s) => s.remoteItems);
-  const localItems = useApp((s) => s.localItems);
   const remoteSelected = useApp((s) => s.remoteSelected);
-  const localSelected = useApp((s) => s.localSelected);
+  const remoteLoading = useApp((s) => s.remoteLoading);
   const sessions = useApp((s) => s.sessions);
   const tabs = useApp((s) => s.tabs);
 
   const [remoteDraft, setRemoteDraft] = useState(remotePath);
-  const [localDraft, setLocalDraft] = useState(localPath);
-  const [dropHover, setDropHover] = useState<"remote" | "local" | null>(null);
-  const hoverRef = useRef<"remote" | "local" | null>(null);
+  const [dropHover, setDropHover] = useState(false);
+  const hoverRef = useRef(false);
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
+    key: "name",
+    dir: "asc",
+  });
   const [ctx, setCtx] = useState<{
     x: number;
     y: number;
-    side: "remote" | "local";
     item: SftpItem | null;
   } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const sftpCollapsed = useApp((s) => s.sftpCollapsed);
+  const toggleSftpCollapsed = useApp((s) => s.toggleSftpCollapsed);
   const sessionName = sftpContext
     ? sessions.find((s) => s.id === sftpContext.sessionId)?.name ?? "已连接会话"
     : null;
+
+  // 排序（目录始终优先分组，组内按所选字段升/降序）
+  const sortedItems = useMemo(() => {
+    const arr = [...remoteItems];
+    arr.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      const r = cmpField(a, b, sort.key);
+      return sort.dir === "asc" ? r : -r;
+    });
+    return arr;
+  }, [remoteItems, sort]);
+
+  const toggleSort = (key: SortKey) => {
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" }
+    );
+  };
 
   // 右键菜单：点击外部 / Esc 关闭
   useEffect(() => {
@@ -200,9 +142,6 @@ export function SftpView() {
       case "download":
         if (item) void (item.isDir ? doDownloadDir(item) : doDownload(item));
         break;
-      case "upload":
-        if (item) void (item.isDir ? doUploadDir(item) : doUpload(item));
-        break;
       case "rename":
         if (item) void handleRename(item);
         break;
@@ -225,19 +164,29 @@ export function SftpView() {
   useEffect(() => {
     setRemoteDraft(remotePath);
   }, [remotePath]);
-  useEffect(() => {
-    setLocalDraft(localPath);
-  }, [localPath]);
 
-  // 上传/下载任务完成后刷新对应目录
+  // 挂载时：若已有已连接的会话但尚未建立 sftpContext，
+  // 自动建立并展示根目录 "/"（store.setSftpContext 负责初始路径与加载）
+  useEffect(() => {
+    const st = useApp.getState();
+    if (!st.sftpContext) {
+      const conn = st.tabs.find(
+        (t) => t.connectionId && t.status === "connected"
+      );
+      if (conn?.connectionId) {
+        void st.setSftpContext(conn.sessionId, conn.connectionId);
+      }
+    }
+  }, []);
+
+  // 上传/下载任务完成后刷新对应目录（上传会改变当前远程目录内容，先失效缓存再重载）
   useEffect(() => {
     let un: (() => void) | undefined;
     onTransferProgress((e) => {
       if (e.status === "completed") {
         if (e.direction === "upload") {
+          useApp.getState().invalidateRemoteCache();
           void useApp.getState().loadRemote();
-        } else if (e.direction === "download") {
-          void useApp.getState().loadLocal();
         }
       }
     })
@@ -252,7 +201,7 @@ export function SftpView() {
     };
   }, []);
 
-  // 系统文件拖入（Tauri webview 事件）：拖到远程栏视为上传
+  // 系统文件拖入（Tauri webview 事件）：拖到远程文件列表视为上传
   useEffect(() => {
     if (!("__TAURI__" in window)) return;
     let un: (() => void) | undefined;
@@ -261,15 +210,14 @@ export function SftpView() {
         getCurrentWebview().onDragDropEvent((ev) => {
           const p = ev.payload;
           if (p.type !== "drop" || !p.paths?.length) return;
-          const target = hoverRef.current;
-          console.log("[sftp] system files dropped:", p.paths, "target:", target);
+          console.log("[sftp] system files dropped:", p.paths, "onPane:", hoverRef.current);
           const st = useApp.getState();
           if (!st.sftpContext) {
             window.alert("请先在左侧选择一个已连接的会话，再拖拽文件上传");
             return;
           }
-          if (target !== "remote") {
-            window.alert("请将文件拖到左侧「远程」栏上传");
+          if (!hoverRef.current) {
+            window.alert("请将文件拖到远程文件列表中上传");
             return;
           }
           const failures: string[] = [];
@@ -301,47 +249,6 @@ export function SftpView() {
     };
   }, []);
 
-  const setHover = (side: "remote" | "local" | null) => {
-    hoverRef.current = side;
-    setDropHover(side);
-  };
-
-  // 应用内拖拽：本地行拖到远程栏=上传，远程行拖到本地栏=下载
-  const handlePaneDrop = (side: "remote" | "local") => (e: React.DragEvent) => {
-    const dt = e.dataTransfer;
-    const remotePathData = dt.getData("termix-remote");
-    const localPathData = dt.getData("termix-local");
-    if (side === "remote" && localPathData) {
-      const name = localPathData.split("/").pop() || localPathData;
-      void doUpload({ name, path: localPathData, isDir: false, size: 0, mtime: 0 });
-    } else if (side === "local" && remotePathData) {
-      const name = remotePathData.split("/").pop() || remotePathData;
-      void doDownload({ name, path: remotePathData, isDir: false, size: 0, mtime: 0 });
-    }
-  };
-
-  const doUpload = async (local: SftpItem) => {
-    const st = useApp.getState();
-    if (!st.sftpContext) {
-      window.alert("请先在左侧选择一个已连接的会话，再上传文件");
-      return;
-    }
-    const dest = joinPath(st.remotePath, local.name);
-    console.log("[sftp] upload", { local: local.path, remote: dest, conn: st.sftpContext.connectionId });
-    try {
-      const taskId = await ipc.sftpUpload(
-        st.sftpContext.connectionId,
-        st.sftpContext.sessionId,
-        local.path,
-        dest
-      );
-      console.log("[sftp] upload task started:", taskId);
-    } catch (e) {
-      console.error("[sftp] upload failed:", e);
-      window.alert(`上传 ${local.name} 失败：${String(e)}`);
-    }
-  };
-
   const doDownload = async (remote: SftpItem) => {
     const st = useApp.getState();
     if (!st.sftpContext) {
@@ -361,28 +268,6 @@ export function SftpView() {
     } catch (e) {
       console.error("[sftp] download failed:", e);
       window.alert(`下载 ${remote.name} 失败：${String(e)}`);
-    }
-  };
-
-  const doUploadDir = async (local: SftpItem) => {
-    const st = useApp.getState();
-    if (!st.sftpContext) {
-      window.alert("请先在左侧选择一个已连接的会话，再上传目录");
-      return;
-    }
-    const dest = joinPath(st.remotePath, local.name);
-    console.log("[sftp] upload-dir", { local: local.path, remote: dest, conn: st.sftpContext.connectionId });
-    try {
-      const taskId = await ipc.sftpUploadDir(
-        st.sftpContext.connectionId,
-        st.sftpContext.sessionId,
-        local.path,
-        dest
-      );
-      console.log("[sftp] upload-dir task started:", taskId);
-    } catch (e) {
-      console.error("[sftp] upload-dir failed:", e);
-      window.alert(`上传目录 ${local.name} 失败：${String(e)}`);
     }
   };
 
@@ -408,55 +293,59 @@ export function SftpView() {
     }
   };
 
-  const handleOpen = (side: "remote" | "local", item: SftpItem) => {
+  const handleOpen = (item: SftpItem) => {
     const st = useApp.getState();
     if (item.isDir) {
-      void (side === "remote"
-        ? st.openRemoteDir(item)
-        : st.openLocalDir(item));
-    } else if (side === "remote") {
-      void doDownload(item);
+      void st.openRemoteDir(item);
     } else {
-      void doUpload(item);
+      void doDownload(item);
     }
   };
 
+  // 刷新：失效缓存后强制重新拉取
   const handleRefresh = () => {
-    void useApp.getState().loadRemote();
-    void useApp.getState().loadLocal();
+    const st = useApp.getState();
+    st.invalidateRemoteCache();
+    void st.loadRemote();
   };
 
   const handleMkdir = async () => {
-    if (!sftpContext) return;
+    const st = useApp.getState();
+    if (!st.sftpContext) return;
     const name = window.prompt("新建文件夹名称");
     if (!name) return;
     try {
-      await ipc.sftpMkdir(sftpContext.connectionId, joinPath(remotePath, name));
-      void useApp.getState().loadRemote();
+      await ipc.sftpMkdir(st.sftpContext.connectionId, joinPath(st.remotePath, name));
+      st.invalidateRemoteCache();
+      void st.loadRemote();
     } catch (e) {
       window.alert(String(e));
     }
   };
 
   const handleDelete = async (item: SftpItem) => {
-    if (!sftpContext) return;
+    const st = useApp.getState();
+    if (!st.sftpContext) return;
     if (!window.confirm(`删除 ${item.name}？`)) return;
     try {
-      await ipc.sftpRemove(sftpContext.connectionId, item.path, item.isDir);
-      void useApp.getState().loadRemote();
+      await ipc.sftpRemove(st.sftpContext.connectionId, item.path, item.isDir);
+      st.invalidateRemoteCache();
+      void st.loadRemote();
     } catch (e) {
       window.alert(String(e));
     }
   };
 
   const handleRename = async (item: SftpItem) => {
-    if (!sftpContext) return;
+    const st = useApp.getState();
+    if (!st.sftpContext) return;
     const name = window.prompt("新名称", item.name);
     if (!name || name === item.name) return;
     const newPath = joinPath(item.path.replace(/\/[^/]+$/, ""), name);
     try {
-      await ipc.sftpRename(sftpContext.connectionId, item.path, newPath);
-      void useApp.getState().loadRemote();
+      await ipc.sftpRename(st.sftpContext.connectionId, item.path, newPath);
+      st.invalidateRemoteCache();
+      void st.loadRemote();
     } catch (e) {
       window.alert(String(e));
     }
@@ -486,8 +375,30 @@ export function SftpView() {
         <span className="sftp-toolbar__session">
           <Icon name="folder" size={13} />
           {sessionName ?? "SFTP"}
-          <span className="sftp-toolbar__path">{remotePath}</span>
         </span>
+        <div className="sftp-pathbar">
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--sm"
+            type="button"
+            title="上级目录"
+            onClick={() => void useApp.getState().upRemote()}
+          >
+            <Icon name="arrow-up" size={12} />
+          </button>
+          <input
+            className="sftp-pathbar__input"
+            value={remoteDraft}
+            onChange={(e) => setRemoteDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                useApp.setState({ remotePath: remoteDraft });
+                useApp.getState().invalidateRemoteCache();
+                void useApp.getState().loadRemote();
+              }
+            }}
+            spellCheck={false}
+          />
+        </div>
         <div className="sftp-toolbar__actions">
           <button
             className="ds-btn ds-btn--secondary ds-btn--sm"
@@ -521,20 +432,6 @@ export function SftpView() {
               <Icon name="trash" size={12} />删除
             </button>
           )}
-          {localSelected && (
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm"
-              type="button"
-              onClick={() =>
-                void (localSelected.isDir
-                  ? doUploadDir(localSelected)
-                  : doUpload(localSelected))
-              }
-            >
-              <Icon name="upload" size={12} />
-              {localSelected.isDir ? "上传目录" : "上传"}
-            </button>
-          )}
           {remoteSelected && (
             <button
               className="ds-btn ds-btn--secondary ds-btn--sm"
@@ -549,60 +446,143 @@ export function SftpView() {
               {remoteSelected.isDir ? "下载目录" : "下载"}
             </button>
           )}
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title={
+              sftpCollapsed
+                ? "展开面板：显示远程文件列表（文件名、大小、类型、修改时间、权限、用户/组）"
+                : "收起面板：隐藏文件列表，仅保留工具栏条"
+            }
+            onClick={toggleSftpCollapsed}
+          >
+            <Icon name={sftpCollapsed ? "chevron-up" : "chevron-down"} size={14} />
+          </button>
         </div>
       </div>
-      <div className="sftp-panes">
-        <FsPane
-          title="远程"
-          side="remote"
-          path={remoteDraft}
-          items={remoteItems}
-          selected={remoteSelected}
-          dropHover={dropHover === "remote"}
-          onSelect={useApp.getState().selectRemote}
-          onOpen={(it) => handleOpen("remote", it)}
-          onUp={() => void useApp.getState().upRemote()}
-          onPathChange={setRemoteDraft}
-          onPathSubmit={() => {
-            useApp.setState({ remotePath: remoteDraft });
-            void useApp.getState().loadRemote();
+      {!sftpCollapsed && (
+        <div
+          className={"sftp-list sftp-list--remote" + (dropHover ? " is-drop-target" : "")}
+          onDragOver={(e) => {
+            e.preventDefault();
+            hoverRef.current = true;
+            setDropHover(true);
           }}
-          onTargetHover={setHover}
-          onPaneDrop={handlePaneDrop("remote")}
-          onRowContextMenu={(e, it) => {
-            useApp.getState().selectRemote(it);
-            setCtx({ x: e.clientX, y: e.clientY, side: "remote", item: it });
+          onDragLeave={() => {
+            hoverRef.current = false;
+            setDropHover(false);
           }}
-          onBlankContextMenu={(e) =>
-            setCtx({ x: e.clientX, y: e.clientY, side: "remote", item: null })
-          }
-        />
-        <FsPane
-          title="本地"
-          side="local"
-          path={localDraft}
-          items={localItems}
-          selected={localSelected}
-          dropHover={dropHover === "local"}
-          onSelect={useApp.getState().selectLocal}
-          onOpen={(it) => handleOpen("local", it)}
-          onUp={() => void useApp.getState().upLocal()}
-          onPathChange={setLocalDraft}
-          onPathSubmit={() => {
-            useApp.setState({ localPath: localDraft });
-            void useApp.getState().loadLocal();
+          onDrop={(e) => {
+            e.preventDefault();
+            hoverRef.current = false;
+            setDropHover(false);
           }}
-          onTargetHover={setHover}
-          onPaneDrop={handlePaneDrop("local")}
-          onRowContextMenu={(e, it) => {
-            useApp.getState().selectLocal(it);
-            setCtx({ x: e.clientX, y: e.clientY, side: "local", item: it });
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setCtx({ x: e.clientX, y: e.clientY, item: null });
           }}
-          onBlankContextMenu={(e) =>
-            setCtx({ x: e.clientX, y: e.clientY, side: "local", item: null })
-          }
-        />
-      </div>
+        >
+          <div className="sftp-head">
+            <button
+              type="button"
+              className={
+                "sftp-head__cell sftp-head__cell--name" +
+                (sort.key === "name" ? " is-sorted" : "")
+              }
+              title="按名称排序"
+              onClick={() => toggleSort("name")}
+            >
+              文件名{sort.key === "name" && (sort.dir === "asc" ? "↑" : "↓")}
+            </button>
+            <button
+              type="button"
+              className={
+                "sftp-head__cell" + (sort.key === "size" ? " is-sorted" : "")
+              }
+              title="按大小排序"
+              onClick={() => toggleSort("size")}
+            >
+              大小{sort.key === "size" && (sort.dir === "asc" ? "↑" : "↓")}
+            </button>
+            <span className="sftp-head__cell">类型</span>
+            <button
+              type="button"
+              className={
+                "sftp-head__cell" + (sort.key === "mtime" ? " is-sorted" : "")
+              }
+              title="按修改时间排序"
+              onClick={() => toggleSort("mtime")}
+            >
+              修改时间{sort.key === "mtime" && (sort.dir === "asc" ? "↑" : "↓")}
+            </button>
+            <button
+              type="button"
+              className={
+                "sftp-head__cell" + (sort.key === "perms" ? " is-sorted" : "")
+              }
+              title="按权限排序"
+              onClick={() => toggleSort("perms")}
+            >
+              权限{sort.key === "perms" && (sort.dir === "asc" ? "↑" : "↓")}
+            </button>
+            <button
+              type="button"
+              className={
+                "sftp-head__cell" + (sort.key === "uid" ? " is-sorted" : "")
+              }
+              title="按用户/组排序"
+              onClick={() => toggleSort("uid")}
+            >
+              用户/组{sort.key === "uid" && (sort.dir === "asc" ? "↑" : "↓")}
+            </button>
+          </div>
+          {remoteLoading && <div className="sftp-empty">加载中…</div>}
+          {!remoteLoading &&
+            sortedItems.map((it) => (
+              <div
+                key={it.path}
+                className={
+                  "sftp-row" + (remoteSelected?.path === it.path ? " is-active" : "")
+                }
+                onClick={() => useApp.getState().selectRemote(it)}
+                onDoubleClick={() => handleOpen(it)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  useApp.getState().selectRemote(it);
+                  setCtx({ x: e.clientX, y: e.clientY, item: it });
+                }}
+                title={it.path}
+              >
+                <span className="sftp-row__name">
+                  <span className="sftp-row__icon">
+                    <Icon name={it.isDir ? "folder" : "file"} size={13} />
+                  </span>
+                  <span className="sftp-row__label">{it.name}</span>
+                </span>
+                <span className="sftp-row__cell sftp-row__cell--num">
+                  {it.isDir ? "-" : formatSize(it.size)}
+                </span>
+                <span className="sftp-row__cell">
+                  {it.isDir ? "目录" : "文件"}
+                </span>
+                <span className="sftp-row__cell sftp-row__cell--time">
+                  {formatMtime(it.mtime)}
+                </span>
+                <span className="sftp-row__cell sftp-row__cell--perms">
+                  {formatPerms(it.perms, it.isDir)}
+                </span>
+                <span className="sftp-row__cell">
+                  {formatOwner(it.uid, it.gid)}
+                </span>
+              </div>
+            ))}
+          {!remoteLoading && remoteItems.length === 0 && (
+            <div className="sftp-empty">空目录</div>
+          )}
+          <div className="sftp-pane__hint">可拖拽本地文件到此处上传</div>
+        </div>
+      )}
 
       {ctx && (
         <div
@@ -611,7 +591,7 @@ export function SftpView() {
           style={{ left: ctx.x, top: ctx.y }}
           onClick={(e) => e.stopPropagation()}
         >
-          {sftpContextMenu(ctx.side, ctx.item).map((m) => (
+          {sftpContextMenu("remote", ctx.item).map((m) => (
             <Fragment key={m.id}>
               {m.dividerBefore && <div className="ctx-menu__sep" />}
               <button

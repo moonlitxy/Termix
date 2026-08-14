@@ -175,6 +175,21 @@ pub struct ProcInfo {
     pub cmd: String,
 }
 
+/// 服务器系统信息（系统信息模块）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SysInfo {
+    pub os_name: String,
+    pub os_version: String,
+    pub kernel: String,
+    pub arch: String,
+    pub cpu_cores: u32,
+    pub cpu_model: String,
+    pub mem_total: u64,
+    pub mem_used: u64,
+    pub disks: Vec<DiskInfo>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
