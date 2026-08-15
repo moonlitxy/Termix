@@ -100,7 +100,7 @@ export function SnippetsView() {
     <div className="sn-view">
       <div className="fw-toolbar">
         <span className="fw-toolbar__title">命令片段</span>
-        <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" onClick={openNew}>
+        <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="新建命令片段" onClick={openNew}>
           <Icon name="plus" size={12} />新建片段
         </button>
       </div>
@@ -154,6 +154,7 @@ export function SnippetsView() {
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
+                title="关闭"
                 onClick={() => setModalOpen(false)}
               >
                 <Icon name="x" size={14} />
@@ -194,10 +195,10 @@ export function SnippetsView() {
               </select>
             </div>
             <div className="modal-actions">
-              <button className="ds-btn ds-btn--secondary" type="button" onClick={() => setModalOpen(false)}>
+              <button className="ds-btn ds-btn--secondary" type="button" title="取消：放弃本次修改" onClick={() => setModalOpen(false)}>
                 取消
               </button>
-              <button className="ds-btn ds-btn--brand" type="button" onClick={() => void save()}>
+              <button className="ds-btn ds-btn--brand" type="button" title="保存命令片段" onClick={() => void save()}>
                 保存
               </button>
             </div>
@@ -212,6 +213,7 @@ export function SnippetsView() {
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
+                title="关闭"
                 onClick={() => setVarModal(null)}
               >
                 <Icon name="x" size={14} />
@@ -232,10 +234,10 @@ export function SnippetsView() {
               </div>
             ))}
             <div className="modal-actions">
-              <button className="ds-btn ds-btn--secondary" type="button" onClick={() => setVarModal(null)}>
+              <button className="ds-btn ds-btn--secondary" type="button" title="取消：放弃插入" onClick={() => setVarModal(null)}>
                 取消
               </button>
-              <button className="ds-btn ds-btn--brand" type="button" onClick={() => void applyVars()}>
+              <button className="ds-btn ds-btn--brand" type="button" title="插入：替换变量后发送到终端" onClick={() => void applyVars()}>
                 插入
               </button>
             </div>

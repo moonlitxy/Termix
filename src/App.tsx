@@ -1,15 +1,16 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { useApp } from "./store/app";
+import { useMonitor, selectMonitorConnection } from "./store/monitor";
 import { TitleBar } from "./components/TitleBar";
 import { ActivityRail } from "./components/ActivityRail";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { EditorTabs } from "./components/EditorTabs";
 import { TerminalView } from "./components/TerminalView";
-import { Toolbar } from "./components/Toolbar";
 import { CommandInput } from "./components/CommandInput";
 import { RightPanel } from "./components/RightPanel";
 import { StatusBar } from "./components/StatusBar";
 import { NewConnectionDialog } from "./components/NewConnectionDialog";
+import { GlobalTooltip } from "./components/GlobalTooltip";
 import { Icon } from "./components/Icon";
 import { ipc, onTransferProgress } from "./lib/ipc";
 import { terminalRegistry } from "./lib/terminalRegistry";
@@ -82,6 +83,14 @@ export default function App() {
   const activeTabId = useApp((s) => s.activeTabId);
   const activity = useApp((s) => s.activity);
   const sftpCollapsed = useApp((s) => s.sftpCollapsed);
+  const sftpContext = useApp((s) => s.sftpContext);
+
+  // 全局唯一监控轮询：跟随连接状态（终端右侧资源监控与「监控」模块共享同一数据源，
+  // 由本组件统一驱动 useMonitor.sync，两处展示的数据完全一致）
+  const monitorConnId = selectMonitorConnection(sftpContext, tabs);
+  useEffect(() => {
+    useMonitor.getState().sync(monitorConnId);
+  }, [monitorConnId]);
 
   useEffect(() => {
     const st = useApp.getState();
@@ -132,7 +141,7 @@ export default function App() {
         if (tab?.connectionId && tab.shellId) {
           void ipc.terminalDestroy(tab.connectionId, tab.shellId);
           void ipc.sessionDisconnect(tab.connectionId);
-          st.updateTab(tab.id, { status: "disconnected" });
+          st.updateTab(tab.id, { status: "disconnected", manualClosed: true });
         }
       } else if (e.key === "=" || e.key === "+") {
         e.preventDefault();
@@ -157,22 +166,50 @@ export default function App() {
   }, [activity, activeTabId]);
 
   const renderMain = () => {
-    // 终端 / SFTP 共用工作区：SSH 终端窗口与底部输入框常驻，
-    // SFTP 模式下仅将工具栏（连接信息区）替换为远程文件浏览器，实现无缝切换
-    if (activity === "terminal" || activity === "sftp") {
-      if (hasTabs) {
-        return (
-          <>
-            <EditorTabs />
-            <div
-              className={
-                "workspace__main" + (activity === "sftp" ? " workspace__main--sftp" : "")
-              }
-            >
+    // 终端与文件（原 SFTP）已整合为统一模块：SSH 终端窗口与底部输入框常驻，
+    // 底部面板（文件）展示远程文件系统，替代原连接信息工具栏。
+    // 终端工作区始终挂载：切换到监控/设置等其他模块时仅隐藏（display:none）而不卸载，
+    // 避免 xterm 实例被销毁导致切回后 SSH 会话输出与状态丢失。
+    const isTerm = activity === "terminal" || activity === "sftp";
+    let activityView: ReactNode = null;
+    if (activity === "forward") {
+      activityView = (
+        <Suspense fallback={<ViewLoading />}>
+          <ForwardView />
+        </Suspense>
+      );
+    } else if (activity === "snippets") {
+      activityView = (
+        <Suspense fallback={<ViewLoading />}>
+          <SnippetsView />
+        </Suspense>
+      );
+    } else if (activity === "monitor") {
+      activityView = (
+        <Suspense fallback={<ViewLoading />}>
+          <MonitorView />
+        </Suspense>
+      );
+    } else if (activity === "settings") {
+      activityView = (
+        <Suspense fallback={<ViewLoading />}>
+          <SettingsView />
+        </Suspense>
+      );
+    } else if (!isTerm) {
+      activityView = <Placeholder id={activity} />;
+    }
+
+    return (
+      <>
+        <div className={"workspace__terminal-stack" + (isTerm ? "" : " is-hidden")}>
+          {hasTabs && <EditorTabs />}
+          {hasTabs ? (
+            <div className="workspace__main workspace__main--files">
               {tabs
                 .filter((t) => !t.hidden)
                 .map((tab) => {
-                  // 分屏：主标签 + 其 pane 标签并排渲染
+                  // 分屏 pane 标签（兼容历史数据）：主标签 + 其 pane 标签并排渲染
                   const panes = tabs.filter((p) => p.splitOf === tab.id);
                   const isActive = tab.id === activeTabId;
                   if (panes.length === 0) {
@@ -208,65 +245,36 @@ export default function App() {
                   );
                 })}
             </div>
-            {activity === "sftp" ? (
-              <div
-                className={
-                  "workspace__sftp" + (sftpCollapsed ? " workspace__sftp--collapsed" : "")
-                }
-              >
-                <Suspense fallback={<ViewLoading />}>
-                  <SftpView />
-                </Suspense>
-              </div>
+          ) : isTerm ? (
+            activity === "sftp" ? (
+              <Suspense fallback={<ViewLoading />}>
+                <SftpView />
+              </Suspense>
             ) : (
-              <Toolbar />
-            )}
-            <CommandInput />
-          </>
-        );
-      }
-      return activity === "sftp" ? (
-        <Suspense fallback={<ViewLoading />}>
-          <SftpView />
-        </Suspense>
-      ) : (
-        <div className="workspace__empty">
-          <span className="workspace__empty-logo">
-            <Icon name="logo" size={56} />
-          </span>
-          <div className="workspace__empty-text">双击左侧会话开始连接</div>
+              <div className="workspace__empty">
+                <span className="workspace__empty-logo">
+                  <Icon name="logo" size={56} />
+                </span>
+                <div className="workspace__empty-text">双击左侧会话开始连接</div>
+              </div>
+            )
+          ) : null}
+          {hasTabs && (
+            <div
+              className={
+                "workspace__sftp" + (sftpCollapsed ? " workspace__sftp--collapsed" : "")
+              }
+            >
+              <Suspense fallback={<ViewLoading />}>
+                <SftpView />
+              </Suspense>
+            </div>
+          )}
+          {hasTabs && <CommandInput />}
         </div>
-      );
-    }
-    if (activity === "forward") {
-      return (
-        <Suspense fallback={<ViewLoading />}>
-          <ForwardView />
-        </Suspense>
-      );
-    }
-    if (activity === "snippets") {
-      return (
-        <Suspense fallback={<ViewLoading />}>
-          <SnippetsView />
-        </Suspense>
-      );
-    }
-    if (activity === "monitor") {
-      return (
-        <Suspense fallback={<ViewLoading />}>
-          <MonitorView />
-        </Suspense>
-      );
-    }
-    if (activity === "settings") {
-      return (
-        <Suspense fallback={<ViewLoading />}>
-          <SettingsView />
-        </Suspense>
-      );
-    }
-    return <Placeholder id={activity} />;
+        {!isTerm && activityView}
+      </>
+    );
   };
 
   return (
@@ -280,6 +288,7 @@ export default function App() {
       </div>
       <StatusBar />
       <NewConnectionDialog />
+      <GlobalTooltip />
     </div>
   );
 }

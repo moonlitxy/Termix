@@ -22,10 +22,21 @@ pub struct SftpItem {
     pub size: u64,
     pub mtime: i64,
     pub perms: Option<u32>,
-    /// 数值 uid（服务端未返回时为 None；用户名映射在前端/后续增强中处理）
+    /// 数值 uid（服务端未返回时为 None）
     pub uid: Option<u32>,
     /// 数值 gid
     pub gid: Option<u32>,
+    /// 用户名（由 /etc/passwd 映射，映射不可用时为 None）
+    pub user_name: Option<String>,
+    /// 组名（由 /etc/group 映射）
+    pub group_name: Option<String>,
+}
+
+/// 服务端 uid/gid → 名称映射（按连接懒加载并缓存）。
+#[derive(Default, Clone)]
+struct IdMap {
+    users: std::collections::HashMap<u32, String>,
+    groups: std::collections::HashMap<u32, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +68,8 @@ pub struct SftpService {
     tasks: Arc<Mutex<HashMap<String, TransferTask>>>,
     cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pauses: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// 连接 → uid/gid 名称映射缓存
+    idmap: Mutex<HashMap<String, IdMap>>,
 }
 
 impl SftpService {
@@ -67,6 +80,7 @@ impl SftpService {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             cancels: Arc::new(Mutex::new(HashMap::new())),
             pauses: Arc::new(Mutex::new(HashMap::new())),
+            idmap: Mutex::new(HashMap::new()),
         }
     }
 
@@ -139,11 +153,69 @@ impl SftpService {
                 perms: meta.permissions,
                 uid: meta.uid,
                 gid: meta.gid,
+                user_name: None,
+                group_name: None,
             });
         }
         sort_items(&mut items);
+        // 补充信息：目录真实占用（du）与 uid/gid 名称映射（懒加载，失败静默降级）
+        self.enrich(connection_id, path, &mut items).await;
         log::debug!("sftp: list conn={connection_id} path={path} -> {} entries", items.len());
         Ok(items)
+    }
+
+    /// 为列表补充目录占用大小与用户/组名称。
+    /// - 目录大小：SFTP 协议仅返回目录自身元数据（约 4KB），
+    ///   用 `du -sb <path>/*` 获取子项真实占用字节数；
+    /// - 用户/组：读取 /etc/passwd、/etc/group 构建 uid/gid → 名称映射并缓存。
+    /// 任一步失败（权限/超时/命令不存在）都静默忽略，保留原始数据。
+    async fn enrich(&self, connection_id: &str, path: &str, items: &mut [SftpItem]) {
+        let need_du = items.iter().any(|i| i.is_dir);
+        let need_idmap = items.iter().any(|i| i.uid.is_some() || i.gid.is_some());
+        if !need_du && !need_idmap {
+            return;
+        }
+        // 组装一条命令，用唯一标记分隔三段输出
+        let mut cmd = String::new();
+        if need_du {
+            let quoted = path.replace('\'', "'\\''");
+            cmd.push_str(&format!("du -sb '{quoted}'/* 2>/dev/null"));
+        }
+        if need_idmap {
+            if !cmd.is_empty() {
+                cmd.push_str("; echo __TERMIX_SEP__; ");
+            }
+            cmd.push_str("cat /etc/passwd 2>/dev/null; echo __TERMIX_SEP__; cat /etc/group 2>/dev/null");
+        }
+        let out = match self.ssh.exec_command(connection_id, &cmd).await {
+            Ok(o) => o,
+            Err(_) => return,
+        };
+        let parts: Vec<&str> = out.split("__TERMIX_SEP__").collect();
+        if need_du {
+            for line in parts.first().unwrap_or(&"").lines() {
+                if let Some((size_s, full)) = line.rsplit_once('\t') {
+                    if let (Ok(size), Some(name)) =
+                        (size_s.trim().parse::<u64>(), full.rsplit('/').next())
+                    {
+                        if let Some(it) = items.iter_mut().find(|i| i.is_dir && i.name == name) {
+                            it.size = size;
+                        }
+                    }
+                }
+            }
+        }
+        if need_idmap {
+            let map = IdMap {
+                users: parse_passwd_map(parts.get(1).copied().unwrap_or("")),
+                groups: parse_group_map(parts.get(2).copied().unwrap_or("")),
+            };
+            self.idmap.lock().await.insert(connection_id.to_string(), map.clone());
+            for it in items.iter_mut() {
+                it.user_name = it.uid.and_then(|u| map.users.get(&u).cloned());
+                it.group_name = it.gid.and_then(|g| map.groups.get(&g).cloned());
+            }
+        }
     }
 
     pub async fn mkdir(&self, connection_id: &str, path: &str) -> Result<(), String> {
@@ -152,6 +224,26 @@ impl SftpService {
         sftp.create_dir(path).await.map_err(|e| {
             log::error!("sftp: mkdir failed conn={connection_id} path={path}: {e}");
             e.to_string()
+        })
+    }
+
+    /// 新建空文件：以 CREATE|TRUNCATE|WRITE 打开后立即关闭。
+    pub async fn create_file(&self, connection_id: &str, path: &str) -> Result<(), String> {
+        let sftp = self.session(connection_id).await?;
+        log::info!("sftp: create_file conn={connection_id} path={path}");
+        let file = sftp
+            .open_with_flags(
+                path,
+                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+            )
+            .await
+            .map_err(|e| {
+                log::error!("sftp: create_file open failed conn={connection_id} path={path}: {e}");
+                format!("create file failed: {e}")
+            })?;
+        file.close().await.map_err(|e| {
+            log::error!("sftp: create_file close failed conn={connection_id} path={path}: {e}");
+            format!("close file failed: {e}")
         })
     }
 
@@ -520,8 +612,9 @@ impl SftpService {
         .await
     }
 
-    /// 会话断开时释放 SFTP 会话缓存。
+    /// 会话断开时释放 SFTP 会话缓存与用户/组映射缓存。
     pub async fn drop_session(&self, connection_id: &str) {
+        self.idmap.lock().await.remove(connection_id);
         if let Some(s) = self.sessions.lock().await.remove(connection_id) {
             log::info!("sftp: closing SFTP session for connection {connection_id}");
             let _ = s.close().await;
@@ -833,6 +926,34 @@ fn sort_items(items: &mut Vec<SftpItem>) {
     });
 }
 
+/// 解析 /etc/passwd：每行 `name:x:uid:gid:...`，构建 uid → 用户名映射。
+fn parse_passwd_map(s: &str) -> std::collections::HashMap<u32, String> {
+    let mut map = std::collections::HashMap::new();
+    for line in s.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.len() >= 3 {
+            if let Ok(uid) = f[2].trim().parse::<u32>() {
+                map.insert(uid, f[0].to_string());
+            }
+        }
+    }
+    map
+}
+
+/// 解析 /etc/group：每行 `name:x:gid:members`，构建 gid → 组名映射。
+fn parse_group_map(s: &str) -> std::collections::HashMap<u32, String> {
+    let mut map = std::collections::HashMap::new();
+    for line in s.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.len() >= 3 {
+            if let Ok(gid) = f[2].trim().parse::<u32>() {
+                map.insert(gid, f[0].to_string());
+            }
+        }
+    }
+    map
+}
+
 /// 本地文件系统辅助：列出目录与获取主目录。
 pub fn local_list(path: &str) -> Result<Vec<SftpItem>, String> {
     let rd = std::fs::read_dir(path).map_err(|e| format!("read_dir failed: {e}"))?;
@@ -858,6 +979,8 @@ pub fn local_list(path: &str) -> Result<Vec<SftpItem>, String> {
             perms: None,
             uid: None,
             gid: None,
+            user_name: None,
+            group_name: None,
         });
     }
     sort_items(&mut items);
@@ -1148,6 +1271,8 @@ mod tests {
             perms: None,
             uid: None,
             gid: None,
+            user_name: None,
+            group_name: None,
         }
     }
 
@@ -1209,6 +1334,31 @@ mod tests {
     fn local_list_missing_dir_returns_err() {
         let dir = std::env::temp_dir().join("termix_no_such_dir_xyz");
         assert!(local_list(&dir.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn parse_passwd_and_group_map() {
+        let passwd = "root:x:0:0:root:/root:/bin/bash\n\
+            daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin";
+        let users = parse_passwd_map(passwd);
+        assert_eq!(users.get(&0).map(String::as_str), Some("root"));
+        assert_eq!(users.get(&1).map(String::as_str), Some("daemon"));
+        assert!(users.get(&999).is_none());
+
+        let group = "root:x:0:\n\
+            staff:x:1000:alice,bob";
+        let groups = parse_group_map(group);
+        assert_eq!(groups.get(&0).map(String::as_str), Some("root"));
+        assert_eq!(groups.get(&1000).map(String::as_str), Some("staff"));
+        assert!(groups.get(&999).is_none());
+    }
+
+    #[test]
+    fn parse_id_maps_ignore_malformed() {
+        let users = parse_passwd_map("not-a-line\n:x:\nuser:x:abc:xyz");
+        assert!(users.is_empty());
+        let groups = parse_group_map("");
+        assert!(groups.is_empty());
     }
 
     #[test]

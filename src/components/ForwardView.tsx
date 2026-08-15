@@ -96,6 +96,7 @@ export function ForwardView() {
         <button
           className="ds-btn ds-btn--brand ds-btn--sm"
           type="button"
+          title="新建端口转发规则"
           onClick={openNew}
         >
           <Icon name="plus" size={12} />新建规则
@@ -126,6 +127,7 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
+                title={r.enabled ? "停用该转发规则" : "启用该转发规则"}
                 onClick={() => {
                   console.log(`[forward] ${r.enabled ? "stop" : "start"} rule`, r.id, r.name);
                   void (r.enabled ? ipc.forwardStop(r.id) : ipc.forwardStart(r.id))
@@ -139,6 +141,7 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
+                title="编辑该转发规则"
                 onClick={() => openEdit(r)}
               >
                 <Icon name="edit" size={12} />
@@ -147,6 +150,7 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--danger-subtle ds-btn--sm"
                 type="button"
+                title="删除该转发规则"
                 onClick={() => {
                   if (window.confirm(`删除规则 ${r.name}？`)) {
                     void ipc.forwardDelete(r.id).then(load);
@@ -168,6 +172,7 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
+                title="关闭"
                 onClick={() => setModalOpen(false)}
               >
                 <Icon name="x" size={14} />
@@ -259,12 +264,13 @@ export function ForwardView() {
               </select>
             </div>
             <div className="modal-actions">
-              <button className="ds-btn ds-btn--secondary" type="button" onClick={() => setModalOpen(false)}>
+              <button className="ds-btn ds-btn--secondary" type="button" title="取消：放弃本次修改" onClick={() => setModalOpen(false)}>
                 取消
               </button>
               <button
                 className="ds-btn ds-btn--brand"
                 type="button"
+                title="保存转发规则"
                 onClick={() => void save()}
               >
                 保存

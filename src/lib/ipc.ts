@@ -68,6 +68,8 @@ export const ipc = {
     invoke<string>("sftp_cwd", { connectionId }),
   sftpMkdir: (connectionId: string, path: string) =>
     invoke<void>("sftp_mkdir", { connectionId, path }),
+  sftpCreateFile: (connectionId: string, path: string) =>
+    invoke<void>("sftp_create_file", { connectionId, path }),
   sftpRemove: (connectionId: string, path: string, isDir: boolean) =>
     invoke<void>("sftp_remove", { connectionId, path, isDir }),
   sftpRename: (connectionId: string, oldPath: string, newPath: string) =>
@@ -170,3 +172,7 @@ export function onTransferProgress(
 ): Promise<UnlistenFn> {
   return listen<TransferProgressEvent>("transfer-progress", (ev) => cb(ev.payload));
 }
+
+/** 命令历史变更事件：终端直接输入 / 底部输入框 / 快捷命令任一来源写入历史后广播，
+    底部输入框监听后刷新历史列表，保证 ↑↓ 与「历史」按钮始终是最新的双向同步数据 */
+export const HISTORY_CHANGED_EVENT = "termix:history-changed";

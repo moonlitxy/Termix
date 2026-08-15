@@ -73,6 +73,8 @@ export interface Tab {
   hidden?: boolean;
   /** 分屏 pane 标签：所属主标签 id */
   splitOf?: string;
+  /** 用户手动断开标记：置位后意外断开不再自动重连 */
+  manualClosed?: boolean;
 }
 
 // ---- v0.2: SFTP ----
@@ -88,6 +90,10 @@ export interface SftpItem {
   uid?: number;
   /** 数值 gid（服务端未返回时缺省） */
   gid?: number;
+  /** 用户名（服务端 /etc/passwd 映射，缺省时用数值 uid） */
+  userName?: string;
+  /** 组名（服务端 /etc/group 映射） */
+  groupName?: string;
 }
 
 export interface TransferTask {
@@ -185,6 +191,12 @@ export interface Metrics {
   netTx: number;
   netConns: number;
   disks: DiskInfo[];
+  /** 系统已运行时间（秒） */
+  uptime: number;
+  /** 系统负载（1/5/15 分钟） */
+  load1: number;
+  load5: number;
+  load15: number;
 }
 
 export interface ProcInfo {

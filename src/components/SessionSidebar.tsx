@@ -20,7 +20,6 @@ export function SessionSidebar() {
   const sessions = useApp(selectFilteredSessions);
   const groups = useApp((s) => s.groups);
   const tabs = useApp((s) => s.tabs);
-  const activity = useApp((s) => s.activity);
   const openNewConnection = useApp((s) => s.openNewConnection);
   const addTab = useApp((s) => s.addTab);
   const loadSessions = useApp((s) => s.loadSessions);
@@ -83,15 +82,12 @@ export function SessionSidebar() {
 
   const handleClick = (session: Session) => {
     setSelectedId(session.id);
-    if (activity === "sftp") {
-      const conn = tabs.find(
-        (t) => t.sessionId === session.id && t.connectionId
-      );
-      if (conn?.connectionId) {
-        useApp.getState().setSftpContext(session.id, conn.connectionId);
-      } else {
-        window.alert("该会话未连接，请先在终端中双击打开连接");
-      }
+    // 文件面板跟随点击的已连接会话
+    const conn = tabs.find(
+      (t) => t.sessionId === session.id && t.connectionId
+    );
+    if (conn?.connectionId) {
+      void useApp.getState().setSftpContext(session.id, conn.connectionId);
     }
   };
 
@@ -298,6 +294,7 @@ export function SessionSidebar() {
               <button
                 className="ds-btn ds-btn--brand ds-btn--sm"
                 type="button"
+                title="确定：创建该分组"
                 onClick={() => void submitGroup()}
                 disabled={!newGroupName.trim()}
               >
@@ -306,6 +303,7 @@ export function SessionSidebar() {
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--sm"
                 type="button"
+                title="取消：放弃创建分组"
                 onClick={() => setAddingGroup(false)}
               >
                 取消
@@ -370,6 +368,7 @@ export function SessionSidebar() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="在新标签中打开该会话的 SSH 连接"
             onClick={() => {
               openSession(ctx.session);
               setCtx(null);
@@ -381,6 +380,7 @@ export function SessionSidebar() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="编辑该会话的连接配置"
             onClick={() => {
               openNewConnection(ctx.session);
               setCtx(null);
@@ -392,6 +392,7 @@ export function SessionSidebar() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="复制该会话的连接信息（用户名@主机:端口）"
             onClick={() => {
               void handleCopyInfo(ctx.session);
               setCtx(null);
@@ -403,6 +404,7 @@ export function SessionSidebar() {
           <button
             type="button"
             className="ctx-menu__item ctx-menu__item--danger"
+            title="删除该会话"
             onClick={() => {
               void handleDelete(ctx.session);
               setCtx(null);
@@ -424,6 +426,7 @@ export function SessionSidebar() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="在分组下新建 SSH 连接"
             onClick={() => {
               openNewConnection(undefined, groupCtx.group.id);
               setGroupCtx(null);
@@ -436,6 +439,7 @@ export function SessionSidebar() {
           <button
             type="button"
             className="ctx-menu__item ctx-menu__item--danger"
+            title="删除该分组（分组内的会话不会被删除）"
             onClick={() => {
               void handleDeleteGroup(groupCtx.group);
               setGroupCtx(null);

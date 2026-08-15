@@ -37,10 +37,14 @@ interface AppState {
   localPath: string;
   /** 远程目录列表加载中标记（用于展示加载状态，避免重复触发加载） */
   remoteLoading: boolean;
+  /** 远程目录加载失败的错误信息（成功/加载中时为空） */
+  remoteError: string | null;
   /** 远程目录列表缓存：connectionId|path → 条目与时间戳，短 TTL 内复用避免重复请求 */
   remoteCache: Record<string, { items: SftpItem[]; ts: number }>;
   /** SFTP 面板收起状态：收起后仅保留工具栏条 */
   sftpCollapsed: boolean;
+  /** 各标签的重连触发计数：请求重新连接时自增，终端视图据此重建连接 */
+  reconnectNonce: Record<string, number>;
 
   loadSessions: () => Promise<void>;
   loadGroups: () => Promise<void>;
@@ -66,6 +70,8 @@ interface AppState {
   invalidateRemoteCache: () => void;
   /** 切换 SFTP 面板收起/展开状态 */
   toggleSftpCollapsed: () => void;
+  /** 请求指定标签重新连接（外部触发，如标题栏重连按钮） */
+  requestReconnect: (tabId: string) => void;
 }
 
 let tabSeq = 0;
@@ -108,8 +114,10 @@ export const useApp = create<AppState>((set, get) => ({
   remoteSelected: null,
   localPath: "",
   remoteLoading: false,
+  remoteError: null,
   remoteCache: {},
   sftpCollapsed: false,
+  reconnectNonce: {},
 
   loadSessions: async () => {
     try {
@@ -160,21 +168,7 @@ export const useApp = create<AppState>((set, get) => ({
   closeNewConnection: () =>
     set({ newConnOpen: false, editingSession: null, newConnPresetGroupId: null }),
 
-  setActivity: (a) => {
-    set({ activity: a });
-    // 进入 SFTP 时：已有终端 SSH 连接则直接建立 SFTP 会话，无需再手动连接
-    if (a === "sftp") {
-      const st = get();
-      if (!st.sftpContext) {
-        const conn = st.tabs.find(
-          (t) => t.connectionId && t.status === "connected"
-        );
-        if (conn?.connectionId) {
-          void st.setSftpContext(conn.sessionId, conn.connectionId);
-        }
-      }
-    }
-  },
+  setActivity: (a) => set({ activity: a }),
   setTransfers: (list) => set({ transfers: list }),
   upsertTransfer: (e) =>
     set((s) => {
@@ -221,32 +215,41 @@ export const useApp = create<AppState>((set, get) => ({
   loadRemote: async () => {
     const { sftpContext, remotePath } = get();
     if (!sftpContext) {
-      set({ remoteItems: [], remoteLoading: false });
+      set({ remoteItems: [], remoteLoading: false, remoteError: null });
       return;
     }
     const key = `${sftpContext.connectionId}|${remotePath}`;
     // 短 TTL 缓存命中：复用上次结果，避免进入/切换目录时重复发起 SFTP 请求
     const cached = get().remoteCache[key];
     if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL) {
-      set({ remoteItems: cached.items, remoteLoading: false });
+      set({ remoteItems: cached.items, remoteLoading: false, remoteError: null });
       return;
     }
     // 并发保护：同一路径已有请求在途时不再重复发起
     if (inflightRemote.has(key)) return;
     inflightRemote.add(key);
-    set({ remoteLoading: true });
+    // 发起新加载时清空上次错误，避免切换目录后残留旧错误提示
+    set({ remoteLoading: true, remoteError: null });
     try {
       const items = await ipc.sftpList(sftpContext.connectionId, remotePath);
       inflightRemote.delete(key);
       set((s) => ({
         remoteItems: items,
         remoteLoading: false,
+        remoteError: null,
         remoteCache: { ...s.remoteCache, [key]: { items, ts: Date.now() } },
       }));
     } catch (e) {
       inflightRemote.delete(key);
       console.warn("loadRemote:", e);
-      set({ remoteItems: [], remoteLoading: false });
+      // 连接失效（重连后 connectionId 变化 / 后端连接被清理）：
+      // 立即解除文件面板上下文，避免目录请求持续失败导致列表空白，随后由 SftpView 自动重新绑定
+      if (String(e).includes("connection not found")) {
+        set({ sftpContext: null, remotePath: "/", remoteItems: [], remoteLoading: false, remoteError: null });
+        return;
+      }
+      // 其他失败（权限、超时、后端 SFTP 错误等）：保留具体错误信息供面板展示
+      set({ remoteItems: [], remoteLoading: false, remoteError: String(e) });
     }
   },
   openRemoteDir: async (item) => {
@@ -261,6 +264,10 @@ export const useApp = create<AppState>((set, get) => ({
   selectRemote: (item) => set({ remoteSelected: item }),
   invalidateRemoteCache: () => set({ remoteCache: {} }),
   toggleSftpCollapsed: () => set((s) => ({ sftpCollapsed: !s.sftpCollapsed })),
+  requestReconnect: (tabId) =>
+    set((s) => ({
+      reconnectNonce: { ...s.reconnectNonce, [tabId]: (s.reconnectNonce[tabId] ?? 0) + 1 },
+    })),
 }));
 
 // Derived: filtered sessions by keyword

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
+import { useMonitor, selectMonitorConnection } from "../store/monitor";
 import { ipc } from "../lib/ipc";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import { resBarColor, resTextColor } from "../lib/resColor";
-import type { Metrics, ProcInfo, SysInfo } from "../types";
+import type { ProcInfo, SysInfo } from "../types";
 
 function formatBytes(n: number): string {
   if (n < 1024) return n + " B";
@@ -28,29 +29,25 @@ function polyline(points: number[], width = 600, height = 160): string {
 export function MonitorView() {
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [procs, setProcs] = useState<ProcInfo[]>([]);
-  const [netSpeed, setNetSpeed] = useState({ rx: 0, tx: 0 });
   const [sysInfo, setSysInfo] = useState<SysInfo | null>(null);
-  const cpuHist = useRef<number[]>([]);
-  const [, setTick] = useState(0);
-  const lastSample = useRef<Metrics | null>(null);
 
-  const connectionId =
-    sftpContext?.connectionId ??
-    tabs.find((t) => t.status === "connected" && t.connectionId)?.connectionId ??
-    null;
+  // ---- 指标数据统一来自共享监控数据源（与终端右侧资源监控同一份，单一轮询） ----
+  const metrics = useMonitor((s) => s.metrics);
+  const netSpeed = useMonitor((s) => s.netSpeed);
+  const cpuHist = useMonitor((s) => s.cpuHist);
+
+  const connectionId = selectMonitorConnection(sftpContext, tabs);
 
   useEffect(() => {
     if (!connectionId) {
-      setMetrics(null);
       setProcs([]);
+      setSysInfo(null);
       return;
     }
     let stopped = false;
-    let iv: number | undefined;
     let pv: number | undefined;
-    // 加载服务器系统信息（连接建立时获取一次）
+    // 加载服务器系统信息（连接建立时获取一次，MonitorView 专属展示）
     setSysInfo(null);
     ipc
       .systemInfo(connectionId)
@@ -60,61 +57,27 @@ export function MonitorView() {
       .catch(() => {
         /* ignore */
       });
-    // busy 防止并发轮询：monitor 命令执行时间可能长于轮询间隔，
-    // 并发请求会相互覆盖采样，导致网络速率计算出现天文数字
-    let busy = false;
-    let lastTs = 0;
-
-    const startTimers = () => {
-      clearInterval(iv);
+    // 进程 Top 列表（MonitorView 专属）：间隔跟随监控设置，但独立于共享指标轮询
+    const startProcs = () => {
       clearInterval(pv);
       const interval = loadSettings().monitorInterval;
-      const tick = async () => {
-        if (busy) return;
-        busy = true;
-        const ts = Date.now();
-        try {
-          const m = await ipc.monitorMetrics(connectionId);
-          if (stopped) return;
-          if (lastSample.current && lastTs > 0) {
-            const dt = (ts - lastTs) / 1000; // 实际采样间隔（秒）
-            if (dt > 0) {
-              setNetSpeed({
-                rx: Math.max(0, m.netRx - lastSample.current.netRx) / dt,
-                tx: Math.max(0, m.netTx - lastSample.current.netTx) / dt,
-              });
-            }
-          }
-          lastSample.current = m;
-          lastTs = ts;
-          cpuHist.current = [...cpuHist.current.slice(-59), m.cpu];
-          setMetrics(m);
-          setTick((t) => t + 1);
-        } catch {
-          /* ignore */
-        } finally {
-          busy = false;
-        }
-      };
-      void tick();
-      iv = setInterval(() => void tick(), interval);
-      pv = setInterval(async () => {
+      const load = async () => {
         try {
           const p = await ipc.monitorProcesses(connectionId, 20);
           if (!stopped) setProcs(p);
         } catch {
           /* ignore */
         }
-      }, Math.max(interval * 2, 5000));
+      };
+      void load();
+      pv = setInterval(() => void load(), Math.max(interval * 2, 5000));
     };
-
-    startTimers();
-    const onSettings = () => startTimers();
+    startProcs();
+    const onSettings = () => startProcs();
     window.addEventListener(SETTINGS_CHANGE_EVENT, onSettings);
     return () => {
       stopped = true;
       window.removeEventListener(SETTINGS_CHANGE_EVENT, onSettings);
-      clearInterval(iv);
       clearInterval(pv);
     };
   }, [connectionId]);
@@ -257,7 +220,7 @@ export function MonitorView() {
         </div>
         <svg viewBox="0 0 600 160" preserveAspectRatio="none" className="mon-chart__svg">
           <polyline
-            points={polyline(cpuHist.current)}
+            points={polyline(cpuHist)}
             fill="none"
             stroke="var(--bg-brand)"
             strokeWidth="2"

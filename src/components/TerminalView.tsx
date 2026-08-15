@@ -5,9 +5,12 @@ import { SearchAddon } from "@xterm/addon-search";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
-import { ipc, onTerminalOutput, onConnectionStatus } from "../lib/ipc";
+import { ipc, onTerminalOutput, onConnectionStatus, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import type { Tab } from "../types";
+
+/** 正在建立连接的标签集合：防止同一标签并发发起多次 SSH 连接 */
+const connectingTabs = new Set<string>();
 
 const TERMINAL_THEME = {
   background: "#1a1b1d",
@@ -44,6 +47,8 @@ export function TerminalView({ tab }: { tab: Tab }) {
   const [pastePending, setPastePending] = useState<string | null>(null);
 
   const updateTab = useApp((s) => s.updateTab);
+  // 重连请求计数：标题栏重连按钮触发后递增，驱动终端重建连接
+  const reconnectNonce = useApp((s) => s.reconnectNonce[tab.id] ?? 0);
 
   // 始终保持 tabRef 指向最新的 tab
   tabRef.current = tab;
@@ -94,11 +99,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
       else unlisteners.push(un);
     });
 
-    // 自动重连：意外断开后最多重试 3 次（主动断开不会触发）
+    // 自动重连：意外断开后最多重试 3 次（用户手动断开不会触发）
     let reconnectCount = 0;
     let reconnecting = false;
     const doReconnect = async () => {
       if (cancelled || reconnecting) return;
+      // 手动断开（断开按钮 / ⌘D）：不自动重连
+      if (tabRef.current.manualClosed) return;
       if (reconnectCount >= 3) {
         terminal.write("\r\n\x1b[31m自动重连失败，请手动重连\x1b[0m\r\n");
         return;
@@ -124,6 +131,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           connectionId: connId,
           shellId,
           status: "connected",
+          manualClosed: false,
         });
         reconnectCount = 0;
         reconnecting = false;
@@ -146,9 +154,40 @@ export function TerminalView({ tab }: { tab: Tab }) {
       else unlisteners.push(un);
     });
 
-    // 用户输入回传后端
+    // 用户输入回传后端；同时跟踪当前命令行，回车时写入历史，
+    // 使终端直接输入的命令与底部输入框/历史按钮共用同一份历史（双向同步）
+    let cmdLine = "";
     const dataDisp = terminal.onData((data) => {
       const t = tabRef.current;
+      if (data.startsWith("\x1b")) {
+        // ESC 开头为控制序列（方向键等），重置当前行跟踪，避免误拼
+        cmdLine = "";
+      } else {
+        for (const ch of data) {
+          if (ch === "\r" || ch === "\n") {
+            const cmd = cmdLine.trim();
+            if (cmd && t.sessionId) {
+              ipc.historyAdd(t.sessionId, cmd).catch(() => {});
+              document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT));
+            }
+            cmdLine = "";
+          } else if (ch === "\u007f" || ch === "\b") {
+            // 退格
+            cmdLine = cmdLine.slice(0, -1);
+          } else if (ch === "\u0003") {
+            // Ctrl+C：中断当前行
+            cmdLine = "";
+          } else if (ch === "\u0015") {
+            // Ctrl+U：清空当前行
+            cmdLine = "";
+          } else if (ch === "\u0017") {
+            // Ctrl+W：删除最后一个词
+            cmdLine = cmdLine.replace(/\s*\S+\s*$/, "");
+          } else if (ch >= " " && ch !== "\u001b") {
+            cmdLine += ch;
+          }
+        }
+      }
       if (t.connectionId && t.shellId) {
         ipc.terminalWrite(t.connectionId, t.shellId, data);
       }
@@ -182,10 +221,12 @@ export function TerminalView({ tab }: { tab: Tab }) {
     });
     ro.observe(container);
 
-    // 连接流程（仅未连接时）
+    // 连接流程（仅未连接时；同标签并发连接保护）
     const connect = async () => {
       const current = tabRef.current;
       if (current.connectionId) return;
+      if (connectingTabs.has(tab.id)) return;
+      connectingTabs.add(tab.id);
       terminal.write("Connecting to host...\r\n");
       try {
         const connId = await ipc.sessionConnect(tab.sessionId);
@@ -216,6 +257,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           connectionId: connId,
           shellId,
           status: "connected",
+          manualClosed: false,
         });
       } catch (e) {
         if (cancelled) return;
@@ -236,6 +278,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           if (ok) {
             try {
               await ipc.hostKeyAccept(session.host, session.port, fingerprint);
+              connectingTabs.delete(tab.id);
               void connect();
             } catch (e2) {
               updateTab(tab.id, {
@@ -269,6 +312,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
             if (sure) {
               try {
                 await ipc.hostKeyAccept(session.host, session.port, changed[1]);
+                connectingTabs.delete(tab.id);
                 void connect();
                 return;
               } catch (e2) {
@@ -285,6 +329,8 @@ export function TerminalView({ tab }: { tab: Tab }) {
 
         updateTab(tab.id, { status: "error", error: String(e) });
         terminal.write("Error: " + String(e) + "\r\n");
+      } finally {
+        connectingTabs.delete(tab.id);
       }
     };
     void connect();
@@ -297,7 +343,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       selDisp.dispose();
       unlisteners.forEach((un) => un());
       if (ro) ro.disconnect();
-      // 仅销毁终端；连接断开由 EditorTabs/Toolbar 负责
+      // 仅销毁终端；连接断开由 EditorTabs / 文件面板「断开」负责
       const t = tabRef.current;
       if (t.connectionId && t.shellId) {
         ipc.terminalDestroy(t.connectionId, t.shellId).catch(() => {});
@@ -308,7 +354,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       terminalRegistry.remove(tab.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.id, retryKey]);
+  }, [tab.id, retryKey, reconnectNonce]);
 
   const handleRetry = () => {
     updateTab(tab.id, {
@@ -453,19 +499,35 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
+              title="复制选中内容"
               disabled={!hasSelectionRef.current}
               onClick={handleCopy}
             >
               复制
             </button>
-            <button type="button" className="terminal-view__ctx-item" onClick={handlePaste}>
+            <button
+              type="button"
+              className="terminal-view__ctx-item"
+              title="粘贴剪贴板内容到终端"
+              onClick={handlePaste}
+            >
               粘贴
             </button>
             <div className="terminal-view__ctx-sep" />
-            <button type="button" className="terminal-view__ctx-item" onClick={handleFind}>
+            <button
+              type="button"
+              className="terminal-view__ctx-item"
+              title="在终端内搜索（Ctrl+F）"
+              onClick={handleFind}
+            >
               查找
             </button>
-            <button type="button" className="terminal-view__ctx-item" onClick={handleClear}>
+            <button
+              type="button"
+              className="terminal-view__ctx-item"
+              title="清空终端输出"
+              onClick={handleClear}
+            >
               清屏
             </button>
           </div>
@@ -476,12 +538,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
           <div className="terminal-view__paste-title">剪贴板包含多行内容</div>
           <pre className="terminal-view__paste-preview">{pastePending}</pre>
           <div className="terminal-view__paste-actions">
-            <button type="button" className="ds-btn" onClick={cancelPaste}>
+            <button type="button" className="ds-btn" title="取消：不粘贴多行内容" onClick={cancelPaste}>
               取消
             </button>
             <button
               type="button"
               className="ds-btn ds-btn--brand"
+              title="粘贴多行内容到终端"
               onClick={confirmPaste}
             >
               粘贴到终端
@@ -496,7 +559,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           </span>
           <div>连接失败</div>
           {tab.error && <div className="terminal-view__error-msg">{tab.error}</div>}
-          <button className="ds-btn ds-btn--brand" type="button" onClick={handleRetry}>
+          <button className="ds-btn ds-btn--brand" type="button" title="重新尝试连接" onClick={handleRetry}>
             重试
           </button>
         </div>

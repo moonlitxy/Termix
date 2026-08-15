@@ -6,6 +6,7 @@ import bar from "../assets/icons/bar.svg?raw";
 import bell from "../assets/icons/bell.svg?raw";
 import chevronDown from "../assets/icons/chevron-down.svg?raw";
 import chevronRight from "../assets/icons/chevron-right.svg?raw";
+import chevronUp from "../assets/icons/chevron-up.svg?raw";
 import clock from "../assets/icons/clock.svg?raw";
 import columns from "../assets/icons/columns.svg?raw";
 import copy from "../assets/icons/copy.svg?raw";
@@ -38,6 +39,7 @@ import upload from "../assets/icons/upload.svg?raw";
 import user from "../assets/icons/user.svg?raw";
 import x from "../assets/icons/x.svg?raw";
 import xCircle from "../assets/icons/x-circle.svg?raw";
+import zap from "../assets/icons/zap.svg?raw";
 
 const ICONS: Record<string, string> = {
   "alert-circle": alertCircle,
@@ -48,6 +50,7 @@ const ICONS: Record<string, string> = {
   bell,
   "chevron-down": chevronDown,
   "chevron-right": chevronRight,
+  "chevron-up": chevronUp,
   clock,
   columns,
   copy,
@@ -80,6 +83,7 @@ const ICONS: Record<string, string> = {
   user,
   x,
   "x-circle": xCircle,
+  zap,
 };
 
 export function Icon({

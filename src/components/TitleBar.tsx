@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
+import { ipc } from "../lib/ipc";
+import { terminalRegistry } from "../lib/terminalRegistry";
 import type { Tab } from "../types";
 
 /** 标签状态 → 状态点样式（复用 ds-dot，保证视觉统一） */
@@ -23,6 +25,42 @@ export function TitleBar() {
   const openNewConnection = useApp((s) => s.openNewConnection);
   const [menuOpen, setMenuOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
+
+  // 连接/断开切换：已连接时断开并清空连接引用；断开时触发重新连接
+  const toggleConnection = async () => {
+    const st = useApp.getState();
+    const tab = st.tabs.find((t) => t.id === st.activeTabId);
+    if (!tab) return;
+    if (tab.connectionId) {
+      // 断开：销毁 shell、断开连接、清空连接引用并标记手动断开（不自动重连）
+      try {
+        if (tab.shellId) {
+          await ipc.terminalDestroy(tab.connectionId, tab.shellId);
+        }
+        await ipc.sessionDisconnect(tab.connectionId);
+      } catch {
+        // 连接可能已失效，忽略
+      }
+      st.updateTab(tab.id, {
+        status: "disconnected",
+        manualClosed: true,
+        connectionId: undefined,
+        shellId: undefined,
+        error: undefined,
+      });
+      terminalRegistry
+        .get(tab.id)
+        ?.write("\r\n\x1b[33m连接已断开（手动断开）\x1b[0m\r\n");
+    } else {
+      // 重新连接：复位连接状态并通知终端视图重建连接
+      st.updateTab(tab.id, {
+        status: "connecting",
+        manualClosed: false,
+        error: undefined,
+      });
+      st.requestReconnect(tab.id);
+    }
+  };
 
   // 当前激活连接（分屏 pane 不单独占用标题栏）
   const activeTab = tabs.find((t) => t.id === activeTabId && !t.hidden);
@@ -80,6 +118,9 @@ export function TitleBar() {
                       key={t.id}
                       type="button"
                       className={"ctx-menu__item" + (isActive ? " is-active" : "")}
+                      title={
+                        s ? `切换到 ${s.name}（${s.username}@${s.host}）` : t.title
+                      }
                       onClick={() => {
                         setActiveTab(t.id);
                         setMenuOpen(false);
@@ -99,6 +140,7 @@ export function TitleBar() {
                 <button
                   type="button"
                   className="ctx-menu__item"
+                  title="新建连接：打开新建会话窗口"
                   onClick={() => {
                     setMenuOpen(false);
                     openNewConnection();
@@ -124,6 +166,24 @@ export function TitleBar() {
         </div>
       </div>
       <div className="titlebar__right">
+        <button
+          className={
+            "ds-btn ds-btn--tertiary ds-btn--icon titlebar__conn-btn" +
+            (activeTab?.status === "connected" ? " is-connected" : "")
+          }
+          type="button"
+          title={
+            activeTab?.status === "connected"
+              ? "断开当前连接"
+              : activeTab?.status === "connecting"
+                ? "正在连接…"
+                : "重新连接"
+          }
+          disabled={!activeTab || activeTab.status === "connecting"}
+          onClick={() => void toggleConnection()}
+        >
+          <Icon name={activeTab?.status === "connected" ? "zap" : "plug"} size={16} />
+        </button>
         <button
           className={
             "ds-btn ds-btn--tertiary ds-btn--icon" +
@@ -167,6 +227,7 @@ export function TitleBar() {
                 <button
                   type="button"
                   className="ctx-menu__item"
+                  title="打开系统偏好设置"
                   onClick={() => {
                     setAvatarOpen(false);
                     setActivity("settings");
@@ -178,6 +239,7 @@ export function TitleBar() {
                 <button
                   type="button"
                   className="ctx-menu__item"
+                  title="查看帮助与文档"
                   onClick={() => {
                     setAvatarOpen(false);
                     setActivity("help");
@@ -189,6 +251,7 @@ export function TitleBar() {
                 <button
                   type="button"
                   className="ctx-menu__item"
+                  title="查看 Termix 版本信息"
                   onClick={() => {
                     setAvatarOpen(false);
                     window.alert(

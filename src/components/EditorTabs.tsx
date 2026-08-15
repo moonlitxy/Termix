@@ -54,7 +54,7 @@ export function EditorTabs() {
     );
   };
 
-  // 分屏按钮在 Toolbar 工具栏（基于当前活动标签的会话新建独立终端 pane）
+  // 分屏 pane 由历史数据兼容渲染（新标签不再提供分屏入口）
 
   // 复制标签：基于同一会话新建一个独立连接的新标签
   const duplicateTab = () => {
@@ -154,6 +154,7 @@ export function EditorTabs() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="关闭当前标签并断开连接"
             onClick={() => {
               void destroyAndClose(ctx.tabId);
               setCtx(null);
@@ -165,6 +166,7 @@ export function EditorTabs() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="关闭当前标签以外的所有标签"
             onClick={() => {
               closeOthers();
               setCtx(null);
@@ -176,6 +178,7 @@ export function EditorTabs() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="关闭当前标签右侧的所有标签"
             onClick={() => {
               closeRight();
               setCtx(null);
@@ -188,6 +191,7 @@ export function EditorTabs() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="复制当前标签（同一连接新开一个终端）"
             onClick={() => {
               duplicateTab();
               setCtx(null);
@@ -199,6 +203,7 @@ export function EditorTabs() {
           <button
             type="button"
             className="ctx-menu__item"
+            title="重命名当前标签"
             onClick={() => {
               renameTab();
               setCtx(null);

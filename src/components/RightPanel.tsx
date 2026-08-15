@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
+import { useMonitor, selectMonitorConnection, computeUptimeSec } from "../store/monitor";
 import { ipc } from "../lib/ipc";
-import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import { resBarColor, resTextColor } from "../lib/resColor";
-import type { Metrics, TransferTask } from "../types";
+import type { TransferTask } from "../types";
 
 function formatBytes(n: number): string {
   if (!n) return "0 B";
@@ -12,6 +12,32 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
   return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+}
+
+/** 系统运行时长 → 天小时分秒（如 1天23小时11分20秒） */
+function formatUptime(sec: number): string {
+  if (!sec) return "-";
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (d > 0) return `${d}天${h}小时${m}分${s}秒`;
+  if (h > 0) return `${h}小时${m}分${s}秒`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
+
+/** CPU 使用率迷你曲线 → SVG polyline 坐标（0-100 归一化） */
+function sparkline(points: number[], width = 100, height = 32): string {
+  if (points.length < 2) return "";
+  const max = Math.max(...points, 100);
+  return points
+    .map((v, i) => {
+      const x = (i / (points.length - 1)) * width;
+      const y = height - (Math.min(v, max) / max) * (height - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
 }
 
 function taskStatusText(t: TransferTask): string {
@@ -41,10 +67,21 @@ export function RightPanel() {
   const transfers = useApp((s) => s.transfers);
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [netSpeed, setNetSpeed] = useState({ rx: 0, tx: 0 });
-  const lastSample = useRef<Metrics | null>(null);
   const doneTimers = useRef(new Set<string>());
+  // 传输重试节流：失败任务连点「重试」会重复创建传输任务，600ms 窗口内只允许一次
+  const lastRetryAt = useRef(0);
+
+  // ---- 指标数据统一来自共享监控数据源（与「监控」模块同一份，单一轮询） ----
+  const metrics = useMonitor((s) => s.metrics);
+  const netSpeed = useMonitor((s) => s.netSpeed);
+  const cpuMeta = useMonitor((s) => s.cpuMeta);
+  const cpuHist = useMonitor((s) => s.cpuHist);
+  const lastSampleAt = useMonitor((s) => s.lastSampleAt);
+  const uptimeBase = useMonitor((s) => s.uptimeBase);
+  const nowTs = useMonitor((s) => s.nowTs);
+
+  const connectionId = selectMonitorConnection(sftpContext, tabs);
+  const connected = !!connectionId;
 
   // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列
   useEffect(() => {
@@ -61,6 +98,9 @@ export function RightPanel() {
   }, [transfers]);
 
   const retryTransfer = (t: TransferTask) => {
+    const now = Date.now();
+    if (now - lastRetryAt.current < 600) return;
+    lastRetryAt.current = now;
     const conn = tabs.find(
       (x) => x.sessionId === t.sessionId && x.connectionId
     );
@@ -84,73 +124,14 @@ export function RightPanel() {
     }
   };
 
-  const connectionId =
-    sftpContext?.connectionId ??
-    tabs.find((t) => t.status === "connected" && t.connectionId)?.connectionId ??
-    null;
-
-  useEffect(() => {
-    if (!connectionId) {
-      setMetrics(null);
-      lastSample.current = null;
-      return;
-    }
-    let stopped = false;
-    let iv: number | undefined;
-    // busy 防止并发轮询：monitor 命令执行时间可能长于轮询间隔，
-    // 若并发请求会相互覆盖采样，导致网络速率计算出现天文数字
-    let busy = false;
-    let lastTs = 0;
-
-    const startTimers = () => {
-      clearInterval(iv);
-      const interval = loadSettings().monitorInterval;
-      const tick = async () => {
-        if (busy) return;
-        busy = true;
-        const ts = Date.now();
-        try {
-          const m = await ipc.monitorMetrics(connectionId);
-          if (stopped) return;
-          if (lastSample.current && lastTs > 0) {
-            const dt = (ts - lastTs) / 1000; // 实际采样间隔（秒）
-            if (dt > 0) {
-              setNetSpeed({
-                rx: Math.max(0, m.netRx - lastSample.current.netRx) / dt,
-                tx: Math.max(0, m.netTx - lastSample.current.netTx) / dt,
-              });
-            }
-          }
-          lastSample.current = m;
-          lastTs = ts;
-          setMetrics(m);
-        } catch {
-          /* ignore */
-        } finally {
-          busy = false;
-        }
-      };
-      void tick();
-      iv = setInterval(() => void tick(), interval);
-    };
-
-    startTimers();
-    const onSettings = () => startTimers();
-    window.addEventListener(SETTINGS_CHANGE_EVENT, onSettings);
-    return () => {
-      stopped = true;
-      window.removeEventListener(SETTINGS_CHANGE_EVENT, onSettings);
-      clearInterval(iv);
-    };
-  }, [connectionId]);
-
-  const connected = !!connectionId;
   const cpu = metrics ? Math.round(metrics.cpu) : 0;
   const memPct = metrics && metrics.memTotal > 0 ? Math.round((metrics.memUsed / metrics.memTotal) * 100) : 0;
   const disk = metrics ? Math.round(metrics.diskUsedPct) : 0;
   // 磁盘详情优先取根分区，其次第一个分区
   const rootDisk =
     metrics?.disks.find((d) => d.mount === "/") ?? metrics?.disks[0];
+  // 运行时长：共享数据源统一计算（本地时钟每秒补偿，不受监控刷新间隔影响）
+  const uptimeSec = computeUptimeSec(metrics, uptimeBase, lastSampleAt, nowTs);
 
   return (
     <div className="right-panel">
@@ -162,13 +143,18 @@ export function RightPanel() {
       </div>
       <div className="right-panel__body">
         {!connected ? (
-          <div className="right-panel__empty">
-            <Icon name="plug" size={20} />
+          <div className="right-panel__empty right-panel__empty--full">
+            <span className="right-panel__empty-icon">
+              <Icon name="plug" size={26} />
+            </span>
             <span className="right-panel__empty-text">未连接服务器</span>
-            <span className="right-panel__empty-sub">连接会话后在此查看实时资源占用</span>
+            <span className="right-panel__empty-sub">
+              打开终端连接会话后，在此查看实时资源占用与传输队列
+            </span>
           </div>
         ) : (
           <>
+        <div className="right-panel__monitor">
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
@@ -178,11 +164,21 @@ export function RightPanel() {
               {cpu}%
             </span>
           </div>
-          <div className="res-bar">
-            <div
-              className={"res-bar__fill " + resBarColor(cpu)}
-              style={{ width: Math.min(cpu, 100) + "%" }}
-            />
+          {cpuHist.length > 1 && (
+            <svg viewBox="0 0 100 32" preserveAspectRatio="none" className="res-spark">
+              <polyline
+                points={sparkline(cpuHist, 100, 32)}
+                fill="none"
+                stroke="var(--bg-brand)"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+          <div className="res-card__detail">
+            {cpuMeta
+              ? `${cpuMeta.cores ? cpuMeta.cores + " 核" : "-"}${cpuMeta.freq ? " · " + cpuMeta.freq : ""}`
+              : "--"}
           </div>
         </div>
         <div className="ds-card">
@@ -231,6 +227,48 @@ export function RightPanel() {
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
+              <Icon name="clock" size={14} />运行
+            </span>
+            <span className="res-card__value res-card__value--uptime">
+              {formatUptime(uptimeSec)}
+            </span>
+          </div>
+          <div className="res-card__detail">
+            {metrics ? "系统已连续运行时长" : "--"}
+          </div>
+        </div>
+
+        <div className="ds-card">
+          <div className="res-card__head">
+            <span className="res-card__label">
+              <Icon name="bar" size={14} />负载
+            </span>
+          </div>
+          <div className="load-grid">
+            <div className="load-cell">
+              <span className="load-cell__label">1 分钟</span>
+              <span className="load-cell__value">
+                {metrics ? metrics.load1.toFixed(2) : "--"}
+              </span>
+            </div>
+            <div className="load-cell">
+              <span className="load-cell__label">5 分钟</span>
+              <span className="load-cell__value">
+                {metrics ? metrics.load5.toFixed(2) : "--"}
+              </span>
+            </div>
+            <div className="load-cell">
+              <span className="load-cell__label">15 分钟</span>
+              <span className="load-cell__value">
+                {metrics ? metrics.load15.toFixed(2) : "--"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="ds-card">
+          <div className="res-card__head">
+            <span className="res-card__label">
               <Icon name="arrow-right-to-line" size={14} />
               Network
             </span>
@@ -250,11 +288,11 @@ export function RightPanel() {
             </div>
           </div>
         </div>
-          </>
-        )}
+        </div>
 
-        <div className="right-panel__section-title">传输队列</div>
-        <div className="ds-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="right-panel__transfers">
+          <div className="right-panel__section-title">传输队列</div>
+          <div className="ds-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {transfers.length === 0 && (
             <div className="transfer-row__status">暂无传输任务</div>
           )}
@@ -278,11 +316,21 @@ export function RightPanel() {
                       重试
                     </button>
                   )}
-                  {(t.status === "running" || t.status === "paused") && (
+                  {/* 目录传输不支持断点续传，不提供暂停/恢复 */}
+                  {(t.status === "running" || t.status === "paused") && !t.isDir && (
                     <button
-                      className="ds-btn ds-btn--tertiary ds-btn--icon"
+                      className={
+                        "ds-btn ds-btn--icon" +
+                        (t.status === "paused"
+                          ? " ds-btn--secondary"
+                          : " ds-btn--tertiary")
+                      }
                       type="button"
-                      title={t.status === "running" ? "暂停" : "恢复"}
+                      title={
+                        t.status === "running"
+                          ? "暂停：中断传输并保留已上传/下载的部分文件"
+                          : "恢复：从断点继续传输"
+                      }
                       style={{ width: 18, height: 18, marginLeft: 2 }}
                       onClick={() => {
                         if (t.status === "running") {
@@ -327,7 +375,15 @@ export function RightPanel() {
               </div>
             </div>
           ))}
+          {transfers.length > 0 && (
+            <div className="transfer-pane__hint">
+              单个文件支持暂停/恢复（断点续传），目录传输仅支持取消
+            </div>
+          )}
+          </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

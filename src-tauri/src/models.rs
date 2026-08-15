@@ -163,6 +163,12 @@ pub struct Metrics {
     pub net_tx: u64,
     pub net_conns: u32,
     pub disks: Vec<DiskInfo>,
+    /// 系统已运行时间（秒，/proc/uptime）
+    pub uptime: f64,
+    /// 系统负载（1/5/15 分钟，/proc/loadavg）
+    pub load1: f64,
+    pub load5: f64,
+    pub load15: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -307,6 +307,7 @@ export function NewConnectionDialog() {
           <button
             className="ds-btn ds-btn--secondary"
             type="button"
+            title="取消：关闭连接窗口"
             onClick={closeNewConnection}
           >
             取消
@@ -314,6 +315,7 @@ export function NewConnectionDialog() {
           <button
             className="ds-btn ds-btn--brand"
             type="button"
+            title="保存连接配置"
             onClick={handleSave}
             disabled={!canSave}
           >

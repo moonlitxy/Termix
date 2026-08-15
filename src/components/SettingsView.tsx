@@ -249,10 +249,10 @@ export function SettingsView() {
               <div className="st-row">
                 <label />
                 <div className="st-actions">
-                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" onClick={() => void doUnlock()}>
+                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="解锁主密码，解密会话密码" onClick={() => void doUnlock()}>
                     解锁
                   </button>
-                  <button className="ds-btn ds-btn--danger-subtle ds-btn--sm" type="button" onClick={() => void doClear()}>
+                  <button className="ds-btn ds-btn--danger-subtle ds-btn--sm" type="button" title="清除主密码（需先解锁）" onClick={() => void doClear()}>
                     清除主密码
                   </button>
                 </div>
@@ -291,10 +291,10 @@ export function SettingsView() {
               <div className="st-row">
                 <label />
                 <div className="st-actions">
-                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" onClick={() => void doSet()}>
+                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="修改主密码" onClick={() => void doSet()}>
                     修改
                   </button>
-                  <button className="ds-btn ds-btn--secondary ds-btn--sm" type="button" onClick={() => void doLock()}>
+                  <button className="ds-btn ds-btn--secondary ds-btn--sm" type="button" title="锁定：重新加密会话密码" onClick={() => void doLock()}>
                     锁定
                   </button>
                 </div>
@@ -325,7 +325,7 @@ export function SettingsView() {
               </div>
               <div className="st-row">
                 <label />
-                <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" onClick={() => void doSet()}>
+                <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="设置主密码并加密存储会话密码" onClick={() => void doSet()}>
                   设置并加密
                 </button>
               </div>

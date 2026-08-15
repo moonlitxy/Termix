@@ -10,7 +10,6 @@ interface RailItem {
 
 const ITEMS: RailItem[] = [
   { id: "terminal", icon: "terminal", label: "终端会话" },
-  { id: "sftp", icon: "folder", label: "SFTP" },
   { id: "forward", icon: "arrow-right-to-line", label: "端口转发" },
   { id: "snippets", icon: "scroll-text", label: "命令片段" },
   { id: "monitor", icon: "bar", label: "监控" },

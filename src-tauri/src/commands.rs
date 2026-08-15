@@ -655,6 +655,15 @@ pub async fn sftp_mkdir(
 }
 
 #[tauri::command]
+pub async fn sftp_create_file(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.sftp.create_file(&connection_id, &path).await
+}
+
+#[tauri::command]
 pub async fn sftp_remove(
     connection_id: String,
     path: String,
@@ -875,7 +884,11 @@ pub async fn monitor_metrics(
             &connection_id,
             // df 默认遍历所有挂载点，访问不可达的网络文件系统（NFS）会长时间卡住，
             // 导致命令整体超时、磁盘数据缺失。加 -l（仅本地）避免访问网络挂载点。
-            "top -bn1 | sed -n '3p'; echo ---; free -b | sed -n '2p'; echo ---; df -klP 2>/dev/null; echo ---; awk 'NR>2 {rx+=$2;tx+=$10} END {print rx, tx}' /proc/net/dev; echo ---; awk 'FNR>1 {n++} END {print n+0}' /proc/net/tcp /proc/net/tcp6 2>/dev/null",
+            // 连接数：/proc/net/tcp（IPv4）+ /proc/net/tcp6（IPv6）中除表头外的行数，
+            // 即系统当前全部 TCP socket 表项总数（含 LISTEN/ESTABLISHED/TIME_WAIT 等所有状态）。
+            // 注意：不是文件句柄/进程句柄数，也不含 UDP 与 Unix socket；如按状态过滤可用
+            // 'awk "NR>1 && $4==\"01\" {n++}"' 统计 ESTABLISHED 活跃连接。
+            "top -bn1 | sed -n '3p'; echo ---; free -b | sed -n '2p'; echo ---; df -klP 2>/dev/null; echo ---; awk 'NR>2 {rx+=$2;tx+=$10} END {print rx, tx}' /proc/net/dev; echo ---; awk 'FNR>1 {n++} END {print n+0}' /proc/net/tcp /proc/net/tcp6 2>/dev/null; echo ---; head -n1 /proc/uptime 2>/dev/null; echo ---; head -n1 /proc/loadavg 2>/dev/null",
         )
         .await?;
     log::debug!(
@@ -895,6 +908,11 @@ pub async fn monitor_metrics(
         .unwrap_or(0.0);
     let (net_rx, net_tx) = parse_net(parts.get(3).unwrap_or(&""));
     let net_conns = parse_conns(parts.get(4).unwrap_or(&""));
+    let uptime = parts
+        .get(5)
+        .and_then(|s| parse_first_f64(s))
+        .unwrap_or(0.0);
+    let (load1, load5, load15) = parse_loadavg(parts.get(6).unwrap_or(&""));
     Ok(Metrics {
         cpu,
         mem_used,
@@ -904,6 +922,10 @@ pub async fn monitor_metrics(
         net_tx,
         net_conns,
         disks,
+        uptime,
+        load1,
+        load5,
+        load15,
     })
 }
 
@@ -1022,6 +1044,20 @@ fn parse_conns(s: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// 解析 /proc/loadavg：前三个字段为 1/5/15 分钟负载。
+fn parse_loadavg(s: &str) -> (f64, f64, f64) {
+    let f: Vec<&str> = s.split_whitespace().collect();
+    if f.len() >= 3 {
+        (
+            f[0].parse().unwrap_or(0.0),
+            f[1].parse().unwrap_or(0.0),
+            f[2].parse().unwrap_or(0.0),
+        )
+    } else {
+        (0.0, 0.0, 0.0)
+    }
+}
+
 fn parse_net(s: &str) -> (u64, u64) {
     let f: Vec<&str> = s.split_whitespace().collect();
     if f.len() >= 2 {
@@ -1124,6 +1160,13 @@ tmpfs           1000000    100000     900000  10% /run";
         assert_eq!(parse_net("only-one"), (0, 0));
         // 非法数字按 0 处理
         assert_eq!(parse_net("abc def"), (0, 0));
+    }
+
+    #[test]
+    fn parse_loadavg_basic() {
+        assert_eq!(parse_loadavg("0.52 0.58 0.59 1/123 456"), (0.52, 0.58, 0.59));
+        assert_eq!(parse_loadavg(""), (0.0, 0.0, 0.0));
+        assert_eq!(parse_loadavg("0.1 0.2"), (0.0, 0.0, 0.0));
     }
 
     // ---- 主密码核心逻辑（master_set / master_clear / 导入导出共用） ----

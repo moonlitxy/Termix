@@ -17,6 +17,63 @@ body,
   height: 100%;
 }
 
+/* =========================================================================
+   全局悬浮提示（统一深色底 + 边框 + 箭头，浅色/深色主题下均清晰可读）
+   ========================================================================= */
+.global-tooltip {
+  position: fixed;
+  z-index: 500;
+  transform: translateX(-50%);
+  max-width: 280px;
+  padding: 5px 9px;
+  background: #23262b;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  color: #f2f4f8;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-line;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* 箭头（默认在元素下方，箭头朝上） */
+.global-tooltip::before,
+.global-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+}
+
+.global-tooltip::before {
+  top: -10px;
+  border-top: none;
+  border-bottom-color: rgba(255, 255, 255, 0.16);
+}
+
+.global-tooltip::after {
+  top: -8px;
+  border-top: none;
+  border-bottom-color: #23262b;
+}
+
+/* 空间不足时显示在元素上方（箭头朝下） */
+.global-tooltip.is-above::before {
+  top: auto;
+  bottom: -10px;
+  border-bottom: none;
+  border-top-color: rgba(255, 255, 255, 0.16);
+}
+
+.global-tooltip.is-above::after {
+  top: auto;
+  bottom: -8px;
+  border-bottom: none;
+  border-top-color: #23262b;
+}
+
 body {
   background: var(--bg-base-default);
   color: var(--text-default);
@@ -939,9 +996,22 @@ a {
 .sftp-view {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--bg-base-default);
+}
+
+/* 快捷命令弹层锚定文件面板，向上弹出（覆盖终端底部） */
+.sftp-view .toolbar__qc-backdrop {
+  position: absolute;
+}
+
+.sftp-view .toolbar__qc-panel {
+  top: auto;
+  bottom: calc(100% + 6px);
+  right: 14px;
 }
 
 .sftp-toolbar {
@@ -949,8 +1019,8 @@ a {
   padding: 0 14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 10px;
   border-bottom: 1px solid var(--border-neutral-l1);
   background: var(--bg-base-secondary);
   flex-shrink: 0;
@@ -974,13 +1044,42 @@ a {
   flex-shrink: 0;
 }
 
-/* 路径栏并入工具栏一行：占据中间剩余宽度 */
+/* 路径栏：占据中间剩余宽度（输入框即内容，无空白），右侧按钮组贴右缘 */
 .sftp-pathbar {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 标题栏断开按钮：连接成功绿色、未连接橙色（warning 对比度优于黄色） */
+.titlebar__conn-btn {
+  color: var(--status-warning-default);
+}
+
+.titlebar__conn-btn.is-connected {
+  color: var(--status-success-default);
+}
+
+/* 新建下拉菜单：锚定「新建」按钮 */
+.sftp-new-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.sftp-new-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 205;
+}
+
+.ctx-menu.sftp-new-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 210;
+  min-width: 150px;
 }
 
 .sftp-pathbar__input {
@@ -1004,18 +1103,22 @@ a {
 .sftp-list {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: 6px;
+  /* 六列在窄面板下可能超出容器宽度：允许横向滚动，
+     保证修改时间/权限等固定最小宽度的列完整显示、不被截断遮挡 */
+  overflow: auto;
+  /* 左右无外边距，使表头（文件名/大小…）紧贴列表容器两侧 */
+  padding: 0 0 6px;
 }
 
-/* 六列网格：文件名 | 大小 | 类型 | 修改时间 | 权限 | 用户/组 */
+/* 六列网格：文件名 | 大小 | 类型 | 修改时间 | 权限 | 用户/组（列宽可拖动调整，末列吸收剩余空间） */
 .sftp-head,
 .sftp-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px 40px 118px 76px 80px;
+  grid-template-columns: var(--sftp-name) var(--sftp-size) var(--sftp-type) var(--sftp-mtime) var(--sftp-perms) var(--sftp-owner) minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  padding: 0 8px;
+  /* 列表左右已无外边距，这里仅留 6px 内边距，保证列内容贴边 */
+  padding: 0 6px;
 }
 
 .sftp-head {
@@ -1031,6 +1134,7 @@ a {
 }
 
 .sftp-head__cell {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -1041,6 +1145,10 @@ a {
   font: inherit;
   text-align: left;
   white-space: nowrap;
+  overflow: visible;
+}
+
+button.sftp-head__cell {
   cursor: pointer;
 }
 
@@ -1051,6 +1159,51 @@ a {
 .sftp-head__cell.is-sorted {
   color: var(--text-default);
   font-weight: 600;
+}
+
+/* 列分隔线（拖动调整列宽） */
+.sftp-resizer {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: -5px;
+  width: 10px;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.sftp-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--border-neutral-l1);
+}
+
+.sftp-resizer:hover::after,
+.sftp-resizer:active::after {
+  background: var(--bg-brand);
+}
+
+/* 排序指示：上下双箭头，当前方向高亮 */
+.sftp-sort {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 2px;
+}
+
+.sftp-sort__arrow {
+  display: inline-flex;
+  color: var(--text-tertiary);
+  opacity: 0.55;
+}
+
+.sftp-sort__arrow.is-active {
+  color: var(--bg-brand);
+  opacity: 1;
 }
 
 .sftp-row {
@@ -1096,6 +1249,13 @@ a {
   white-space: nowrap;
   font-size: var(--body-xs-font-size);
   color: var(--text-tertiary);
+  /* 列间垂直分隔线 */
+  border-right: 1px solid var(--border-neutral-l1);
+  padding-right: 8px;
+}
+
+.sftp-row__cell:last-child {
+  border-right: none;
 }
 
 .sftp-row__cell--num {
@@ -1107,11 +1267,69 @@ a {
   font-family: var(--font-family-mono);
 }
 
+/* 终端内搜索行（Ctrl+F / 右键查找展开） */
+.sftp-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-base-secondary);
+  border-bottom: 1px solid var(--border-neutral-l1);
+  flex-shrink: 0;
+}
+
+.sftp-search .toolbar__search-input {
+  width: 220px;
+}
+
 .sftp-empty {
   padding: 24px;
   text-align: center;
   font-size: var(--body-sm-font-size);
   color: var(--text-tertiary);
+}
+
+/* 目录加载失败提示：图标 + 具体错误信息 + 重试按钮 */
+.sftp-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 12px;
+  padding: 10px 12px;
+  background: var(--bg-overlay-l1);
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: var(--radius-6);
+}
+
+.sftp-error__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--status-error-default);
+}
+
+.sftp-error__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sftp-error__title {
+  font-size: var(--body-sm-font-size);
+  color: var(--text-default);
+  font-weight: 600;
+}
+
+.sftp-error__msg {
+  font-family: var(--font-family-mono);
+  font-size: var(--body-xs-font-size);
+  color: var(--status-error-default);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  max-height: 60px;
+  overflow: hidden;
 }
 
 .sftp-list--remote.is-drop-target {
@@ -1230,11 +1448,25 @@ a {
   display: flex;
 }
 
-/* SFTP 嵌入工作区：终端（3）与远程文件浏览器（2）按比例共享中间区域，
-   终端窗口常驻，仅替换原工具栏（连接信息区）为 SFTP 面板 */
-.workspace__main--sftp {
+/* SFTP 嵌入工作区：终端（3）与文件面板（2）按比例共享中间区域，
+   终端窗口常驻，底部文件面板替代原连接信息工具栏 */
+.workspace__main--files {
   flex: 3;
   min-height: 120px;
+}
+
+/* 终端工作区常驻挂载（EditorTabs + 终端 + 文件面板 + 输入框）：
+   切换到监控/设置等其他模块时用 is-hidden 隐藏而非卸载，
+   保证 SSH 会话输出与终端状态在切回时完整保留 */
+.workspace__terminal-stack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace__terminal-stack.is-hidden {
+  display: none;
 }
 
 .workspace__sftp {
@@ -1444,51 +1676,8 @@ a {
 }
 
 /* =========================================================================
-   Toolbar
+   快捷命令弹层（原工具栏合并至文件面板）
    ========================================================================= */
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 38px;
-  padding: 0 14px;
-  background: var(--bg-base-secondary);
-  border-bottom: 1px solid var(--border-neutral-l1);
-  flex-shrink: 0;
-  position: relative;
-}
-
-.toolbar__left,
-.toolbar__right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.toolbar__conn-info {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-default);
-  font-size: var(--body-sm-font-size);
-  font-family: var(--font-family-mono);
-}
-
-.toolbar__sep {
-  color: var(--text-tertiary);
-}
-
-.toolbar__meta {
-  color: var(--text-tertiary);
-  font-size: var(--body-sm-font-size);
-}
-
-.toolbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .toolbar__qc-backdrop {
   position: fixed;
   inset: 0;
@@ -1725,11 +1914,39 @@ a {
 
 .right-panel__body {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
   padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* 资源监控区：上部，占主要空间，内部紧凑 */
+.right-panel__monitor {
+  flex: 1 1 58%;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 传输队列区：下部，占比约 1/3，独立滚动 */
+.right-panel__transfers {
+  flex: 0 1 32%;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-neutral-l1);
+  padding-top: 8px;
+}
+
+.right-panel__transfers .ds-card {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .right-panel__section-title {
@@ -1756,6 +1973,26 @@ a {
   text-align: center;
 }
 
+/* 占满整个面板（未连接时隐藏传输队列，仅展示空状态） */
+.right-panel__empty--full {
+  flex: 1;
+  min-height: 0;
+  gap: 4px;
+}
+
+.right-panel__empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-overlay-l2);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-neutral-l1);
+}
+
 .right-panel__empty-text {
   font-size: var(--body-md-font-size);
   font-weight: 500;
@@ -1765,6 +2002,8 @@ a {
 .right-panel__empty-sub {
   font-size: var(--body-xs-font-size);
   color: var(--text-tertiary);
+  max-width: 220px;
+  line-height: 1.5;
 }
 
 .res-card__head {
@@ -1786,6 +2025,12 @@ a {
   font-family: var(--font-family-mono);
   font-size: var(--body-sm-font-size);
   color: var(--text-default);
+}
+
+/* 运行时长：文本较长（天小时分秒），用更小字号保证单行完整显示 */
+.res-card__value--uptime {
+  font-size: var(--body-xs-font-size);
+  white-space: nowrap;
 }
 
 .res-bar {
@@ -1831,6 +2076,16 @@ a {
   text-overflow: ellipsis;
 }
 
+/* CPU 实时曲线（迷你 sparkline，随轮询更新） */
+.res-spark {
+  display: block;
+  width: 100%;
+  height: 34px;
+  margin-top: 2px;
+  background: var(--bg-overlay-l1);
+  border-radius: var(--radius-4);
+}
+
 .transfer-row__head {
   display: flex;
   align-items: center;
@@ -1863,6 +2118,15 @@ a {
   color: var(--text-tertiary);
 }
 
+/* 传输队列底部提示：暂停/恢复能力说明 */
+.transfer-pane__hint {
+  padding: 6px 2px 2px;
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+  border-top: 1px dashed var(--border-neutral-l1);
+  line-height: 1.4;
+}
+
 .net-row {
   display: flex;
   align-items: center;
@@ -1880,6 +2144,35 @@ a {
 .net-row__value {
   font-family: var(--font-family-mono);
   font-size: var(--body-sm-font-size);
+  color: var(--text-default);
+}
+
+/* 负载（1/5/15 分钟）三格排版 */
+.load-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.load-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  background: var(--bg-overlay-l1);
+  border-radius: var(--radius-6);
+}
+
+.load-cell__label {
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+}
+
+.load-cell__value {
+  font-family: var(--font-family-mono);
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
   color: var(--text-default);
 }
 

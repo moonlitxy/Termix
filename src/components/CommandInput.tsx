@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
-import { ipc } from "../lib/ipc";
+import { ipc, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import type { CommandHistory } from "../types";
 
 /** 历史列表最大条数（完整展示当前会话输入过的所有命令） */
@@ -47,11 +47,28 @@ export function CommandInput() {
       await ipc.terminalWrite(tab.connectionId, tab.shellId, command + "\n");
       if (tab.sessionId) {
         await ipc.historyAdd(tab.sessionId, command);
+        document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT));
       }
     }
     setValue("");
     setHistIdx(-1);
   };
+
+  // 监听历史变更：终端直接输入、快捷命令等写入历史后，刷新 ↑↓ 与「历史」按钮的数据源
+  useEffect(() => {
+    const sessionId = tab?.sessionId;
+    if (!sessionId) return;
+    const reload = async () => {
+      try {
+        const list = await ipc.historyList(sessionId, HIST_LIMIT);
+        setHistory(dedupHistory(list));
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener(HISTORY_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(HISTORY_CHANGED_EVENT, reload);
+  }, [tab?.sessionId]);
 
   const toggleHistory = async () => {
     const next = !histOpen;
@@ -138,6 +155,7 @@ export function CommandInput() {
       <button
         className="ds-btn ds-btn--brand"
         type="button"
+        title="执行：将输入的命令发送到终端"
         onClick={() => execute(value)}
         disabled={disabled}
       >
@@ -148,6 +166,7 @@ export function CommandInput() {
         <button
           className="ds-btn ds-btn--secondary"
           type="button"
+          title="历史：查看并复用历史命令"
           onClick={toggleHistory}
           disabled={disabled}
         >

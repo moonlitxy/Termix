@@ -54,6 +54,7 @@ fn main() {
             commands::sftp_list,
             commands::sftp_cwd,
             commands::sftp_mkdir,
+            commands::sftp_create_file,
             commands::sftp_remove,
             commands::sftp_rename,
             commands::sftp_chmod,

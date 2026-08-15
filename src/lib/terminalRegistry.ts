@@ -47,9 +47,6 @@ export const terminalRegistry = {
     const next = cur.length + data.length > MAX_BUF ? cur.slice(data.length) + data : cur + data;
     buffers.set(tabId, next);
   },
-  getBuffer(tabId: string): string {
-    return buffers.get(tabId) ?? "";
-  },
   clearBuffer(tabId: string): void {
     buffers.delete(tabId);
   },
