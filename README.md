@@ -2,8 +2,6 @@
 
 跨平台（macOS / Windows）SSH 终端连接工具，对标 MobaXterm / FinalShell，集成连接管理、多标签终端、SFTP、端口转发、系统监控等能力。基于 Tauri 2 构建，**安装包小（5-15MB）、内存占用低（约为 Electron 1/3）**。
 
-> 产品需求：`design/PRD.md` · 设计原型：`design/pages/index-v2.html`
-
 ---
 
 ## 功能特性
@@ -99,8 +97,6 @@ npm test                     # 前端 Vitest（18 个用例）
 
 ```
 Termix/
-├── design/                  # PRD 与设计原型
-├── plan/                    # 开发进度、PRD 完成度总结（git 忽略，仅本地）
 ├── src/                     # 前端（React + TS）
 │   ├── components/          # 标题栏 / 活动导航 / 终端与文件面板 / 转发 / 监控 / 设置等
 │   ├── store/               # zustand 全局状态（app.ts）与监控单一数据源（monitor.ts）
@@ -121,8 +117,3 @@ Termix/
 ```
 
 ---
-
-## 相关文档
-
-- [开发进度](plan/开发进度.md)
-- [PRD 完成度总结](plan/PRD完成度总结.md)
