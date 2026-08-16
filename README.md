@@ -2,6 +2,10 @@
 
 跨平台（macOS / Windows）SSH 终端连接工具，对标 MobaXterm / FinalShell，集成连接管理、多标签终端、SFTP、端口转发、系统监控等能力。基于 Tauri 2 构建，**安装包小（5-15MB）、内存占用低（约为 Electron 1/3）**。
 
+<p align="center">
+  <img src="screenshots/termix-main.png" alt="Termix 主界面" width="900" />
+</p>
+
 ---
 
 ## 功能特性
