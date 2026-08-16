@@ -60,10 +60,11 @@ jobs:
 
       - run: npm ci
 
-      # lock 由 macOS 生成，仅含 darwin 平台的可选二进制，npm install 补齐
-      # Windows 平台包（tauri CLI / rollup 等），--no-save 不修改 package.json
+      # lock 由 macOS 生成，仅含 darwin 平台的可选二进制。npm ci 严格按 lock
+      # 安装，不含 win32 平台包（tauri CLI / rollup / esbuild 等）。此处忽略
+      # lock 按 package.json 重新解析当前平台，补齐所有 win32 可选包
       - name: Install Windows platform binaries
-        run: npm install --no-save
+        run: npm install --no-save --package-lock=false
 
       - name: Build EXE
         run: npm run tauri build -- --bundles nsis
