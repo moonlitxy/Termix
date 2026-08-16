@@ -60,6 +60,10 @@ jobs:
 
       - run: npm ci
 
+      # lock 由 macOS 生成，未含 Windows 平台的可选二进制，需补装 tauri CLI 的 win32 原生包
+      - name: Install tauri CLI win32 binary
+        run: npm install --no-save @tauri-apps/cli-win32-x64-msvc@2.11.4
+
       - name: Build EXE
         run: npm run tauri build -- --bundles nsis
 
