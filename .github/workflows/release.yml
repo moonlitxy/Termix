@@ -6,6 +6,9 @@ on:
       - "v1.0.1"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   # macOS：构建 DMG 安装包
   build-macos:
