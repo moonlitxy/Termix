@@ -45,6 +45,8 @@ interface AppState {
   sftpCollapsed: boolean;
   /** 各标签的重连触发计数：请求重新连接时自增，终端视图据此重建连接 */
   reconnectNonce: Record<string, number>;
+  /** 帮助页滚动锚点：标题栏「关于 Termix」设置后，帮助视图挂载时定位到对应区块 */
+  helpAnchor: string | null;
 
   loadSessions: () => Promise<void>;
   loadGroups: () => Promise<void>;
@@ -59,6 +61,7 @@ interface AppState {
   closeNewConnection: () => void;
 
   setActivity: (a: Activity) => void;
+  setHelpAnchor: (id: string | null) => void;
   setTransfers: (list: TransferTask[]) => void;
   upsertTransfer: (e: TransferProgressEvent) => void;
   setSftpContext: (sessionId: string, connectionId: string | null) => Promise<void>;
@@ -118,6 +121,7 @@ export const useApp = create<AppState>((set, get) => ({
   remoteCache: {},
   sftpCollapsed: false,
   reconnectNonce: {},
+  helpAnchor: null,
 
   loadSessions: async () => {
     try {
@@ -169,6 +173,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ newConnOpen: false, editingSession: null, newConnPresetGroupId: null }),
 
   setActivity: (a) => set({ activity: a }),
+  setHelpAnchor: (id) => set({ helpAnchor: id }),
   setTransfers: (list) => set({ transfers: list }),
   upsertTransfer: (e) =>
     set((s) => {

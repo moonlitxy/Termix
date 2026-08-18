@@ -1,8 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
   plugins: [react()],
+  // 版本号以 package.json 为准注入，前端「关于」等场景读取，避免硬编码
+  define: {
+    __TERMIX_VERSION__: JSON.stringify(pkg.version),
+  },
   clearScreen: false,
   server: {
     port: 1420,

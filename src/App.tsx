@@ -30,10 +30,12 @@ const MonitorView = lazy(() =>
 const SettingsView = lazy(() =>
   import("./components/SettingsView").then((m) => ({ default: m.SettingsView }))
 );
+const HelpView = lazy(() =>
+  import("./components/HelpView").then((m) => ({ default: m.HelpView }))
+);
 
 const PLACEHOLDERS: Record<string, { icon: string; title: string }> = {
   plugins: { icon: "grid-2x2", title: "插件" },
-  help: { icon: "help", title: "帮助" },
 };
 
 function adjustFontSize(delta: number) {
@@ -194,6 +196,12 @@ export default function App() {
       activityView = (
         <Suspense fallback={<ViewLoading />}>
           <SettingsView />
+        </Suspense>
+      );
+    } else if (activity === "help") {
+      activityView = (
+        <Suspense fallback={<ViewLoading />}>
+          <HelpView />
         </Suspense>
       );
     } else if (!isTerm) {

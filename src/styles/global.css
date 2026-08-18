@@ -2772,3 +2772,67 @@ button.sftp-head__cell {
   margin: 4px 6px;
   background: var(--border-neutral-l1);
 }
+
+/* 帮助与文档（HelpView） */
+.hp-desc {
+  margin: 0;
+  font-size: var(--body-sm-font-size);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.hp-list {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.hp-list__item {
+  position: relative;
+  padding-left: 16px;
+  font-size: var(--body-sm-font-size);
+  line-height: 1.6;
+  color: var(--text-default);
+}
+
+.hp-list__item::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.hp-faq-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hp-faq {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: var(--radius-6);
+  background: var(--bg-overlay-l1);
+}
+
+.hp-faq__q {
+  font-size: var(--body-sm-font-size);
+  font-weight: 600;
+  color: var(--text-default);
+}
+
+.hp-faq__a {
+  font-size: var(--body-sm-font-size);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}

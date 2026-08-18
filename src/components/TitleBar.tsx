@@ -254,9 +254,9 @@ export function TitleBar() {
                   title="查看 Termix 版本信息"
                   onClick={() => {
                     setAvatarOpen(false);
-                    window.alert(
-                      "Termix v0.1.0\n\n轻量级 SSH / SFTP / 系统监控桌面客户端，基于 Tauri + React + Rust。"
-                    );
+                    // 进入帮助页并定位到「关于 Termix」区块（版本号由构建配置注入，避免硬编码）
+                    useApp.getState().setHelpAnchor("about");
+                    setActivity("help");
                   }}
                 >
                   <Icon name="info-circle" size={12} />
