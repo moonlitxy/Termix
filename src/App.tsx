@@ -10,10 +10,18 @@ import { CommandInput } from "./components/CommandInput";
 import { RightPanel } from "./components/RightPanel";
 import { StatusBar } from "./components/StatusBar";
 import { NewConnectionDialog } from "./components/NewConnectionDialog";
+import { UpdateDialog } from "./components/UpdateDialog";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { Icon } from "./components/Icon";
-import { ipc, onTransferProgress } from "./lib/ipc";
+import {
+  ipc,
+  onTransferProgress,
+  onUpdateDownloadDone,
+  onUpdateDownloadError,
+  onUpdateDownloadProgress,
+} from "./lib/ipc";
 import { terminalRegistry } from "./lib/terminalRegistry";
+import { useUpdate } from "./store/update";
 
 // 非终端视图按需加载（首屏不下载，减小初始 bundle）
 // 组件为命名导出，转换为 default 供 lazy 使用
@@ -122,6 +130,47 @@ export default function App() {
       }
     })();
     return () => {
+      unlistens.forEach((u) => u());
+    };
+  }, []);
+
+  // 软件更新：启动后延迟自动检查（不打断首次交互），并监听下载进度 / 完成 / 失败事件
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void useUpdate.getState().autoCheck();
+    }, 4000);
+    const unlistens: (() => void)[] = [];
+    (async () => {
+      try {
+        const un = await onUpdateDownloadProgress((e) => {
+          useUpdate.getState().setProgress(e);
+        });
+        unlistens.push(un);
+      } catch {
+        /* browser mode */
+      }
+      try {
+        const un = await onUpdateDownloadDone((e) => {
+          const st = useUpdate.getState();
+          st.setDownloadDone(e.path);
+          // 下载完成后自动打开安装程序（macOS 挂载 DMG / Windows 启动 EXE 安装程序）
+          void ipc.openInstaller(e.path).catch((err) => st.setDownloadError(String(err)));
+        });
+        unlistens.push(un);
+      } catch {
+        /* browser mode */
+      }
+      try {
+        const un = await onUpdateDownloadError((e) => {
+          useUpdate.getState().setDownloadError(e.error);
+        });
+        unlistens.push(un);
+      } catch {
+        /* browser mode */
+      }
+    })();
+    return () => {
+      window.clearTimeout(t);
       unlistens.forEach((u) => u());
     };
   }, []);
@@ -296,6 +345,7 @@ export default function App() {
       </div>
       <StatusBar />
       <NewConnectionDialog />
+      <UpdateDialog />
       <GlobalTooltip />
     </div>
   );

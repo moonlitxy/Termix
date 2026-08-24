@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
 import { loadSettings, saveSettings, type Settings } from "../lib/settings";
+import { useUpdate } from "../store/update";
 import type { MasterStatus } from "../types";
 
 function systemTheme(): "dark" | "light" {
@@ -44,6 +45,25 @@ export function SettingsView() {
   }, [settings.theme]);
 
   const set = (patch: Partial<Settings>) => setSettings((s) => ({ ...s, ...patch }));
+
+  // ---- 软件更新 ----
+  const checking = useUpdate((s) => s.checking);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+
+  const handleCheckUpdate = async () => {
+    setUpdateMsg(null);
+    const info = await useUpdate.getState().check();
+    if (!info) {
+      setUpdateMsg(useUpdate.getState().error ?? "检查更新失败，请稍后重试");
+      return;
+    }
+    if (info.hasUpdate) {
+      setUpdateMsg(`发现新版本 v${info.latestVersion}，正在打开更新提示`);
+      useUpdate.getState().openDialog();
+    } else {
+      setUpdateMsg(`已是最新版本 v${info.currentVersion}`);
+    }
+  };
 
   // ---- 安全：主密码 ----
   const [master, setMaster] = useState<MasterStatus>({ hasMaster: false, unlocked: false });
@@ -352,6 +372,33 @@ export function SettingsView() {
             <label>终端字号缩放</label>
             <span className="st-kbd">Ctrl + / -</span>
           </div>
+        </div>
+
+        <div className="ds-card st-section">
+          <div className="res-card__head">
+            <span className="res-card__label">
+              <Icon name="download" size={14} />软件更新
+            </span>
+          </div>
+          <div className="st-row">
+            <label>当前版本</label>
+            <span className="st-kbd">v{__TERMIX_VERSION__}</span>
+          </div>
+          <div className="st-row">
+            <label />
+            <div className="st-actions">
+              <button
+                className="ds-btn ds-btn--brand ds-btn--sm"
+                type="button"
+                disabled={checking}
+                title="检查 Termix 是否有新版本"
+                onClick={() => void handleCheckUpdate()}
+              >
+                {checking ? "检查中…" : "检查更新"}
+              </button>
+            </div>
+          </div>
+          {updateMsg && <div className="st-hint">{updateMsg}</div>}
         </div>
       </div>
     </div>

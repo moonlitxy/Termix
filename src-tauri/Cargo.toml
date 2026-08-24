@@ -20,6 +20,8 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 env_logger = "0.11"
+# 软件更新检查/下载：rustls-tls 避免依赖系统 OpenSSL，stream 用于流式下载
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 
 [features]
 # this feature is used for production builds where `devUrl` is not used

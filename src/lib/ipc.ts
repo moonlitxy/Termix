@@ -18,6 +18,8 @@ import type {
   SysInfo,
   TransferProgressEvent,
   TransferTask,
+  UpdateInfo,
+  UpdateProgressEvent,
 } from "../types";
 
 export const ipc = {
@@ -143,6 +145,13 @@ export const ipc = {
   masterUnlock: (master: string) => invoke<void>("master_unlock", { master }),
   masterLock: () => invoke<void>("master_lock"),
   masterClear: (master: string) => invoke<void>("master_clear", { master }),
+
+  // ---- 软件更新 ----
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  downloadUpdate: (url: string, fileName: string) =>
+    invoke<void>("download_update", { url, fileName }),
+  openInstaller: (path: string) => invoke<void>("open_installer", { path }),
+  openExternal: (url: string) => invoke<void>("open_external", { url }),
 };
 
 export interface TerminalOutputEvent {
@@ -171,6 +180,26 @@ export function onTransferProgress(
   cb: (e: TransferProgressEvent) => void
 ): Promise<UnlistenFn> {
   return listen<TransferProgressEvent>("transfer-progress", (ev) => cb(ev.payload));
+}
+
+export function onUpdateDownloadProgress(
+  cb: (e: UpdateProgressEvent) => void
+): Promise<UnlistenFn> {
+  return listen<UpdateProgressEvent>("update-download-progress", (ev) => cb(ev.payload));
+}
+
+export function onUpdateDownloadDone(
+  cb: (e: { fileName: string; path: string }) => void
+): Promise<UnlistenFn> {
+  return listen<{ fileName: string; path: string }>("update-download-done", (ev) =>
+    cb(ev.payload)
+  );
+}
+
+export function onUpdateDownloadError(
+  cb: (e: { error: string }) => void
+): Promise<UnlistenFn> {
+  return listen<{ error: string }>("update-download-error", (ev) => cb(ev.payload));
 }
 
 /** 命令历史变更事件：终端直接输入 / 底部输入框 / 快捷命令任一来源写入历史后广播，

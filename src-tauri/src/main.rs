@@ -7,6 +7,7 @@ mod forward;
 mod models;
 mod sftp;
 mod ssh;
+mod updater;
 
 use tauri::Manager;
 
@@ -86,6 +87,10 @@ fn main() {
             commands::master_unlock,
             commands::master_lock,
             commands::master_clear,
+            updater::check_update,
+            updater::download_update,
+            updater::open_installer,
+            updater::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

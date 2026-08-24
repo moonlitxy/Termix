@@ -226,3 +226,22 @@ export interface MasterStatus {
   hasMaster: boolean;
   unlocked: boolean;
 }
+
+// ---- 软件更新 ----
+
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseUrl: string;
+  assetUrl: string;
+  assetName: string;
+  releaseNotes: string;
+}
+
+export interface UpdateProgressEvent {
+  fileName: string;
+  received: number;
+  total: number;
+  percent: number;
+}

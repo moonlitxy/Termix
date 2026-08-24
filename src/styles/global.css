@@ -2311,6 +2311,86 @@ button.sftp-head__cell {
 }
 
 /* =========================================================================
+   软件更新弹窗
+   ========================================================================= */
+.dialog--update {
+  width: 520px;
+}
+
+.dialog--update .dialog__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.upd-versions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-overlay-l1);
+  border-radius: var(--radius-6);
+}
+
+.upd-versions__old {
+  font-size: var(--body-sm-font-size);
+  color: var(--text-tertiary);
+}
+
+.upd-versions__arrow {
+  display: inline-flex;
+  color: var(--text-tertiary);
+}
+
+.upd-versions__new {
+  font-size: var(--body-md-font-size);
+  font-weight: 600;
+  color: var(--status-success-default);
+}
+
+.upd-notes {
+  max-height: 240px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 10px 12px;
+  font-size: var(--body-sm-font-size);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-overlay-l1);
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: var(--radius-6);
+}
+
+.upd-progress {
+  height: 8px;
+  overflow: hidden;
+  background: var(--bg-overlay-l2);
+  border-radius: var(--radius-full);
+}
+
+.upd-progress__bar {
+  height: 100%;
+  background: var(--bg-brand);
+  border-radius: var(--radius-full);
+  transition: width 0.15s ease;
+}
+
+.upd-progress__text {
+  margin-top: 6px;
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+}
+
+.upd-done {
+  padding: 10px 12px;
+  font-size: var(--body-sm-font-size);
+  color: var(--status-success-default);
+  background: var(--bg-overlay-l1);
+  border-radius: var(--radius-6);
+}
+
+/* =========================================================================
    v0.3: 端口转发 / 命令片段 / 监控 / 设置
    ========================================================================= */
 .fw-view,
