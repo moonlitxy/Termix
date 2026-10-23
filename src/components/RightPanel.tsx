@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { useMonitor, selectMonitorConnection, computeUptimeSec } from "../store/monitor";
 import { ipc } from "../lib/ipc";
 import { resBarColor, resTextColor } from "../lib/resColor";
+import { toast } from "../store/feedback";
 import type { TransferTask } from "../types";
 
 function formatBytes(n: number): string {
@@ -68,8 +69,39 @@ export function RightPanel() {
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
   const doneTimers = useRef(new Set<string>());
+  const [pendingTransfers, setPendingTransfers] = useState<Record<string, boolean>>({});
   // 传输重试节流：失败任务连点「重试」会重复创建传输任务，600ms 窗口内只允许一次
   const lastRetryAt = useRef(0);
+
+  const patchTransferStatus = (taskId: string, status: TransferTask["status"]) => {
+    useApp.setState((state) => ({
+      transfers: state.transfers.map((task) =>
+        task.id === taskId ? { ...task, status } : task
+      ),
+    }));
+  };
+
+  const mutateTransferStatus = async (
+    task: TransferTask,
+    nextStatus: TransferTask["status"],
+    action: () => Promise<void>
+  ) => {
+    const previous = task.status;
+    setPendingTransfers((current) => ({ ...current, [task.id]: true }));
+    patchTransferStatus(task.id, nextStatus);
+    try {
+      await action();
+    } catch (e) {
+      patchTransferStatus(task.id, previous);
+      toast.error(String(e), "传输操作失败");
+    } finally {
+      setPendingTransfers((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+    }
+  };
 
   // ---- 指标数据统一来自共享监控数据源（与「监控」模块同一份，单一轮询） ----
   const metrics = useMonitor((s) => s.metrics);
@@ -86,7 +118,10 @@ export function RightPanel() {
   // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列
   useEffect(() => {
     const done = transfers.filter(
-      (t) => t.status !== "running" && !doneTimers.current.has(t.id)
+      (t) =>
+        t.status !== "running" &&
+        !pendingTransfers[t.id] &&
+        !doneTimers.current.has(t.id)
     );
     done.forEach((t) => {
       doneTimers.current.add(t.id);
@@ -95,7 +130,7 @@ export function RightPanel() {
         useApp.setState((s) => ({ transfers: s.transfers.filter((x) => x.id !== t.id) }));
       }, 5000);
     });
-  }, [transfers]);
+  }, [transfers, pendingTransfers]);
 
   const retryTransfer = (t: TransferTask) => {
     const now = Date.now();
@@ -105,7 +140,7 @@ export function RightPanel() {
       (x) => x.sessionId === t.sessionId && x.connectionId
     );
     if (!conn?.connectionId) {
-      window.alert("该会话已断开，请先重新连接后再试");
+      toast.warning("该会话已断开，请先重新连接后再试");
       return;
     }
     console.log("[transfer] retry", t.id, t.direction, { local: t.localPath, remote: t.remotePath });
@@ -326,6 +361,7 @@ export function RightPanel() {
                           : " ds-btn--tertiary")
                       }
                       type="button"
+                      disabled={!!pendingTransfers[t.id]}
                       title={
                         t.status === "running"
                           ? "暂停：中断传输并保留已上传/下载的部分文件"
@@ -335,14 +371,14 @@ export function RightPanel() {
                       onClick={() => {
                         if (t.status === "running") {
                           console.log("[transfer] pause task", t.id);
-                          ipc
-                            .transferPause(t.id)
-                            .catch((e) => console.warn("[transfer] pause failed:", e));
+                          void mutateTransferStatus(t, "paused", () =>
+                            ipc.transferPause(t.id)
+                          );
                         } else {
                           console.log("[transfer] resume task", t.id);
-                          ipc
-                            .transferResume(t.id)
-                            .catch((e) => console.warn("[transfer] resume failed:", e));
+                          void mutateTransferStatus(t, "running", () =>
+                            ipc.transferResume(t.id)
+                          );
                         }
                       }}
                     >
@@ -353,13 +389,14 @@ export function RightPanel() {
                     <button
                       className="ds-btn ds-btn--tertiary ds-btn--icon"
                       type="button"
+                      disabled={!!pendingTransfers[t.id]}
                       title="取消"
                       style={{ width: 18, height: 18, marginLeft: 2 }}
                       onClick={() => {
                         console.log("[transfer] cancel task", t.id);
-                        ipc
-                          .transferCancel(t.id)
-                          .catch((e) => console.warn("[transfer] cancel failed:", e));
+                        void mutateTransferStatus(t, "cancelled", () =>
+                          ipc.transferCancel(t.id)
+                        );
                       }}
                     >
                       <Icon name="x-circle" size={12} />

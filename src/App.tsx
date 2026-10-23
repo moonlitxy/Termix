@@ -12,6 +12,7 @@ import { StatusBar } from "./components/StatusBar";
 import { NewConnectionDialog } from "./components/NewConnectionDialog";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { GlobalTooltip } from "./components/GlobalTooltip";
+import { FeedbackHost } from "./components/FeedbackHost";
 import { Icon } from "./components/Icon";
 import {
   ipc,
@@ -82,8 +83,17 @@ function Placeholder({ id }: { id: string }) {
 /** 懒加载视图的加载占位 */
 function ViewLoading() {
   return (
-    <div className="workspace__empty">
-      <span className="workspace__empty-text">加载中…</span>
+    <div className="view-skeleton" role="status" aria-label="内容加载中">
+      <div className="view-skeleton__toolbar" />
+      <div className="view-skeleton__grid">
+        {[0, 1, 2, 3].map((item) => (
+          <div className="view-skeleton__card" key={item}>
+            <span className="view-skeleton__line view-skeleton__line--short" />
+            <span className="view-skeleton__line" />
+            <span className="view-skeleton__line view-skeleton__line--medium" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -329,7 +339,11 @@ export default function App() {
           )}
           {hasTabs && <CommandInput />}
         </div>
-        {!isTerm && activityView}
+        {!isTerm && (
+          <div className="workspace__activity" key={activity}>
+            {activityView}
+          </div>
+        )}
       </>
     );
   };
@@ -346,6 +360,7 @@ export default function App() {
       <StatusBar />
       <NewConnectionDialog />
       <UpdateDialog />
+      <FeedbackHost />
       <GlobalTooltip />
     </div>
   );

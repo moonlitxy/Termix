@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { applyVariables, buildVarDefs, type VarDef } from "../lib/variables";
+import { confirmDialog, toast } from "../store/feedback";
 import type { Snippet, SnippetInput } from "../types";
 
 const EMPTY: SnippetInput = { title: "", command: "", groupId: undefined };
@@ -49,7 +50,7 @@ export function SnippetsView() {
 
   const save = async () => {
     if (!form.title || !form.command) {
-      window.alert("请填写标题与命令");
+      toast.warning("请填写标题与命令");
       return;
     }
     try {
@@ -60,21 +61,22 @@ export function SnippetsView() {
       }
       setModalOpen(false);
       void load();
+      toast.success(editingId ? "命令片段已更新" : "命令片段已创建");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
   const send = async (command: string) => {
     const tab = tabs.find((t) => t.id === activeTabId);
     if (!tab?.connectionId || !tab.shellId) {
-      window.alert("请先打开一个已连接的终端标签页");
+      toast.warning("请先打开一个已连接的终端标签页");
       return;
     }
     try {
       await ipc.terminalWrite(tab.connectionId, tab.shellId, command + "\n");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -131,9 +133,20 @@ export function SnippetsView() {
                   className="ds-btn ds-btn--danger-subtle ds-btn--icon"
                   type="button"
                   title="删除"
-                  onClick={() => {
-                    if (window.confirm(`删除片段 ${s.title}？`)) {
-                      void ipc.snippetDelete(s.id).then(load);
+                  onClick={async () => {
+                    const confirmed = await confirmDialog({
+                      title: "删除命令片段",
+                      message: `确定删除片段「${s.title}」？`,
+                      confirmText: "删除",
+                      danger: true,
+                    });
+                    if (!confirmed) return;
+                    try {
+                      await ipc.snippetDelete(s.id);
+                      await load();
+                      toast.success("命令片段已删除");
+                    } catch (e) {
+                      toast.error(String(e));
                     }
                   }}
                 >

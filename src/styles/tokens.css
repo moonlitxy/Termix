@@ -7,6 +7,11 @@
   --radius-10: 10px;
   --radius-full: 9999px;
 
+  /* motion */
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 180ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+
   /* spacers */
   --spacer-4: 4px;
   --spacer-6: 6px;

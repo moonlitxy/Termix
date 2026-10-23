@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
 import { loadSettings, saveSettings, type Settings } from "../lib/settings";
 import { useUpdate } from "../store/update";
+import { confirmDialog, toast } from "../store/feedback";
 import type { MasterStatus } from "../types";
 
 function systemTheme(): "dark" | "light" {
@@ -84,11 +85,11 @@ export function SettingsView() {
 
   const doSet = async () => {
     if (newPass.length < 4) {
-      window.alert("主密码至少 4 位");
+      toast.warning("主密码至少 4 位");
       return;
     }
     if (newPass !== confirmPass) {
-      window.alert("两次输入的主密码不一致");
+      toast.warning("两次输入的主密码不一致");
       return;
     }
     try {
@@ -97,9 +98,11 @@ export function SettingsView() {
       setConfirmPass("");
       setOldPass("");
       refreshMaster();
-      window.alert(master.hasMaster ? "主密码已修改" : "主密码已设置，会话密码已加密");
+      toast.success(
+        master.hasMaster ? "主密码已修改" : "主密码已设置，会话密码已加密"
+      );
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -108,9 +111,9 @@ export function SettingsView() {
       await ipc.masterUnlock(unlockPass);
       setUnlockPass("");
       refreshMaster();
-      window.alert("已解锁");
+      toast.success("已解锁");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -118,21 +121,27 @@ export function SettingsView() {
     try {
       await ipc.masterLock();
       refreshMaster();
-      window.alert("已锁定");
+      toast.success("已锁定");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
   const doClear = async () => {
-    if (!window.confirm("清除主密码后，所有会话密码将恢复为明文存储，确定继续？")) return;
+    const confirmed = await confirmDialog({
+      title: "清除主密码",
+      message: "清除主密码后，所有会话密码将恢复为明文存储，确定继续？",
+      confirmText: "清除",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await ipc.masterClear(unlockPass);
       setUnlockPass("");
       refreshMaster();
-      window.alert("主密码已清除");
+      toast.success("主密码已清除");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp, selectFilteredSessions, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { useClampedMenuPosition } from "../lib/contextMenu";
+import { confirmDialog, toast } from "../store/feedback";
 import type { Group, Session } from "../types";
 
 interface CtxMenu {
@@ -33,6 +35,7 @@ export function SessionSidebar() {
   const [newGroupName, setNewGroupName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPosition = useClampedMenuPosition(ctx ?? groupCtx, menuRef);
 
   // 导出会话（JSON 备份下载）
   const handleExport = async () => {
@@ -48,8 +51,9 @@ export function SessionSidebar() {
       a.download = name;
       a.click();
       URL.revokeObjectURL(url);
+      toast.success("会话配置已导出");
     } catch (e) {
-      window.alert("导出失败：" + String(e));
+      toast.error("导出失败：" + String(e));
     }
   };
 
@@ -64,9 +68,10 @@ export function SessionSidebar() {
         res.secretsCleared > 0
           ? `导入完成：新增 ${res.sessionsCreated} 个会话、${res.groupsCreated} 个分组，跳过 ${res.sessionsSkipped} 个同名会话；${res.secretsCleared} 个密码字段无法解密已清空（可能来自其他设备，请重新填写）`
           : `导入完成：新增 ${res.sessionsCreated} 个会话、${res.groupsCreated} 个分组，跳过 ${res.sessionsSkipped} 个同名会话`;
-      window.alert(msg);
+      if (res.secretsCleared > 0) toast.warning(msg, "导入完成");
+      else toast.success(msg, "导入完成");
     } catch (e) {
-      window.alert("导入失败：" + String(e));
+      toast.error("导入失败：" + String(e));
     }
   };
 
@@ -92,12 +97,19 @@ export function SessionSidebar() {
   };
 
   const handleDelete = async (session: Session) => {
-    if (!window.confirm(`删除会话 ${session.name}？`)) return;
+    const confirmed = await confirmDialog({
+      title: "删除会话",
+      message: `确定删除会话「${session.name}」？此操作不可恢复。`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await ipc.sessionDelete(session.id);
       void loadSessions();
+      toast.success(`会话「${session.name}」已删除`);
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -106,8 +118,10 @@ export function SessionSidebar() {
       await navigator.clipboard.writeText(
         `${session.username}@${session.host}:${session.port}`
       );
+      toast.success("连接信息已复制");
     } catch (e) {
       console.error("[session] copy failed:", e);
+      toast.error("复制连接信息失败");
     }
   };
 
@@ -146,17 +160,24 @@ export function SessionSidebar() {
       setAddingGroup(false);
       setNewGroupName("");
     } catch (e) {
-      window.alert("新建分组失败：" + String(e));
+      toast.error("新建分组失败：" + String(e));
     }
   };
 
   const handleDeleteGroup = async (g: Group) => {
-    if (!window.confirm(`删除分组「${g.name}」？组内会话将保留，但不再归入该分组。`)) return;
+    const confirmed = await confirmDialog({
+      title: "删除分组",
+      message: `确定删除分组「${g.name}」？组内会话将保留，但不再归入该分组。`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await ipc.groupDelete(g.id);
       await loadGroups();
+      toast.success(`分组「${g.name}」已删除`);
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -362,7 +383,7 @@ export function SessionSidebar() {
         <div
           className="ctx-menu"
           ref={menuRef}
-          style={{ left: ctx.x, top: ctx.y }}
+          style={{ left: menuPosition?.x ?? ctx.x, top: menuPosition?.y ?? ctx.y }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -420,7 +441,10 @@ export function SessionSidebar() {
         <div
           className="ctx-menu"
           ref={menuRef}
-          style={{ left: groupCtx.x, top: groupCtx.y }}
+          style={{
+            left: menuPosition?.x ?? groupCtx.x,
+            top: menuPosition?.y ?? groupCtx.y,
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           <button

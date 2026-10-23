@@ -5,6 +5,9 @@ import { ipc, onTransferProgress, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import { sftpContextMenu, type SftpMenuItem } from "../lib/sftpMenu";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { applyVariables, buildVarDefs } from "../lib/variables";
+import { useClampedMenuPosition } from "../lib/contextMenu";
+import { getVirtualRange } from "../lib/virtualList";
+import { confirmDialog, promptDialog, toast } from "../store/feedback";
 import type { SftpItem, Snippet } from "../types";
 
 function formatSize(n: number): string {
@@ -62,6 +65,10 @@ function textWidth(s: string, fontSize: number, mono = false): number {
 
 type SortKey = "name" | "size" | "mtime" | "perms" | "uid";
 type SortDir = "asc" | "desc";
+const SFTP_ROW_HEIGHT = 28;
+const SFTP_HEADER_OFFSET = 26;
+const SFTP_VIRTUALIZE_THRESHOLD = 80;
+const SFTP_OVERSCAN = 8;
 
 function cmpField(a: SftpItem, b: SftpItem, key: SortKey): number {
   switch (key) {
@@ -179,6 +186,8 @@ export function SftpView() {
   const [remoteDraft, setRemoteDraft] = useState(remotePath);
   const [dropHover, setDropHover] = useState(false);
   const hoverRef = useRef(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [listViewport, setListViewport] = useState({ scrollTop: 0, height: 0 });
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
     key: "name",
     dir: "asc",
@@ -189,6 +198,7 @@ export function SftpView() {
     item: SftpItem | null;
   } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const ctxPosition = useClampedMenuPosition(ctx, ctxRef);
   // 新建菜单（新建文件夹 / 新建文件）
   const [newMenu, setNewMenu] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
@@ -220,6 +230,37 @@ export function SftpView() {
     });
     return arr;
   }, [remoteItems, sort]);
+
+  useEffect(() => {
+    if (!sftpContext || sftpCollapsed) return;
+    const list = listRef.current;
+    if (!list) return;
+    let frame = 0;
+    const syncViewport = () => {
+      frame = 0;
+      const next = {
+        scrollTop: list.scrollTop,
+        height: list.clientHeight,
+      };
+      setListViewport((current) =>
+        current.scrollTop === next.scrollTop && current.height === next.height
+          ? current
+          : next
+      );
+    };
+    const scheduleSync = () => {
+      if (!frame) frame = window.requestAnimationFrame(syncViewport);
+    };
+    const observer = new ResizeObserver(scheduleSync);
+    observer.observe(list);
+    list.addEventListener("scroll", scheduleSync, { passive: true });
+    syncViewport();
+    return () => {
+      observer.disconnect();
+      list.removeEventListener("scroll", scheduleSync);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [sftpContext, sftpCollapsed]);
 
   const toggleSort = (key: SortKey) => {
     setSort((s) =>
@@ -270,8 +311,10 @@ export function SftpView() {
   const copyPath = async (p: string) => {
     try {
       await navigator.clipboard.writeText(p);
+      toast.success("路径已复制");
     } catch (e) {
       console.error("[sftp] copy path failed:", e);
+      toast.error("复制路径失败");
     }
   };
 
@@ -366,11 +409,11 @@ export function SftpView() {
           console.log("[sftp] system files dropped:", p.paths, "onPane:", hoverRef.current);
           const st = useApp.getState();
           if (!st.sftpContext) {
-            window.alert("请先连接一个 SSH 会话，再拖拽文件上传");
+            toast.warning("请先连接一个 SSH 会话，再拖拽文件上传");
             return;
           }
           if (!hoverRef.current) {
-            window.alert("请将文件拖到远程文件列表中上传");
+            toast.warning("请将文件拖到远程文件列表中上传");
             return;
           }
           const failures: string[] = [];
@@ -388,7 +431,10 @@ export function SftpView() {
           });
           void Promise.all(uploads).then(() => {
             if (failures.length > 0) {
-              window.alert(`有 ${failures.length} 个文件上传失败：\n${failures.join("\n")}`);
+              toast.error(
+                `有 ${failures.length} 个文件上传失败：\n${failures.join("\n")}`,
+                "上传失败"
+              );
             }
           });
         })
@@ -443,7 +489,7 @@ export function SftpView() {
 
   const sendCommand = async (command: string) => {
     if (!activeTab?.connectionId || !activeTab.shellId) {
-      window.alert("请先打开一个已连接的终端标签页");
+      toast.warning("请先打开一个已连接的终端标签页");
       return;
     }
     try {
@@ -508,7 +554,7 @@ export function SftpView() {
   const doDownload = async (remote: SftpItem) => {
     const st = useApp.getState();
     if (!st.sftpContext) {
-      window.alert("请先连接一个 SSH 会话，再下载文件");
+      toast.warning("请先连接一个 SSH 会话，再下载文件");
       return;
     }
     const dest = joinPath(st.localPath, remote.name);
@@ -517,13 +563,13 @@ export function SftpView() {
       try {
         const list = await ipc.localList(st.localPath);
         if (list.some((f) => f.name === remote.name && !f.isDir)) {
-          if (
-            !window.confirm(
-              `本地已存在同名文件 ${remote.name}，是否覆盖？`
-            )
-          ) {
-            return;
-          }
+          const confirmed = await confirmDialog({
+            title: "覆盖本地文件",
+            message: `本地已存在同名文件「${remote.name}」，是否覆盖？`,
+            confirmText: "覆盖",
+            danger: true,
+          });
+          if (!confirmed) return;
         }
       } catch {
         /* 本地目录不可读时不拦截，交由下载任务处理 */
@@ -540,14 +586,14 @@ export function SftpView() {
       console.log("[sftp] download task started:", taskId);
     } catch (e) {
       console.error("[sftp] download failed:", e);
-      window.alert(`下载 ${remote.name} 失败：${String(e)}`);
+      toast.error(`下载「${remote.name}」失败：${String(e)}`);
     }
   };
 
   const doDownloadDir = async (remote: SftpItem) => {
     const st = useApp.getState();
     if (!st.sftpContext) {
-      window.alert("请先连接一个 SSH 会话，再下载目录");
+      toast.warning("请先连接一个 SSH 会话，再下载目录");
       return;
     }
     const dest = joinPath(st.localPath, remote.name);
@@ -556,13 +602,12 @@ export function SftpView() {
       try {
         const list = await ipc.localList(st.localPath);
         if (list.some((f) => f.name === remote.name && f.isDir)) {
-          if (
-            !window.confirm(
-              `本地已存在同名目录 ${remote.name}，下载内容将合并到其中，是否继续？`
-            )
-          ) {
-            return;
-          }
+          const confirmed = await confirmDialog({
+            title: "合并本地目录",
+            message: `本地已存在同名目录「${remote.name}」，下载内容将合并到其中，是否继续？`,
+            confirmText: "继续下载",
+          });
+          if (!confirmed) return;
         }
       } catch {
         /* 本地目录不可读时不拦截 */
@@ -579,7 +624,7 @@ export function SftpView() {
       console.log("[sftp] download-dir task started:", taskId);
     } catch (e) {
       console.error("[sftp] download-dir failed:", e);
-      window.alert(`下载目录 ${remote.name} 失败：${String(e)}`);
+      toast.error(`下载目录「${remote.name}」失败：${String(e)}`);
     }
   };
 
@@ -608,14 +653,22 @@ export function SftpView() {
   const handleMkdir = async () => {
     const st = useApp.getState();
     if (!st.sftpContext) return;
-    const name = window.prompt("新建文件夹名称");
-    if (!name) return;
+    const name = await promptDialog({
+      title: "新建文件夹",
+      placeholder: "文件夹名称",
+      confirmText: "创建",
+    });
+    if (!name?.trim()) return;
     try {
-      await ipc.sftpMkdir(st.sftpContext.connectionId, joinPath(st.remotePath, name));
+      await ipc.sftpMkdir(
+        st.sftpContext.connectionId,
+        joinPath(st.remotePath, name.trim())
+      );
       st.invalidateRemoteCache();
       void st.loadRemote();
+      toast.success("文件夹已创建");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -634,22 +687,24 @@ export function SftpView() {
       }
       st.invalidateRemoteCache();
       await st.loadRemote();
-      const name = window.prompt(
-        kind === "dir" ? "文件夹名称" : "文件名称",
-        defaultName
-      );
+      const name = await promptDialog({
+        title: kind === "dir" ? "文件夹名称" : "文件名称",
+        defaultValue: defaultName,
+        confirmText: "重命名",
+      });
       if (name && name.trim() && name.trim() !== defaultName) {
         const newPath = joinPath(st.remotePath, name.trim());
         try {
           await ipc.sftpRename(st.sftpContext.connectionId, target, newPath);
           st.invalidateRemoteCache();
           void st.loadRemote();
+          toast.success(kind === "dir" ? "文件夹已创建" : "文件已创建");
         } catch (e) {
-          window.alert(`重命名失败：${String(e)}`);
+          toast.error(`重命名失败：${String(e)}`);
         }
       }
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -660,28 +715,40 @@ export function SftpView() {
     const msg = item.isDir
       ? `删除目录 ${item.name}？\n目录及其内所有内容将被永久删除，此操作不可恢复。`
       : `删除文件 ${item.name}？此操作不可恢复。`;
-    if (!window.confirm(msg)) return;
+    const confirmed = await confirmDialog({
+      title: item.isDir ? "删除远程目录" : "删除远程文件",
+      message: msg,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await ipc.sftpRemove(st.sftpContext.connectionId, item.path, item.isDir);
       st.invalidateRemoteCache();
       void st.loadRemote();
+      toast.success("已删除远程项目");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
   const handleRename = async (item: SftpItem) => {
     const st = useApp.getState();
     if (!st.sftpContext) return;
-    const name = window.prompt("新名称", item.name);
+    const name = await promptDialog({
+      title: "重命名",
+      defaultValue: item.name,
+      confirmText: "重命名",
+    });
     if (!name || name === item.name) return;
     const newPath = joinPath(item.path.replace(/\/[^/]+$/, ""), name);
     try {
       await ipc.sftpRename(st.sftpContext.connectionId, item.path, newPath);
       st.invalidateRemoteCache();
       void st.loadRemote();
+      toast.success("名称已更新");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -746,6 +813,19 @@ export function SftpView() {
 
   const sortState = (key: SortKey): "asc" | "desc" | "none" =>
     sort.key === key ? sort.dir : "none";
+  const initialLoading = remoteLoading && sortedItems.length === 0;
+  const virtualize = sortedItems.length > SFTP_VIRTUALIZE_THRESHOLD;
+  const virtualRange = getVirtualRange(
+    sortedItems.length,
+    listViewport.scrollTop,
+    listViewport.height,
+    SFTP_ROW_HEIGHT,
+    SFTP_OVERSCAN,
+    SFTP_HEADER_OFFSET
+  );
+  const renderedItems = virtualize
+    ? sortedItems.slice(virtualRange.start, virtualRange.end)
+    : sortedItems;
 
   return (
     <div className="sftp-view">
@@ -913,8 +993,14 @@ export function SftpView() {
 
       {!sftpCollapsed && (
         <div
-          className={"sftp-list sftp-list--remote" + (dropHover ? " is-drop-target" : "")}
+          ref={listRef}
+          className={
+            "sftp-list sftp-list--remote" +
+            (dropHover ? " is-drop-target" : "") +
+            (remoteLoading ? " is-loading" : "")
+          }
           style={colVars}
+          aria-busy={remoteLoading}
           onDragOver={(e) => {
             e.preventDefault();
             hoverRef.current = true;
@@ -1013,9 +1099,17 @@ export function SftpView() {
               />
             </button>
           </div>
-          {remoteLoading && <div className="sftp-empty">加载中…</div>}
-          {!remoteLoading &&
-            sortedItems.map((it) => (
+          {remoteLoading && (
+            <div className="sftp-loading" role="status" aria-label="正在加载远程目录" />
+          )}
+          {virtualize && virtualRange.topPadding > 0 && (
+            <div
+              className="sftp-virtual-spacer"
+              style={{ height: virtualRange.topPadding }}
+              aria-hidden="true"
+            />
+          )}
+          {renderedItems.map((it) => (
               <div
                 key={it.path}
                 className={
@@ -1054,6 +1148,14 @@ export function SftpView() {
                 </span>
               </div>
             ))}
+          {virtualize && virtualRange.bottomPadding > 0 && (
+            <div
+              className="sftp-virtual-spacer"
+              style={{ height: virtualRange.bottomPadding }}
+              aria-hidden="true"
+            />
+          )}
+          {initialLoading && <div className="sftp-empty">加载中…</div>}
           {!remoteLoading && remoteError && (
             <div className="sftp-error">
               <span className="sftp-error__icon">
@@ -1202,7 +1304,7 @@ export function SftpView() {
         <div
           className="ctx-menu"
           ref={ctxRef}
-          style={{ left: ctx.x, top: ctx.y }}
+          style={{ left: ctxPosition?.x ?? ctx.x, top: ctxPosition?.y ?? ctx.y }}
           onClick={(e) => e.stopPropagation()}
         >
           {sftpContextMenu("remote", ctx.item).map((m) => (

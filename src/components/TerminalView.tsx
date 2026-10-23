@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc, onTerminalOutput, onConnectionStatus, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import { terminalRegistry } from "../lib/terminalRegistry";
+import { confirmDialog } from "../store/feedback";
 import type { Tab } from "../types";
 
 /** 正在建立连接的标签集合：防止同一标签并发发起多次 SSH 连接 */
@@ -60,6 +61,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     let cancelled = false;
     const unlisteners: UnlistenFn[] = [];
     let ro: ResizeObserver | null = null;
+    let resizeTimer: number | undefined;
 
     const terminal = new Terminal({
       fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
@@ -209,15 +211,21 @@ export function TerminalView({ tab }: { tab: Tab }) {
       if (cancelled) return;
       // 隐藏的 tab 容器尺寸为 0，跳过 fit 避免破坏终端尺寸
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
-      try {
-        fitAddon.fit();
-        const t = tabRef.current;
-        if (t.connectionId && t.shellId && terminal.cols > 0 && terminal.rows > 0) {
-          ipc.terminalResize(t.connectionId, t.shellId, terminal.cols, terminal.rows);
+      window.clearTimeout(resizeTimer);
+      // 面板折叠/窗口拖动会连续触发尺寸变化，等布局稳定后只 fit 一次
+      resizeTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
+        try {
+          fitAddon.fit();
+          const t = tabRef.current;
+          if (t.connectionId && t.shellId && terminal.cols > 0 && terminal.rows > 0) {
+            ipc.terminalResize(t.connectionId, t.shellId, terminal.cols, terminal.rows);
+          }
+        } catch {
+          // 忽略
         }
-      } catch {
-        // 忽略
-      }
+      }, 80);
     });
     ro.observe(container);
 
@@ -270,11 +278,14 @@ export function TerminalView({ tab }: { tab: Tab }) {
         const unverified = msg.match(/^HOST_KEY_UNVERIFIED:(.+)$/);
         if (unverified && session) {
           const fingerprint = unverified[1];
-          const ok = window.confirm(
-            `首次连接到 ${session.host}:${session.port}\n\n` +
+          const ok = await confirmDialog({
+            title: "首次连接：确认主机密钥",
+            message:
+              `首次连接到 ${session.host}:${session.port}\n\n` +
               `主机密钥指纹：\n${fingerprint}\n\n` +
-              `是否信任该密钥并继续连接？`
-          );
+              "是否信任该密钥并继续连接？",
+            confirmText: "信任并连接",
+          });
           if (ok) {
             try {
               await ipc.hostKeyAccept(session.host, session.port, fingerprint);
@@ -299,16 +310,23 @@ export function TerminalView({ tab }: { tab: Tab }) {
         const changed = msg.match(/^HOST_KEY_CHANGED:(.+):(.+)$/);
         if (changed && session) {
           updateTab(tab.id, { status: "error", error: "主机密钥变更，已阻止连接" });
-          const warn = window.confirm(
-            `警告：${session.host}:${session.port} 的主机密钥已变更！\n\n` +
+          const warn = await confirmDialog({
+            title: "警告：主机密钥已变更",
+            message:
+              `警告：${session.host}:${session.port} 的主机密钥已变更！\n\n` +
               `当前指纹：${changed[1]}\n已信任指纹：${changed[2]}\n\n` +
-              `这可能是中间人攻击，也可能是服务器已重装系统。\n` +
-              `是否仍要继续连接？`
-          );
+              "这可能是中间人攻击，也可能是服务器已重装系统。\n" +
+              "是否仍要继续连接？",
+            confirmText: "继续检查",
+            danger: true,
+          });
           if (warn) {
-            const sure = window.confirm(
-              "再次确认：信任新的主机密钥并重新连接？"
-            );
+            const sure = await confirmDialog({
+              title: "再次确认",
+              message: "信任新的主机密钥并重新连接？",
+              confirmText: "信任并重连",
+              danger: true,
+            });
             if (sure) {
               try {
                 await ipc.hostKeyAccept(session.host, session.port, changed[1]);
@@ -342,6 +360,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       container.removeEventListener("focusin", onContainerFocusIn);
       selDisp.dispose();
       unlisteners.forEach((un) => un());
+      window.clearTimeout(resizeTimer);
       if (ro) ro.disconnect();
       // 仅销毁终端；连接断开由 EditorTabs / 文件面板「断开」负责
       const t = tabRef.current;

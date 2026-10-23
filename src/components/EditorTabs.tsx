@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { useClampedMenuPosition } from "../lib/contextMenu";
+import { promptDialog } from "../store/feedback";
 
 interface CtxMenu {
   x: number;
@@ -18,6 +20,7 @@ export function EditorTabs() {
   const updateTab = useApp((s) => s.updateTab);
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPosition = useClampedMenuPosition(ctx, menuRef);
 
   const destroyAndClose = async (tabId: string) => {
     // 分屏 pane 标签随主标签一起销毁
@@ -72,11 +75,15 @@ export function EditorTabs() {
   };
 
   // 重命名标签：仅修改标题
-  const renameTab = () => {
+  const renameTab = async () => {
     if (!ctx) return;
     const t = tabs.find((x) => x.id === ctx.tabId);
     if (!t) return;
-    const name = window.prompt("重命名标签", t.title);
+    const name = await promptDialog({
+      title: "重命名标签",
+      defaultValue: t.title,
+      confirmText: "重命名",
+    });
     if (name && name.trim()) {
       updateTab(ctx.tabId, { title: name.trim() });
     }
@@ -148,7 +155,7 @@ export function EditorTabs() {
         <div
           className="ctx-menu"
           ref={menuRef}
-          style={{ left: ctx.x, top: ctx.y }}
+          style={{ left: menuPosition?.x ?? ctx.x, top: menuPosition?.y ?? ctx.y }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -205,7 +212,7 @@ export function EditorTabs() {
             className="ctx-menu__item"
             title="重命名当前标签"
             onClick={() => {
-              renameTab();
+              void renameTab();
               setCtx(null);
             }}
           >

@@ -1470,19 +1470,35 @@ button.sftp-head__cell {
 }
 
 .workspace__sftp {
-  flex: 2;
+  flex: 2 1 0%;
   min-height: 140px;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   border-top: 1px solid var(--border-neutral-l1);
   background: var(--bg-base-default);
+  transition:
+    flex-grow var(--motion-duration-base) var(--motion-ease-standard),
+    flex-basis var(--motion-duration-base) var(--motion-ease-standard),
+    min-height var(--motion-duration-base) var(--motion-ease-standard);
 }
 
 /* 收起态：面板收缩为仅工具栏条的高度 */
 .workspace__sftp--collapsed {
-  flex: 0 0 auto;
+  flex-grow: 0;
+  flex-shrink: 0;
+  flex-basis: 38px;
+  min-height: 38px;
+}
+
+.workspace__activity {
+  flex: 1;
+  min-width: 0;
   min-height: 0;
+  display: flex;
+  overflow: hidden;
+  animation: activity-enter var(--motion-duration-base) var(--motion-ease-standard);
 }
 
 .workspace__terminal-slot {
@@ -2818,6 +2834,8 @@ button.sftp-head__cell {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  transform-origin: top left;
+  animation: ctx-menu-enter var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .ctx-menu__item {
@@ -2915,4 +2933,346 @@ button.sftp-head__cell {
   font-size: var(--body-sm-font-size);
   line-height: 1.6;
   color: var(--text-secondary);
+}
+
+/* =========================================================================
+   FeedbackHost：统一 Toast / Confirm / Prompt
+   ========================================================================= */
+.toast-stack {
+  position: fixed;
+  top: 54px;
+  right: 14px;
+  z-index: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 10px 11px 12px;
+  background: var(--bg-base-tertiary);
+  border: 1px solid var(--border-neutral-l2);
+  border-radius: var(--radius-8);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  pointer-events: auto;
+  animation: toast-enter var(--motion-duration-base) var(--motion-ease-standard);
+}
+
+.toast__icon {
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--status-primary-default);
+}
+
+.toast--success .toast__icon {
+  color: var(--status-success-default);
+}
+
+.toast--warning .toast__icon {
+  color: var(--status-warning-default);
+}
+
+.toast--error .toast__icon {
+  color: var(--status-error-default);
+}
+
+.toast__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast__title {
+  color: var(--text-default);
+  font-size: var(--body-sm-font-size);
+  font-weight: 600;
+}
+
+.toast__message {
+  color: var(--text-secondary);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.toast__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-4);
+  color: var(--text-tertiary);
+}
+
+.toast__close:hover {
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
+}
+
+.feedback-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 650;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.54);
+  animation: feedback-fade-in var(--motion-duration-fast) ease-out;
+}
+
+.feedback-dialog {
+  width: min(420px, calc(100vw - 48px));
+  padding: 18px;
+  background: var(--bg-base-secondary);
+  border: 1px solid var(--border-neutral-l2);
+  border-radius: var(--radius-10);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.52);
+  animation: dialog-enter var(--motion-duration-base) var(--motion-ease-standard);
+}
+
+.feedback-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.feedback-dialog__title {
+  color: var(--text-default);
+  font-size: var(--body-base-font-size);
+  font-weight: 600;
+}
+
+.feedback-dialog__message {
+  color: var(--text-secondary);
+  font-size: var(--body-sm-font-size);
+  line-height: 1.65;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.feedback-dialog__input {
+  margin-top: 12px;
+}
+
+.feedback-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-neutral-l1);
+}
+
+/* 文件列表刷新时保留旧内容，仅用顶部进度条表达加载状态 */
+.sftp-loading {
+  position: sticky;
+  top: 24px;
+  z-index: 3;
+  height: 2px;
+  margin-bottom: -2px;
+  overflow: hidden;
+  background: var(--bg-overlay-l1);
+}
+
+.sftp-loading::after {
+  content: "";
+  display: block;
+  width: 38%;
+  height: 100%;
+  background: var(--bg-brand);
+  animation: sftp-loading-sweep 900ms ease-in-out infinite;
+}
+
+.view-skeleton {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  background: var(--bg-base-default);
+}
+
+.view-skeleton__toolbar,
+.view-skeleton__line {
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay-l1) 25%,
+    var(--bg-overlay-l2) 37%,
+    var(--bg-overlay-l1) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.35s ease infinite;
+}
+
+.view-skeleton__toolbar {
+  width: 220px;
+  height: 28px;
+  border-radius: var(--radius-6);
+}
+
+.view-skeleton__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.view-skeleton__card {
+  height: 112px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-overlay-l1);
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: var(--radius-8);
+}
+
+.view-skeleton__line {
+  display: block;
+  width: 100%;
+  height: 10px;
+  border-radius: var(--radius-full);
+}
+
+.view-skeleton__line--short {
+  width: 38%;
+}
+
+.view-skeleton__line--medium {
+  width: 68%;
+}
+
+.dialog-overlay,
+.modal-overlay {
+  animation: feedback-fade-in var(--motion-duration-fast) ease-out;
+}
+
+.dialog,
+.modal-card,
+.toolbar__qc-panel,
+.command-input__popover,
+.terminal-view__ctx-menu {
+  animation: dialog-enter var(--motion-duration-base) var(--motion-ease-standard);
+}
+
+.global-tooltip {
+  animation: tooltip-enter var(--motion-duration-fast) ease-out;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+.session-row:focus-visible,
+.sftp-row:focus-visible {
+  outline: 2px solid var(--border-brand);
+  outline-offset: 1px;
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes feedback-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ctx-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes sftp-loading-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@keyframes activity-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }

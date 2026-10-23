@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { confirmDialog, toast } from "../store/feedback";
 import type { ForwardRule, ForwardRuleInput } from "../types";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -66,11 +67,15 @@ export function ForwardView() {
 
   const save = async () => {
     if (!form.name || !form.localPort) {
-      window.alert("请填写名称与本地端口");
+      toast.warning("请填写名称与本地端口");
       return;
     }
     if (form.type !== "dynamic" && !form.remotePort) {
-      window.alert(form.type === "remote" ? "远程转发需要填写服务端监听端口" : "本地转发需要填写远程端口");
+      toast.warning(
+        form.type === "remote"
+          ? "远程转发需要填写服务端监听端口"
+          : "本地转发需要填写远程端口"
+      );
       return;
     }
     try {
@@ -81,8 +86,9 @@ export function ForwardView() {
       }
       setModalOpen(false);
       void load();
+      toast.success(editingId ? "转发规则已更新" : "转发规则已创建");
     } catch (e) {
-      window.alert(String(e));
+      toast.error(String(e));
     }
   };
 
@@ -132,7 +138,10 @@ export function ForwardView() {
                   console.log(`[forward] ${r.enabled ? "stop" : "start"} rule`, r.id, r.name);
                   void (r.enabled ? ipc.forwardStop(r.id) : ipc.forwardStart(r.id))
                     .then(load)
-                    .catch((e) => console.error("[forward] toggle rule failed:", e));
+                    .catch((e) => {
+                      console.error("[forward] toggle rule failed:", e);
+                      toast.error(String(e));
+                    });
                 }}
               >
                 <Icon name={r.enabled ? "pause" : "play"} size={12} />
@@ -151,9 +160,20 @@ export function ForwardView() {
                 className="ds-btn ds-btn--danger-subtle ds-btn--sm"
                 type="button"
                 title="删除该转发规则"
-                onClick={() => {
-                  if (window.confirm(`删除规则 ${r.name}？`)) {
-                    void ipc.forwardDelete(r.id).then(load);
+                onClick={async () => {
+                  const confirmed = await confirmDialog({
+                    title: "删除转发规则",
+                    message: `确定删除规则「${r.name}」？`,
+                    confirmText: "删除",
+                    danger: true,
+                  });
+                  if (!confirmed) return;
+                  try {
+                    await ipc.forwardDelete(r.id);
+                    await load();
+                    toast.success("转发规则已删除");
+                  } catch (e) {
+                    toast.error(String(e));
                   }
                 }}
               >
