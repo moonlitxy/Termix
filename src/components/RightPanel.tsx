@@ -172,9 +172,6 @@ export function RightPanel() {
     <div className="right-panel">
       <div className="right-panel__header">
         <span>资源监控</span>
-        <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="刷新">
-          <Icon name="refresh" size={14} />
-        </button>
       </div>
       <div className="right-panel__body">
         {!connected ? (

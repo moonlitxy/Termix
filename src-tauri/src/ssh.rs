@@ -176,6 +176,37 @@ pub enum ShellCmd {
 pub struct Connection {
     handle: Arc<client::Handle<SshClient>>,
     shells: Arc<Mutex<HashMap<String, mpsc::Sender<ShellCmd>>>>,
+    encoding: &'static encoding_rs::Encoding,
+}
+
+fn resolve_encoding(name: &str) -> &'static encoding_rs::Encoding {
+    encoding_rs::Encoding::for_label(name.as_bytes())
+        .unwrap_or(encoding_rs::UTF_8)
+}
+
+fn decode_remote_bytes(data: &[u8], encoding: &'static encoding_rs::Encoding) -> String {
+    if encoding == encoding_rs::UTF_8 {
+        return String::from_utf8_lossy(data).into_owned();
+    }
+    let (text, _, had_errors) = encoding.decode(data);
+    if had_errors {
+        log::debug!("ssh: decode with {} fallback replaced invalid bytes", encoding.name());
+    }
+    text.into_owned()
+}
+
+fn encode_terminal_input(
+    text: &str,
+    encoding: &'static encoding_rs::Encoding,
+) -> Result<Vec<u8>, String> {
+    if encoding == encoding_rs::UTF_8 {
+        return Ok(text.as_bytes().to_vec());
+    }
+    let (bytes, _, had_errors) = encoding.encode(text);
+    if had_errors {
+        return Err(format!("encode input with {} failed", encoding.name()));
+    }
+    Ok(bytes.to_vec())
 }
 
 pub struct SshManager {
@@ -261,6 +292,7 @@ impl SshManager {
         let conn = Connection {
             handle: Arc::new(session),
             shells: Arc::new(Mutex::new(HashMap::new())),
+            encoding: resolve_encoding(&s.encoding),
         };
         self.connections
             .lock()
@@ -347,10 +379,16 @@ impl SshManager {
 
     /// 在连接上执行一次性命令并返回完整输出（用于监控等）。
     pub async fn exec_command(&self, connection_id: &str, command: &str) -> Result<String, String> {
-        let handle = self.get_handle(connection_id).await.ok_or_else(|| {
-            log::error!("exec_command: connection not found: {connection_id}");
-            "connection not found".to_string()
-        })?;
+        let (handle, encoding) = {
+            let cons = self.connections.lock().await;
+            let conn = cons
+                .get(connection_id)
+                .ok_or_else(|| {
+                    log::error!("exec_command: connection not found: {connection_id}");
+                    "connection not found".to_string()
+                })?;
+            (conn.handle.clone(), conn.encoding)
+        };
         let mut channel = handle.channel_open_session().await.map_err(|e| {
             log::error!("exec_command: open channel failed conn={connection_id}: {e}");
             format!("open channel failed: {e}")
@@ -369,7 +407,7 @@ impl SshManager {
         loop {
             match tokio::time::timeout(idle, channel.wait()).await {
                 Ok(Some(ChannelMsg::Data { data })) => {
-                    output.push_str(&String::from_utf8_lossy(&data));
+                    output.push_str(&decode_remote_bytes(&data, encoding));
                     idle = Duration::from_secs(2);
                 }
                 Ok(Some(ChannelMsg::ExitStatus { .. })) => {}
@@ -393,7 +431,7 @@ impl SshManager {
         cols: u32,
         rows: u32,
     ) -> Result<String, String> {
-        let (mut channel, shells) = {
+        let (mut channel, shells, encoding) = {
             let mut cons = self.connections.lock().await;
             let conn = cons
                 .get_mut(connection_id)
@@ -411,14 +449,14 @@ impl SshManager {
                 .request_shell(true)
                 .await
                 .map_err(|e| e.to_string())?;
-            (channel, conn.shells.clone())
+            (channel, conn.shells.clone(), conn.encoding)
         };
 
         let shell_id = uuid::Uuid::new_v4().to_string();
         let (tx, mut rx) = mpsc::channel::<ShellCmd>(64);
         let sid = shell_id.clone();
         let app2 = app.clone();
-        let shells2 = shells.clone();
+            let shells2 = shells.clone();
 
         tokio::spawn(async move {
             let mut user_closed = false;
@@ -439,7 +477,7 @@ impl SshManager {
                     },
                     msg = channel.wait() => match msg {
                         Some(ChannelMsg::Data { data }) => {
-                            let text = String::from_utf8_lossy(&data).into_owned();
+                            let text = decode_remote_bytes(&data, encoding);
                             let _ = app2.emit(
                                 "terminal-output",
                                 serde_json::json!({ "shellId": sid, "data": text, "tabId": tab_id }),
@@ -479,16 +517,20 @@ impl SshManager {
         shell_id: &str,
         data: Vec<u8>,
     ) -> Result<(), String> {
-        let tx = {
+        let (tx, encoding) = {
             let cons = self.connections.lock().await;
             let conn = cons
                 .get(connection_id)
                 .ok_or_else(|| "connection not found".to_string())?;
             let shells = conn.shells.lock().await;
-            shells.get(shell_id).cloned()
+            (shells.get(shell_id).cloned(), conn.encoding)
         };
         if let Some(tx) = tx {
-            tx.send(ShellCmd::Data(data))
+            let bytes = encode_terminal_input(
+                &String::from_utf8_lossy(&data).into_owned(),
+                encoding,
+            )?;
+            tx.send(ShellCmd::Data(bytes))
                 .await
                 .map_err(|_| "shell closed".to_string())?;
             Ok(())
@@ -535,5 +577,35 @@ impl SshManager {
             let _ = tx.send(ShellCmd::Close).await;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_encoding_supports_utf8_and_gbk_aliases() {
+        assert_eq!(resolve_encoding("utf-8"), encoding_rs::UTF_8);
+        assert_eq!(resolve_encoding("UTF8"), encoding_rs::UTF_8);
+        assert_eq!(resolve_encoding("gbk"), encoding_rs::GBK);
+        assert_eq!(resolve_encoding("GB18030"), encoding_rs::GB18030);
+        assert_eq!(resolve_encoding("unknown"), encoding_rs::UTF_8);
+    }
+
+    #[test]
+    fn decode_and_encode_gbk_roundtrip() {
+        let original = "连接成功 df -h";
+        let encoded = encode_terminal_input(original, encoding_rs::GBK).unwrap();
+        assert_ne!(encoded, original.as_bytes());
+        assert_eq!(decode_remote_bytes(&encoded, encoding_rs::GBK), original);
+    }
+
+    #[test]
+    fn decode_utf8_uses_lossy_fallback() {
+        assert_eq!(
+            decode_remote_bytes(b"ok\xff", encoding_rs::UTF_8),
+            "ok\u{fffd}"
+        );
     }
 }

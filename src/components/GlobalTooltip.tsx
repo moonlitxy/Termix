@@ -11,8 +11,8 @@ interface Tip {
 /**
  * 全局悬浮提示：对带 title / data-tooltip 的元素在 100ms 延迟后
  * 显示统一样式（深色底、浅色文字、边框、箭头）的提示框。
- * 基于 pointermove 跟踪当前悬停元素：鼠标移出元素立即隐藏，
- * 在元素内部（含子元素）移动不重置计时，避免闪烁与残留。
+ * 基于 pointerover/pointerout 事件委托：终端高频 pointermove 不再触发逻辑，
+ * 在同一元素内部移动也不重置计时，避免闪烁与残留。
  * 优先读取 data-tooltip，其次 title；显示期间临时禁用原生 title 提示。
  */
 export function GlobalTooltip() {
@@ -39,25 +39,16 @@ export function GlobalTooltip() {
       }
     };
 
-    const hide = () => {
+    const leaveCurrent = () => {
       clearTimer();
       setTip(null);
-    };
-
-    const onMove = (e: PointerEvent) => {
-      const t = e.target as Element | null;
-      const el = t?.closest?.("[data-tooltip],[title]") as HTMLElement | null;
-      // 仍在同一元素（含内部子元素移动）：保持计时/显示，不重置
-      if (el === currentRef.current) return;
-
-      // 离开旧元素：恢复原生 title 并立即隐藏
       if (currentRef.current) {
         restoreTitle(currentRef.current);
         currentRef.current = null;
       }
-      hide();
-      if (!el) return;
+    };
 
+    const enter = (el: HTMLElement) => {
       currentRef.current = el;
       const text =
         el.getAttribute("data-tooltip") || el.getAttribute("title") || "";
@@ -80,9 +71,34 @@ export function GlobalTooltip() {
       }, 100);
     };
 
-    document.addEventListener("pointermove", onMove, true);
+    const closestTipTarget = (node: EventTarget | null) =>
+      (node as Element | null)?.closest?.(
+        "[data-tooltip],[title]"
+      ) as HTMLElement | null;
+
+    const onOver = (e: PointerEvent) => {
+      const current = currentRef.current;
+      if (current?.contains(e.target as Node)) return;
+      const el = closestTipTarget(e.target);
+      leaveCurrent();
+      if (el) enter(el);
+    };
+
+    const onOut = (e: PointerEvent) => {
+      const current = currentRef.current;
+      if (!current || !current.contains(e.target as Node)) return;
+      const related = e.relatedTarget as Node | null;
+      if (current.contains(related)) return;
+      const next = closestTipTarget(related);
+      leaveCurrent();
+      if (next) enter(next);
+    };
+
+    document.addEventListener("pointerover", onOver, true);
+    document.addEventListener("pointerout", onOut, true);
     return () => {
-      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerover", onOver, true);
+      document.removeEventListener("pointerout", onOut, true);
       clearTimer();
       // 卸载时恢复所有暂存 title
       saved.forEach((v, k) => k.setAttribute("title", v));

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { confirmDialog, toast } from "../store/feedback";
+import { useFocusTrap } from "../lib/focusTrap";
 import type { ForwardRule, ForwardRuleInput } from "../types";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -16,6 +17,8 @@ export function ForwardView() {
   const [rules, setRules] = useState<ForwardRule[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, modalOpen);
   const [form, setForm] = useState<ForwardRuleInput>({
     type: "local",
     name: "",
@@ -186,7 +189,14 @@ export function ForwardView() {
 
       {modalOpen && (
         <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card"
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingId ? "编辑转发规则" : "新建转发规则"}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-head">
               <span>{editingId ? "编辑转发规则" : "新建转发规则"}</span>
               <button

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useFeedback } from "../store/feedback";
+import { useFocusTrap } from "../lib/focusTrap";
 
 const TOAST_ICON = {
   info: "info-circle",
@@ -19,9 +20,14 @@ export function FeedbackHost() {
 
   const [promptValue, setPromptValue] = useState("");
   const promptInputRef = useRef<HTMLInputElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const dialogOpen = !!confirmRequest || !!promptRequest;
   const dialogId = confirmRequest?.id ?? promptRequest?.id ?? 0;
+  useFocusTrap(dialogRef, dialogOpen);
+
+  const setDialogRef = (node: HTMLElement | null) => {
+    dialogRef.current = node;
+  };
 
   useEffect(() => {
     if (!promptRequest) return;
@@ -35,7 +41,6 @@ export function FeedbackHost() {
 
   useEffect(() => {
     if (!dialogOpen) return;
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -45,7 +50,6 @@ export function FeedbackHost() {
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      previousFocusRef.current?.focus();
     };
   }, [dialogOpen, confirmRequest, promptRequest, settleConfirm, settlePrompt]);
 
@@ -85,6 +89,7 @@ export function FeedbackHost() {
         >
           <div
             className="feedback-dialog"
+            ref={setDialogRef}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="feedback-confirm-title"
@@ -136,6 +141,7 @@ export function FeedbackHost() {
         <div className="feedback-overlay" onMouseDown={() => settlePrompt(null)}>
           <form
             className="feedback-dialog"
+            ref={setDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="feedback-prompt-title"

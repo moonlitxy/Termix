@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { applyVariables, buildVarDefs, type VarDef } from "../lib/variables";
 import { confirmDialog, toast } from "../store/feedback";
+import { useFocusTrap } from "../lib/focusTrap";
 import type { Snippet, SnippetInput } from "../types";
 
 const EMPTY: SnippetInput = { title: "", command: "", groupId: undefined };
@@ -19,6 +20,8 @@ export function SnippetsView() {
   // 变量填充弹窗
   const [varModal, setVarModal] = useState<{ snippet: Snippet; vars: VarDef[] } | null>(null);
   const [varValues, setVarValues] = useState<Record<string, string>>({});
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, modalOpen || !!varModal);
 
   const load = async () => {
     try {
@@ -161,7 +164,14 @@ export function SnippetsView() {
 
       {modalOpen && (
         <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card"
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingId ? "编辑片段" : "新建片段"}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-head">
               <span>{editingId ? "编辑片段" : "新建片段"}</span>
               <button
@@ -220,7 +230,14 @@ export function SnippetsView() {
       )}
       {varModal && (
         <div className="modal-overlay" onClick={() => setVarModal(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card"
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`填写变量：${varModal.snippet.title}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-head">
               <span>填写变量：{varModal.snippet.title}</span>
               <button

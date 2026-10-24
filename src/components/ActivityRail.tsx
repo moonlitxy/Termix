@@ -17,7 +17,6 @@ const ITEMS: RailItem[] = [
 
 const BOTTOM_ITEMS: RailItem[] = [
   { id: "settings", icon: "settings", label: "设置" },
-  { id: "plugins", icon: "grid-2x2", label: "插件" },
   { id: "help", icon: "help", label: "帮助" },
 ];
 

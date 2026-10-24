@@ -35,6 +35,7 @@ export function SessionSidebar() {
   const [newGroupName, setNewGroupName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuReturnRef = useRef<HTMLElement | null>(null);
   const menuPosition = useClampedMenuPosition(ctx ?? groupCtx, menuRef);
 
   // 导出会话（JSON 备份下载）
@@ -85,6 +86,16 @@ export function SessionSidebar() {
     });
   };
 
+  // 会话行与右键菜单能力对齐：Enter/Space 选中，Enter 连接，Shift+F10 / Menu 打开菜单
+  const openSessionMenu = (
+    session: Session,
+    position: { x: number; y: number }
+  ) => {
+    menuReturnRef.current = document.activeElement as HTMLElement | null;
+    setSelectedId(session.id);
+    setCtx({ ...position, session });
+  };
+
   const handleClick = (session: Session) => {
     setSelectedId(session.id);
     // 文件面板跟随点击的已连接会话
@@ -127,6 +138,11 @@ export function SessionSidebar() {
 
   useEffect(() => {
     if (!ctx && !groupCtx) return;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLElement>("button:not([disabled])")
+        ?.focus();
+    });
     const onDocClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setCtx(null);
@@ -142,8 +158,11 @@ export function SessionSidebar() {
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
     return () => {
+      window.cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onEsc);
+      menuReturnRef.current?.focus();
+      menuReturnRef.current = null;
     };
   }, [ctx, groupCtx]);
 
@@ -195,11 +214,24 @@ export function SessionSidebar() {
           (selectedId === s.id ? " is-active" : "")
         }
         onClick={() => handleClick(s)}
+        role="button"
+        tabIndex={0}
+        aria-current={selectedId === s.id ? "true" : undefined}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleClick(s);
+            if (e.key === "Enter") openSession(s);
+          } else if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+            e.preventDefault();
+            const rect = e.currentTarget.getBoundingClientRect();
+            openSessionMenu(s, { x: rect.right, y: rect.bottom });
+          }
+        }}
         onDoubleClick={() => openSession(s)}
         onContextMenu={(e) => {
           e.preventDefault();
-          setSelectedId(s.id);
-          setCtx({ x: e.clientX, y: e.clientY, session: s });
+          openSessionMenu(s, { x: e.clientX, y: e.clientY });
         }}
         title={s.host + ":" + s.port}
       >
@@ -345,6 +377,14 @@ export function SessionSidebar() {
                   onClick={() =>
                     setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
                   }
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={open}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault();
+                    setGroupsOpen((m) => ({ ...m, [g.id]: !open }));
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

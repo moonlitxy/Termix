@@ -20,7 +20,14 @@ export function EditorTabs() {
   const updateTab = useApp((s) => s.updateTab);
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuReturnRef = useRef<HTMLElement | null>(null);
   const menuPosition = useClampedMenuPosition(ctx, menuRef);
+
+  const openTabMenu = (tabId: string, position: { x: number; y: number }) => {
+    menuReturnRef.current = document.activeElement as HTMLElement | null;
+    setActiveTab(tabId);
+    setCtx({ ...position, tabId });
+  };
 
   const destroyAndClose = async (tabId: string) => {
     // 分屏 pane 标签随主标签一起销毁
@@ -91,6 +98,11 @@ export function EditorTabs() {
 
   useEffect(() => {
     if (!ctx) return;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLElement>("button:not([disabled])")
+        ?.focus();
+    });
     const onDocClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setCtx(null);
@@ -102,8 +114,11 @@ export function EditorTabs() {
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
     return () => {
+      window.cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onEsc);
+      menuReturnRef.current?.focus();
+      menuReturnRef.current = null;
     };
   }, [ctx]);
 
@@ -119,11 +134,26 @@ export function EditorTabs() {
           key={tab.id}
           className={"ds-editortab" + (tab.id === activeTabId ? " is-active" : "")}
           onClick={() => setActiveTab(tab.id)}
+          role="button"
+          tabIndex={0}
+          aria-current={tab.id === activeTabId ? "true" : undefined}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setActiveTab(tab.id);
+            } else if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              openTabMenu(tab.id, { x: rect.right, y: rect.bottom });
+            } else if (e.key === "Delete") {
+              e.preventDefault();
+              void destroyAndClose(tab.id);
+            }
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            setActiveTab(tab.id);
-            setCtx({ x: e.clientX, y: e.clientY, tabId: tab.id });
+            openTabMenu(tab.id, { x: e.clientX, y: e.clientY });
           }}
           title={tab.title}
         >
@@ -138,18 +168,6 @@ export function EditorTabs() {
         </div>
       ))}
       <div className="editor-tabs__spacer" />
-      <div className="editor-tabs__actions">
-        <button
-          className="ds-btn ds-btn--tertiary ds-btn--icon"
-          type="button"
-          title="最大化"
-        >
-          <Icon name="arrow-expand" size={15} />
-        </button>
-        <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="更多">
-          <Icon name="more-h" size={15} />
-        </button>
-      </div>
 
       {ctx && (
         <div

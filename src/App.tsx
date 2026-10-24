@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useApp } from "./store/app";
 import { useMonitor, selectMonitorConnection } from "./store/monitor";
 import { TitleBar } from "./components/TitleBar";
@@ -13,6 +20,7 @@ import { NewConnectionDialog } from "./components/NewConnectionDialog";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { FeedbackHost } from "./components/FeedbackHost";
+import { CommandPalette } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import {
   ipc,
@@ -23,6 +31,7 @@ import {
 } from "./lib/ipc";
 import { terminalRegistry } from "./lib/terminalRegistry";
 import { useUpdate } from "./store/update";
+import { loadSettings, saveSettings } from "./lib/settings";
 
 // 非终端视图按需加载（首屏不下载，减小初始 bundle）
 // 组件为命名导出，转换为 default 供 lazy 使用
@@ -104,6 +113,51 @@ export default function App() {
   const activity = useApp((s) => s.activity);
   const sftpCollapsed = useApp((s) => s.sftpCollapsed);
   const sftpContext = useApp((s) => s.sftpContext);
+  const stackRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{ startY: number; startRatio: number } | null>(null);
+  const [panelResizing, setPanelResizing] = useState(false);
+  const [sftpRatio, setSftpRatio] = useState(() =>
+    Math.min(0.8, Math.max(0.15, loadSettings().sftpPanelRatio || 0.4))
+  );
+
+  const startSftpResize = (e: React.PointerEvent) => {
+    if (sftpCollapsed || !stackRef.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setPanelResizing(true);
+    dragStateRef.current = {
+      startY: e.clientY,
+      startRatio: sftpRatio,
+    };
+  };
+
+  const moveSftpResize = (e: React.PointerEvent) => {
+    const drag = dragStateRef.current;
+    const stack = stackRef.current;
+    if (!drag || !stack) return;
+    const delta = (e.clientY - drag.startY) / Math.max(1, stack.clientHeight);
+    setSftpRatio(
+      Math.min(0.8, Math.max(0.15, drag.startRatio + delta))
+    );
+  };
+
+  const endSftpResize = () => {
+    if (!dragStateRef.current) return;
+    dragStateRef.current = null;
+    setPanelResizing(false);
+    setSftpRatio((ratio) => {
+      saveSettings({ ...loadSettings(), sftpPanelRatio: ratio });
+      return ratio;
+    });
+  };
+
+  const adjustSftpRatio = (delta: number) => {
+    setSftpRatio((current) => {
+      const ratio = Math.min(0.8, Math.max(0.15, current + delta));
+      saveSettings({ ...loadSettings(), sftpPanelRatio: ratio });
+      return ratio;
+    });
+  };
 
   // 全局唯一监控轮询：跟随连接状态（终端右侧资源监控与「监控」模块共享同一数据源，
   // 由本组件统一驱动 useMonitor.sync，两处展示的数据完全一致）
@@ -192,7 +246,10 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
-      if (e.key.toLowerCase() === "t") {
+      if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        useApp.getState().openPalette();
+      } else if (e.key.toLowerCase() === "t") {
         e.preventDefault();
         useApp.getState().openNewConnection();
       } else if (e.key.toLowerCase() === "d") {
@@ -269,10 +326,20 @@ export default function App() {
 
     return (
       <>
-        <div className={"workspace__terminal-stack" + (isTerm ? "" : " is-hidden")}>
+        <div
+          ref={stackRef}
+          className={
+            "workspace__terminal-stack" +
+            (isTerm ? "" : " is-hidden") +
+            (panelResizing ? " is-panel-resizing" : "")
+          }
+        >
           {hasTabs && <EditorTabs />}
           {hasTabs ? (
-            <div className="workspace__main workspace__main--files">
+            <div
+              className="workspace__main workspace__main--files"
+              style={{ flexGrow: 1 - sftpRatio }}
+            >
               {tabs
                 .filter((t) => !t.hidden)
                 .map((tab) => {
@@ -326,10 +393,41 @@ export default function App() {
               </div>
             )
           ) : null}
+          {hasTabs && !sftpCollapsed && (
+            <div
+              className="workspace__panel-resizer"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="调整文件面板高度"
+              tabIndex={0}
+              aria-valuenow={Math.round(sftpRatio * 100)}
+              aria-valuemin={15}
+              aria-valuemax={80}
+              onPointerDown={startSftpResize}
+              onPointerMove={moveSftpResize}
+              onPointerUp={endSftpResize}
+              onPointerCancel={endSftpResize}
+              onLostPointerCapture={endSftpResize}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  adjustSftpRatio(-0.02);
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  adjustSftpRatio(0.02);
+                }
+              }}
+            />
+          )}
           {hasTabs && (
             <div
               className={
                 "workspace__sftp" + (sftpCollapsed ? " workspace__sftp--collapsed" : "")
+              }
+              style={
+                sftpCollapsed
+                  ? undefined
+                  : { flexGrow: sftpRatio, flexShrink: 1, flexBasis: 0 }
               }
             >
               <Suspense fallback={<ViewLoading />}>
@@ -358,6 +456,7 @@ export default function App() {
         <RightPanel />
       </div>
       <StatusBar />
+      <CommandPalette />
       <NewConnectionDialog />
       <UpdateDialog />
       <FeedbackHost />

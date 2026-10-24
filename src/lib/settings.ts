@@ -7,6 +7,7 @@ export interface Settings {
   cursorStyle: "block" | "underline" | "bar";
   scrollback: number;
   monitorInterval: number; // 监控刷新间隔（毫秒）
+  sftpPanelRatio: number; // 文件面板占工作区高度的比例（0-1）
 }
 
 export const SETTINGS_KEY = "termix.settings";
@@ -18,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursorStyle: "block",
   scrollback: 5000,
   monitorInterval: 2000,
+  sftpPanelRatio: 0.4,
 };
 
 export function loadSettings(): Settings {

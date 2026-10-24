@@ -1,6 +1,8 @@
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
 import { useUpdate } from "../store/update";
+import { useEffect, useRef } from "react";
+import { useFocusTrap } from "../lib/focusTrap";
 
 /** 软件更新提示弹窗：检测到新版本后弹出，用户可选择立即更新 / 稍后提醒 / 忽略此版本 */
 export function UpdateDialog() {
@@ -13,6 +15,19 @@ export function UpdateDialog() {
   const closeDialog = useUpdate((s) => s.closeDialog);
   const download = useUpdate((s) => s.download);
   const skip = useUpdate((s) => s.skip);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open && !!info);
+
+  useEffect(() => {
+    if (!open || !info || downloading || downloadedPath) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeDialog();
+    };
+    document.addEventListener("keydown", onEsc);
+    return () => document.removeEventListener("keydown", onEsc);
+  }, [open, info, downloading, downloadedPath, closeDialog]);
 
   if (!open || !info) return null;
   const busy = downloading;
@@ -25,7 +40,14 @@ export function UpdateDialog() {
         if (!busy) closeDialog();
       }}
     >
-      <div className="dialog dialog--update" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="dialog dialog--update"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`发现新版本 v${info.latestVersion}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="dialog__header">
           <span className="dialog__title">
             <Icon name="download" size={15} />

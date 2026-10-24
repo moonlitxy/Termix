@@ -199,6 +199,7 @@ export function SftpView() {
   } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
   const ctxPosition = useClampedMenuPosition(ctx, ctxRef);
+  const menuReturnRef = useRef<HTMLElement | null>(null);
   // 新建菜单（新建文件夹 / 新建文件）
   const [newMenu, setNewMenu] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
@@ -273,6 +274,11 @@ export function SftpView() {
   // 右键菜单：点击外部 / Esc 关闭
   useEffect(() => {
     if (!ctx) return;
+    const frame = window.requestAnimationFrame(() => {
+      ctxRef.current
+        ?.querySelector<HTMLElement>("button:not([disabled])")
+        ?.focus();
+    });
     const onDocClick = (e: MouseEvent) => {
       if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
         setCtx(null);
@@ -284,8 +290,11 @@ export function SftpView() {
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
     return () => {
+      window.cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onEsc);
+      menuReturnRef.current?.focus();
+      menuReturnRef.current = null;
     };
   }, [ctx]);
 
@@ -635,6 +644,12 @@ export function SftpView() {
     } else {
       void doDownload(item);
     }
+  };
+
+  const openItemMenu = (item: SftpItem, position: { x: number; y: number }) => {
+    menuReturnRef.current = document.activeElement as HTMLElement | null;
+    useApp.getState().selectRemote(item);
+    setCtx({ ...position, item });
   };
 
   // 刷新：失效缓存后强制重新拉取。
@@ -1116,12 +1131,28 @@ export function SftpView() {
                   "sftp-row" + (remoteSelected?.path === it.path ? " is-active" : "")
                 }
                 onClick={() => useApp.getState().selectRemote(it)}
+                role="button"
+                tabIndex={0}
+                aria-current={remoteSelected?.path === it.path ? "true" : undefined}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    useApp.getState().selectRemote(it);
+                    handleOpen(it);
+                  } else if (e.key === " ") {
+                    e.preventDefault();
+                    useApp.getState().selectRemote(it);
+                  } else if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    openItemMenu(it, { x: rect.right, y: rect.bottom });
+                  }
+                }}
                 onDoubleClick={() => handleOpen(it)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  useApp.getState().selectRemote(it);
-                  setCtx({ x: e.clientX, y: e.clientY, item: it });
+                  openItemMenu(it, { x: e.clientX, y: e.clientY });
                 }}
                 title={it.path}
               >

@@ -159,7 +159,7 @@ export function TitleBar() {
           </span>
           <input
             type="text"
-            placeholder="搜索会话 / 命令 / 文件"
+            placeholder="过滤会话（⌘K 全局搜索）"
             value={searchKeyword}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -194,9 +194,6 @@ export function TitleBar() {
           onClick={() => setActivity("settings")}
         >
           <Icon name="settings" size={16} />
-        </button>
-        <button className="ds-btn ds-btn--tertiary ds-btn--icon" type="button" title="通知">
-          <Icon name="bell" size={16} />
         </button>
         <div className="titlebar__avatar-wrap">
           <button

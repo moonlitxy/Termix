@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
+import { useFocusTrap } from "../lib/focusTrap";
 import type { AuthType, SessionInput } from "../types";
 
 const EMPTY: SessionInput = {
@@ -33,6 +34,19 @@ export function NewConnectionDialog() {
   const [saveError, setSaveError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showPassphrase, setShowPassphrase] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
+  useEffect(() => {
+    if (!open) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeNewConnection();
+    };
+    document.addEventListener("keydown", onEsc);
+    return () => document.removeEventListener("keydown", onEsc);
+  }, [open, closeNewConnection]);
 
   const isEnc = (s?: string) => !!s && s.startsWith("enc:v1:");
 
@@ -133,7 +147,14 @@ export function NewConnectionDialog() {
 
   return (
     <div className="dialog-overlay" onMouseDown={closeNewConnection}>
-      <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={editing ? "编辑连接" : "新建连接"}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="dialog__header">
           <span className="dialog__title">
             {editing ? "编辑连接" : "新建连接"}

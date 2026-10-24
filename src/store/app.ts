@@ -21,6 +21,7 @@ interface AppState {
   tabs: Tab[];
   activeTabId: string | null;
   searchKeyword: string;
+  paletteOpen: boolean;
   newConnOpen: boolean;
   editingSession: Session | null;
   /** 新建连接对话框打开时预选的分组 id（来自分组快捷入口） */
@@ -51,6 +52,8 @@ interface AppState {
   loadSessions: () => Promise<void>;
   loadGroups: () => Promise<void>;
   setSearch: (kw: string) => void;
+  openPalette: () => void;
+  closePalette: () => void;
 
   addTab: (tab: Tab) => void;
   setActiveTab: (id: string) => void;
@@ -105,6 +108,7 @@ export const useApp = create<AppState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   searchKeyword: "",
+  paletteOpen: false,
   newConnOpen: false,
   editingSession: null,
   newConnPresetGroupId: null,
@@ -140,6 +144,8 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
   setSearch: (kw) => set({ searchKeyword: kw }),
+  openPalette: () => set({ paletteOpen: true }),
+  closePalette: () => set({ paletteOpen: false }),
 
   addTab: (tab) =>
     set((s) => ({
