@@ -577,12 +577,163 @@ a {
 .titlebar {
   display: flex;
   align-items: center;
-  gap: 12px;
   height: 40px;
-  padding: 0 14px 0 84px;
+  gap: 10px;
+  padding: 0 10px 0 10px;
   background: var(--bg-base-secondary);
   border-bottom: 1px solid var(--border-neutral-l1);
   flex-shrink: 0;
+}
+
+.window-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.window-controls--macos {
+  width: 56px;
+  justify-content: space-between;
+}
+
+.window-controls__dot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  position: relative;
+}
+
+.window-controls__dot::before,
+.window-controls__dot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.48);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.7);
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+
+.window-controls:hover .window-controls__dot::before,
+.window-controls:hover .window-controls__dot::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.window-controls__dot--close::after {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+}
+
+.window-controls__dot--minimize::before {
+  width: 6px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.window-controls__dot--minimize::after {
+  display: none;
+}
+
+.window-controls__dot--maximize::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: transparent;
+  border: 1.4px solid rgba(0, 0, 0, 0.55);
+}
+
+.window-controls__dot--maximize::after {
+  display: none;
+}
+
+.window-controls__dot--close {
+  background: #ff5f57;
+}
+
+.window-controls__dot--minimize {
+  background: #febc2e;
+}
+
+.window-controls__dot--maximize {
+  background: #28c840;
+}
+
+.window-controls__dot:disabled {
+  background: var(--bg-overlay-l3);
+}
+
+.window-controls--windows {
+  order: 99;
+  margin-left: auto;
+}
+
+.window-controls__square {
+  width: 40px;
+  height: 30px;
+  position: relative;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.window-controls__square::before,
+.window-controls__square::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: currentColor;
+}
+
+.window-controls__square--minimize::before {
+  width: 10px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+
+.window-controls__square--maximize::before {
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  background: transparent;
+  transform: translate(-50%, -50%);
+}
+
+.window-controls__square--close::before,
+.window-controls__square--close::after {
+  width: 11px;
+  height: 1px;
+  transform-origin: center;
+}
+
+.window-controls__square--close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.window-controls__square--close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.window-controls__square:hover {
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
+}
+
+.window-controls__square--close:hover {
+  background: #e5484d;
+  color: #fff;
 }
 
 .titlebar__left,
@@ -1051,11 +1202,11 @@ a {
 
 .sftp-toolbar {
   height: 40px;
-  padding: 0 14px;
+  padding: 0 10px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 8px;
   border-bottom: 1px solid var(--border-neutral-l1);
   background: var(--bg-base-secondary);
   flex-shrink: 0;
@@ -1068,15 +1219,19 @@ a {
   font-size: var(--body-sm-font-size);
   font-weight: 500;
   color: var(--text-default);
-  min-width: 0;
-  flex-shrink: 0;
+  width: 58px;
 }
 
 .sftp-toolbar__actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
+}
+
+.sftp-pathbar {
+  gap: 4px;
+  margin: 0 2px;
 }
 
 .sftp-toolbar__actions .ds-btn--secondary.ds-btn--sm {
@@ -1125,7 +1280,7 @@ a {
 .sftp-pathbar__input {
   flex: 1;
   min-width: 0;
-  height: 24px;
+  height: 26px;
   padding: 0 8px;
   border: 1px solid var(--border-neutral-l2);
   border-radius: var(--radius-6);
@@ -1620,7 +1775,7 @@ button.sftp-head__cell {
   flex-grow: 2;
   flex-shrink: 1;
   flex-basis: 0%;
-  min-height: 140px;
+  min-height: 176px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1653,8 +1808,8 @@ button.sftp-head__cell {
 .workspace__sftp--collapsed {
   flex-grow: 0;
   flex-shrink: 0;
-  flex-basis: 38px;
-  min-height: 38px;
+  flex-basis: 40px;
+  min-height: 40px;
 }
 
 .workspace__activity {
@@ -2416,7 +2571,7 @@ button.sftp-head__cell {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 26px;
+  height: 28px;
   padding: 0 12px;
   background: var(--bg-base-secondary);
   border-top: 1px solid var(--border-neutral-l1);
@@ -2429,7 +2584,15 @@ button.sftp-head__cell {
 .status-bar__right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+
+.status-bar__shortcut {
+  display: none;
+}
+
+.status-bar__shortcut:first-child {
+  display: inline-flex;
 }
 
 .status-bar__item {

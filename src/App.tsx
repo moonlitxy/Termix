@@ -9,6 +9,7 @@ import {
 import { useApp } from "./store/app";
 import { useMonitor, selectMonitorConnection } from "./store/monitor";
 import { ActivityRail } from "./components/ActivityRail";
+import { TitleBar } from "./components/TitleBar";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { EditorTabs } from "./components/EditorTabs";
 import { TerminalView } from "./components/TerminalView";
@@ -462,6 +463,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="app__body">
+        <TitleBar />
         <div className="app__main-row">
           <ActivityRail />
           <SessionSidebar />

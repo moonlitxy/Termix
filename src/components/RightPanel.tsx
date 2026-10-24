@@ -210,9 +210,16 @@ export function RightPanel() {
             <span>MEM</span>
             <strong>{connected ? memPct : "-"}</strong>
           </div>
-          <div className="right-panel__mini" title="网络连接数">
-            <span>NET</span>
-            <strong>{connected ? metrics?.netConns ?? 0 : "-"}</strong>
+          <div
+            className="right-panel__mini"
+            title={
+              connected
+                ? `磁盘 ${disk}%`
+                : "磁盘使用率"
+            }
+          >
+            <span>DISK</span>
+            <strong>{connected ? disk : "-"}</strong>
           </div>
         </div>
       )}

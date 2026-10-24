@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
+import { WindowControls } from "./WindowControls";
+import { windowControls } from "../lib/windowControls";
 
 export function TitleBar() {
   const activity = useApp((s) => s.activity);
@@ -9,7 +11,16 @@ export function TitleBar() {
   const [avatarOpen, setAvatarOpen] = useState(false);
 
   return (
-    <div className="titlebar">
+    <div
+      className="titlebar"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) void windowControls.startDragging();
+      }}
+      onDoubleClick={(e) => {
+        if (e.target === e.currentTarget) void windowControls.toggleMaximize();
+      }}
+    >
+      <WindowControls />
       <div className="titlebar__left">
         <span className="titlebar__brand">
           <Icon name="terminal" size={14} />
