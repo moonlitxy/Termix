@@ -27,6 +27,8 @@ function dedupHistory(list: CommandHistory[]): CommandHistory[] {
 }
 
 export function CommandInput() {
+  const open = useApp((s) => s.commandInputOpen);
+  const setOpen = useApp((s) => s.setCommandInputOpen);
   const activeTabId = useApp((s) => s.activeTabId);
   const tabs = useApp((s) => s.tabs);
   const [value, setValue] = useState("");
@@ -37,6 +39,13 @@ export function CommandInput() {
   const inputRef = useRef<HTMLInputElement>(null);
   const histSearchRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [open]);
 
   const tab = tabs.find((t) => t.id === activeTabId);
 
@@ -136,6 +145,8 @@ export function CommandInput() {
     ? history.filter((h) => h.command.includes(histQuery.trim()))
     : history;
 
+  if (!open) return null;
+
   return (
     <div className="command-input">
       <div className="ds-input command-input__field">
@@ -218,6 +229,14 @@ export function CommandInput() {
           </div>
         )}
       </div>
+      <button
+        className="ds-btn ds-btn--tertiary ds-btn--icon"
+        type="button"
+        title="关闭命令输入条"
+        onClick={() => setOpen(false)}
+      >
+        <Icon name="x" size={14} />
+      </button>
     </div>
   );
 }

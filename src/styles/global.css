@@ -172,6 +172,13 @@ a {
   flex: 1;
   display: flex;
   min-height: 0;
+  flex-direction: column;
+}
+
+.app__main-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 /* =========================================================================
@@ -571,10 +578,10 @@ a {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 44px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 14px 0 84px;
   background: var(--bg-base-secondary);
-  border-bottom: 1px solid var(--border-neutral-l2);
+  border-bottom: 1px solid var(--border-neutral-l1);
   flex-shrink: 0;
 }
 
@@ -595,9 +602,9 @@ a {
   gap: 6px;
   height: 26px;
   padding: 0 10px;
-  background: var(--bg-brand);
-  color: var(--text-onbrand);
-  border-radius: var(--radius-6);
+  background: transparent;
+  color: var(--text-default);
+  border-radius: var(--radius-4);
   font-size: var(--body-sm-font-size);
   font-weight: 600;
 }
@@ -669,7 +676,22 @@ a {
 }
 
 .titlebar__search {
-  width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-4);
+  background: var(--bg-overlay-l1);
+  border: 1px solid var(--border-neutral-l1);
+  color: var(--text-tertiary);
+  font-size: var(--body-sm-font-size);
+  cursor: pointer;
+}
+
+.titlebar__search:hover {
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
 }
 
 .titlebar__avatar-wrap {
@@ -990,6 +1012,19 @@ a {
   color: var(--text-tertiary);
 }
 
+.workspace__empty-btn {
+  margin-top: 14px;
+}
+
+.workspace__empty-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: var(--body-sm-font-size);
+}
+
 /* =========================================================================
    v0.2: SFTP 视图
    ========================================================================= */
@@ -1042,6 +1077,11 @@ a {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.sftp-toolbar__actions .ds-btn--secondary.ds-btn--sm {
+  width: 28px;
+  padding: 0;
 }
 
 /* 路径栏：占据中间剩余宽度（输入框即内容，无空白），右侧按钮组贴右缘 */
@@ -1932,8 +1972,8 @@ button.sftp-head__cell {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 42px;
-  padding: 6px 14px;
+  height: 38px;
+  padding: 5px 12px;
   background: var(--bg-base-secondary);
   border-top: 1px solid var(--border-neutral-l1);
   flex-shrink: 0;
@@ -2034,10 +2074,61 @@ button.sftp-head__cell {
 .right-panel {
   display: flex;
   flex-direction: column;
-  width: 280px;
   background: var(--bg-base-secondary);
   border-left: 1px solid var(--border-neutral-l1);
   flex-shrink: 0;
+}
+
+.right-panel.is-expanded {
+  width: 280px;
+}
+
+.right-panel.is-collapsed {
+  width: 44px;
+}
+
+.right-panel__rail {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.right-panel__expand {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-4);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.right-panel__expand:hover {
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
+}
+
+.right-panel__mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  color: var(--text-tertiary);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.right-panel__mini strong {
+  color: var(--text-default);
+  font-family: var(--font-family-mono);
+  font-size: var(--body-sm-font-size);
+  font-variant-numeric: tabular-nums;
 }
 
 .right-panel__header {
@@ -2166,6 +2257,7 @@ button.sftp-head__cell {
   font-family: var(--font-family-mono);
   font-size: var(--body-sm-font-size);
   color: var(--text-default);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 运行时长：文本较长（天小时分秒），用更小字号保证单行完整显示 */
@@ -2324,8 +2416,8 @@ button.sftp-head__cell {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 24px;
-  padding: 0 14px;
+  height: 26px;
+  padding: 0 12px;
   background: var(--bg-base-secondary);
   border-top: 1px solid var(--border-neutral-l1);
   font-size: var(--body-xs-font-size);
@@ -2344,6 +2436,12 @@ button.sftp-head__cell {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.status-bar,
+.load-cell__value,
+.net-row__value {
+  font-variant-numeric: tabular-nums;
 }
 
 .status-bar__shortcut {

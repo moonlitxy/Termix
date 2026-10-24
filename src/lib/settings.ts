@@ -8,6 +8,8 @@ export interface Settings {
   scrollback: number;
   monitorInterval: number; // 监控刷新间隔（毫秒）
   sftpPanelRatio: number; // 文件面板占工作区高度的比例（0-1）
+  rightPanelExpanded: boolean;
+  sftpCollapsed: boolean;
 }
 
 export const SETTINGS_KEY = "termix.settings";
@@ -20,6 +22,8 @@ export const DEFAULT_SETTINGS: Settings = {
   scrollback: 5000,
   monitorInterval: 2000,
   sftpPanelRatio: 0.4,
+  rightPanelExpanded: false,
+  sftpCollapsed: false,
 };
 
 export function loadSettings(): Settings {

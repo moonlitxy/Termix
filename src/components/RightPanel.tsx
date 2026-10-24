@@ -5,6 +5,7 @@ import { useMonitor, selectMonitorConnection, computeUptimeSec } from "../store/
 import { ipc } from "../lib/ipc";
 import { resBarColor, resTextColor } from "../lib/resColor";
 import { toast } from "../store/feedback";
+import { loadSettings, saveSettings } from "../lib/settings";
 import type { TransferTask } from "../types";
 
 function formatBytes(n: number): string {
@@ -68,6 +69,21 @@ export function RightPanel() {
   const transfers = useApp((s) => s.transfers);
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
+  const expanded = useApp((s) => s.rightPanelExpanded);
+  const setExpanded = useApp((s) => s.setRightPanelExpanded);
+  const initialLayoutLoaded = useRef(false);
+
+  useEffect(() => {
+    const layout = loadSettings();
+    setExpanded(layout.rightPanelExpanded);
+    useApp.setState({ sftpCollapsed: layout.sftpCollapsed });
+    initialLayoutLoaded.current = true;
+  }, [setExpanded]);
+
+  const changeExpanded = (next: boolean) => {
+    setExpanded(next);
+    saveSettings({ ...loadSettings(), rightPanelExpanded: next });
+  };
   const doneTimers = useRef(new Set<string>());
   const [pendingTransfers, setPendingTransfers] = useState<Record<string, boolean>>({});
   // 传输重试节流：失败任务连点「重试」会重复创建传输任务，600ms 窗口内只允许一次
@@ -169,9 +185,50 @@ export function RightPanel() {
   const uptimeSec = computeUptimeSec(metrics, uptimeBase, lastSampleAt, nowTs);
 
   return (
-    <div className="right-panel">
+    <aside
+      className={
+        "right-panel" + (expanded ? " is-expanded" : " is-collapsed")
+      }
+      aria-label="资源监控"
+    >
+      {!expanded && (
+        <div className="right-panel__rail">
+          <button
+            className="right-panel__expand"
+            type="button"
+            title="展开资源监控"
+            aria-label="展开资源监控"
+            onClick={() => changeExpanded(true)}
+          >
+            <Icon name="bar" size={15} />
+          </button>
+          <div className="right-panel__mini" title={`CPU ${cpu}%`}>
+            <span>CPU</span>
+            <strong>{connected ? cpu : "-"}</strong>
+          </div>
+          <div className="right-panel__mini" title={`内存 ${memPct}%`}>
+            <span>MEM</span>
+            <strong>{connected ? memPct : "-"}</strong>
+          </div>
+          <div className="right-panel__mini" title="网络连接数">
+            <span>NET</span>
+            <strong>{connected ? metrics?.netConns ?? 0 : "-"}</strong>
+          </div>
+        </div>
+      )}
+      {expanded && (
+        <>
       <div className="right-panel__header">
         <span>资源监控</span>
+        <button
+          className="ds-btn ds-btn--tertiary ds-btn--icon"
+          type="button"
+          title="收起资源监控"
+          aria-label="收起资源监控"
+          onClick={() => changeExpanded(false)}
+        >
+          <Icon name="chevron-right" size={15} />
+        </button>
       </div>
       <div className="right-panel__body">
         {!connected ? (
@@ -419,6 +476,8 @@ export function RightPanel() {
           </>
         )}
       </div>
-    </div>
+        </>
+      )}
+    </aside>
   );
 }

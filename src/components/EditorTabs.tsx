@@ -18,6 +18,7 @@ export function EditorTabs() {
   const closeTab = useApp((s) => s.closeTab);
   const addTab = useApp((s) => s.addTab);
   const updateTab = useApp((s) => s.updateTab);
+  const requestReconnect = useApp((s) => s.requestReconnect);
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuReturnRef = useRef<HTMLElement | null>(null);
@@ -127,6 +128,36 @@ export function EditorTabs() {
     await destroyAndClose(tabId);
   };
 
+  const activeTab = tabs.find((t) => t.id === activeTabId && !t.hidden);
+
+  const toggleConnection = async () => {
+    if (!activeTab) return;
+    if (activeTab.connectionId) {
+      try {
+        if (activeTab.shellId) {
+          await ipc.terminalDestroy(activeTab.connectionId, activeTab.shellId);
+        }
+        await ipc.sessionDisconnect(activeTab.connectionId);
+      } catch {
+        // 连接可能已失效，忽略
+      }
+      updateTab(activeTab.id, {
+        status: "disconnected",
+        manualClosed: true,
+        connectionId: undefined,
+        shellId: undefined,
+        error: undefined,
+      });
+      return;
+    }
+    updateTab(activeTab.id, {
+      status: "connecting",
+      manualClosed: false,
+      error: undefined,
+    });
+    requestReconnect(activeTab.id);
+  };
+
   return (
     <div className="editor-tabs">
       {tabs.filter((t) => !t.hidden).map((tab) => (
@@ -168,6 +199,28 @@ export function EditorTabs() {
         </div>
       ))}
       <div className="editor-tabs__spacer" />
+      {activeTab && (
+        <div className="editor-tabs__actions">
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title={
+              activeTab.status === "connected"
+                ? "断开当前连接"
+                : activeTab.status === "connecting"
+                  ? "正在连接…"
+                  : "重新连接"
+            }
+            disabled={activeTab.status === "connecting"}
+            onClick={() => void toggleConnection()}
+          >
+            <Icon
+              name={activeTab.status === "connected" ? "zap" : "plug"}
+              size={15}
+            />
+          </button>
+        </div>
+      )}
 
       {ctx && (
         <div

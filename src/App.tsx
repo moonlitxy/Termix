@@ -8,7 +8,6 @@ import {
 } from "react";
 import { useApp } from "./store/app";
 import { useMonitor, selectMonitorConnection } from "./store/monitor";
-import { TitleBar } from "./components/TitleBar";
 import { ActivityRail } from "./components/ActivityRail";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { EditorTabs } from "./components/EditorTabs";
@@ -270,6 +269,9 @@ export default function App() {
       } else if (e.key.toLowerCase() === "f") {
         e.preventDefault();
         document.dispatchEvent(new CustomEvent("termix:search"));
+      } else if (e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        useApp.getState().setCommandInputOpen(true);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -390,6 +392,17 @@ export default function App() {
                   <Icon name="logo" size={56} />
                 </span>
                 <div className="workspace__empty-text">双击左侧会话开始连接</div>
+                <button
+                  className="ds-btn ds-btn--brand workspace__empty-btn"
+                  type="button"
+                  onClick={() => useApp.getState().openNewConnection()}
+                >
+                  <Icon name="plus" size={14} />
+                  新建连接
+                </button>
+                <div className="workspace__empty-shortcut">
+                  <span className="ds-kbd">⌘T</span> 快速新建
+                </div>
               </div>
             )
           ) : null}
@@ -435,7 +448,7 @@ export default function App() {
               </Suspense>
             </div>
           )}
-          {hasTabs && <CommandInput />}
+          <CommandInput />
         </div>
         {!isTerm && (
           <div className="workspace__activity" key={activity}>
@@ -448,12 +461,13 @@ export default function App() {
 
   return (
     <div className="app">
-      <TitleBar />
       <div className="app__body">
-        <ActivityRail />
-        <SessionSidebar />
-        <div className="workspace">{renderMain()}</div>
-        <RightPanel />
+        <div className="app__main-row">
+          <ActivityRail />
+          <SessionSidebar />
+          <div className="workspace">{renderMain()}</div>
+          <RightPanel />
+        </div>
       </div>
       <StatusBar />
       <CommandPalette />

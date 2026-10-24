@@ -878,7 +878,7 @@ export function SftpView() {
             title="快捷命令：打开已保存的命令片段并发送到终端"
             onClick={() => void toggleQuickCmd()}
           >
-            <Icon name="terminal" size={12} />快捷命令
+            <Icon name="terminal" size={12} />
           </button>
           <button
             className="ds-btn ds-btn--secondary ds-btn--sm"
@@ -886,7 +886,7 @@ export function SftpView() {
             title="清屏：清空当前终端输出"
             onClick={handleClearTerminal}
           >
-            <Icon name="trash" size={12} />清屏
+            <Icon name="trash" size={12} />
           </button>
           <button
             className="ds-btn ds-btn--secondary ds-btn--sm"

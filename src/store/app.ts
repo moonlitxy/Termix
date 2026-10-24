@@ -9,6 +9,7 @@ import type {
   TransferTask,
 } from "../types";
 import { ipc } from "../lib/ipc";
+import { loadSettings, saveSettings } from "../lib/settings";
 
 interface SftpContext {
   sessionId: string;
@@ -44,6 +45,10 @@ interface AppState {
   remoteCache: Record<string, { items: SftpItem[]; ts: number }>;
   /** SFTP 面板收起状态：收起后仅保留工具栏条 */
   sftpCollapsed: boolean;
+  /** 右侧资源面板展开状态：收起时仅保留迷你指标条 */
+  rightPanelExpanded: boolean;
+  /** 底部命令输入条展开状态：默认隐藏，Ctrl+L 唤出 */
+  commandInputOpen: boolean;
   /** 各标签的重连触发计数：请求重新连接时自增，终端视图据此重建连接 */
   reconnectNonce: Record<string, number>;
   /** 帮助页滚动锚点：标题栏「关于 Termix」设置后，帮助视图挂载时定位到对应区块 */
@@ -76,6 +81,8 @@ interface AppState {
   invalidateRemoteCache: () => void;
   /** 切换 SFTP 面板收起/展开状态 */
   toggleSftpCollapsed: () => void;
+  setRightPanelExpanded: (open: boolean) => void;
+  setCommandInputOpen: (open: boolean) => void;
   /** 请求指定标签重新连接（外部触发，如标题栏重连按钮） */
   requestReconnect: (tabId: string) => void;
 }
@@ -124,6 +131,8 @@ export const useApp = create<AppState>((set, get) => ({
   remoteError: null,
   remoteCache: {},
   sftpCollapsed: false,
+  rightPanelExpanded: false,
+  commandInputOpen: false,
   reconnectNonce: {},
   helpAnchor: null,
 
@@ -274,7 +283,14 @@ export const useApp = create<AppState>((set, get) => ({
   },
   selectRemote: (item) => set({ remoteSelected: item }),
   invalidateRemoteCache: () => set({ remoteCache: {} }),
-  toggleSftpCollapsed: () => set((s) => ({ sftpCollapsed: !s.sftpCollapsed })),
+  toggleSftpCollapsed: () =>
+    set((s) => {
+      const next = !s.sftpCollapsed;
+      saveSettings({ ...loadSettings(), sftpCollapsed: next });
+      return { sftpCollapsed: next };
+    }),
+  setRightPanelExpanded: (open) => set({ rightPanelExpanded: open }),
+  setCommandInputOpen: (open) => set({ commandInputOpen: open }),
   requestReconnect: (tabId) =>
     set((s) => ({
       reconnectNonce: { ...s.reconnectNonce, [tabId]: (s.reconnectNonce[tabId] ?? 0) + 1 },
