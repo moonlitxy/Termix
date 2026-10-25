@@ -993,6 +993,74 @@ pub fn local_home() -> Result<String, String> {
         .ok_or_else(|| "cannot determine home directory".to_string())
 }
 
+fn ensure_safe_local_path(path: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(path);
+    if !p.is_absolute() {
+        return Err("local path must be absolute".into());
+    }
+    Ok(p)
+}
+
+pub fn local_mkdir(path: &str) -> Result<(), String> {
+    let p = ensure_safe_local_path(path)?;
+    std::fs::create_dir(&p).map_err(|e| format!("create_dir failed: {e}"))
+}
+
+pub fn local_rename(old_path: &str, new_path: &str) -> Result<(), String> {
+    let from = ensure_safe_local_path(old_path)?;
+    let to = ensure_safe_local_path(new_path)?;
+    if !from.exists() {
+        return Err("source path not found".into());
+    }
+    if to.exists() {
+        return Err("target path already exists".into());
+    }
+    std::fs::rename(&from, &to).map_err(|e| format!("rename failed: {e}"))
+}
+
+pub fn local_delete(path: &str, is_dir: bool) -> Result<(), String> {
+    let p = ensure_safe_local_path(path)?;
+    if let Some(home) = std::env::home_dir() {
+        if p == home || p == PathBuf::from("/") {
+            return Err("refusing to delete protected path".into());
+        }
+    }
+    if is_dir {
+        let empty = std::fs::read_dir(&p)
+            .map_err(|e| format!("read_dir failed: {e}"))?
+            .next()
+            .is_none();
+        if !empty {
+            return Err("directory is not empty".into());
+        }
+        std::fs::remove_dir(&p).map_err(|e| format!("remove_dir failed: {e}"))
+    } else {
+        std::fs::remove_file(&p).map_err(|e| format!("remove_file failed: {e}"))
+    }
+}
+
+pub fn local_open_path(path: &str) -> Result<(), String> {
+    let p = ensure_safe_local_path(path)?;
+    if !p.exists() {
+        return Err("path not found".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("open failed: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("explorer failed: {e}"))?;
+    }
+    Ok(())
+}
+
 // ---- 目录递归传输 ----
 
 fn join_remote(base: &str, name: &str) -> String {
@@ -1379,5 +1447,39 @@ mod tests {
         assert_eq!(names, vec!["f1.txt", "f2.txt", "f3.txt"]);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn local_mkdir_and_rename_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("termix_mkdir_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old");
+        let s = path.to_string_lossy().into_owned();
+        local_mkdir(&s).unwrap();
+        assert!(path.is_dir());
+
+        let new_path = dir.join("new");
+        local_rename(&s, &new_path.to_string_lossy()).unwrap();
+        assert!(!path.exists() && new_path.is_dir());
+
+        std::fs::remove_dir(&new_path).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn local_delete_rejects_nonempty_and_root() {
+        let dir = std::env::temp_dir().join(format!("termix_delete_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let s = dir.to_string_lossy().into_owned();
+        assert!(local_delete(&s, true).unwrap_err().contains("not empty"));
+        std::fs::remove_dir(dir.join("sub")).unwrap();
+        local_delete(&s, true).unwrap();
+        assert!(!dir.exists());
+        assert!(local_delete("/", true).is_err());
+    }
+
+    #[test]
+    fn local_mkdir_rejects_relative_path() {
+        assert!(local_mkdir("relative/path").unwrap_err().contains("absolute"));
     }
 }

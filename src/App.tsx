@@ -189,6 +189,7 @@ export default function App() {
       try {
         const home = await ipc.localHome();
         useApp.setState({ localPath: home });
+        void useApp.getState().loadLocal();
       } catch {
         /* browser mode */
       }

@@ -792,6 +792,26 @@ pub fn local_home() -> Result<String, String> {
     crate::sftp::local_home()
 }
 
+#[tauri::command]
+pub fn local_mkdir(path: String) -> Result<(), String> {
+    crate::sftp::local_mkdir(&path)
+}
+
+#[tauri::command]
+pub fn local_rename(old_path: String, new_path: String) -> Result<(), String> {
+    crate::sftp::local_rename(&old_path, &new_path)
+}
+
+#[tauri::command]
+pub fn local_delete(path: String, is_dir: bool) -> Result<(), String> {
+    crate::sftp::local_delete(&path, is_dir)
+}
+
+#[tauri::command]
+pub fn local_open_path(path: String) -> Result<(), String> {
+    crate::sftp::local_open_path(&path)
+}
+
 // ---- v0.3: 命令片段 ----
 
 #[tauri::command]

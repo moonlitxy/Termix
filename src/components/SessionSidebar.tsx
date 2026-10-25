@@ -77,6 +77,7 @@ export function SessionSidebar() {
   };
 
   const openSession = (session: Session) => {
+    useApp.setState({ activity: "terminal" });
     addTab({
       id: nextTabId(),
       kind: "terminal",

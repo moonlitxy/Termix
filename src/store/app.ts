@@ -37,6 +37,10 @@ interface AppState {
   remoteSelected: SftpItem | null;
   /** 本地下载目标目录（无本地文件面板，下载直接落到该目录） */
   localPath: string;
+  localItems: SftpItem[];
+  localSelected: SftpItem | null;
+  localLoading: boolean;
+  localError: string | null;
   /** 远程目录列表加载中标记（用于展示加载状态，避免重复触发加载） */
   remoteLoading: boolean;
   /** 远程目录加载失败的错误信息（成功/加载中时为空） */
@@ -76,6 +80,10 @@ interface AppState {
   loadRemote: () => Promise<void>;
   openRemoteDir: (item: SftpItem) => Promise<void>;
   upRemote: () => Promise<void>;
+  loadLocal: () => Promise<void>;
+  openLocalDir: (item: SftpItem) => Promise<void>;
+  upLocal: () => Promise<void>;
+  selectLocal: (item: SftpItem | null) => void;
   selectRemote: (item: SftpItem | null) => void;
   /** 目录变更（新建/重命名/删除/上传完成）后使缓存失效，下次加载强制重新请求 */
   invalidateRemoteCache: () => void;
@@ -127,6 +135,10 @@ export const useApp = create<AppState>((set, get) => ({
   remotePath: "/",
   remoteSelected: null,
   localPath: "",
+  localItems: [],
+  localSelected: null,
+  localLoading: false,
+  localError: null,
   remoteLoading: false,
   remoteError: null,
   remoteCache: {},
@@ -282,6 +294,34 @@ export const useApp = create<AppState>((set, get) => ({
     await get().loadRemote();
   },
   selectRemote: (item) => set({ remoteSelected: item }),
+  loadLocal: async () => {
+    const { localPath } = get();
+    if (!localPath) return;
+    set({ localLoading: true, localError: null });
+    try {
+      const items = await ipc.localList(localPath);
+      set({ localItems: items, localLoading: false, localError: null });
+    } catch (e) {
+      console.warn("loadLocal:", e);
+      set({ localItems: [], localLoading: false, localError: String(e) });
+    }
+  },
+  openLocalDir: async (item) => {
+    if (!item.isDir) return;
+    set({ localPath: item.path, localSelected: null });
+    await get().loadLocal();
+  },
+  upLocal: async () => {
+    const path = get().localPath;
+    if (!path) return;
+    const parts = path.replace(/\\/g, "/").split("/");
+    parts.pop();
+    let next = parts.join("/") || "/";
+    if (next === "") next = "/";
+    set({ localPath: next, localSelected: null });
+    await get().loadLocal();
+  },
+  selectLocal: (item) => set({ localSelected: item }),
   invalidateRemoteCache: () => set({ remoteCache: {} }),
   toggleSftpCollapsed: () =>
     set((s) => {

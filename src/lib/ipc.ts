@@ -112,6 +112,12 @@ export const ipc = {
   // local fs
   localList: (path: string) => invoke<SftpItem[]>("local_list", { path }),
   localHome: () => invoke<string>("local_home"),
+  localMkdir: (path: string) => invoke<void>("local_mkdir", { path }),
+  localRename: (oldPath: string, newPath: string) =>
+    invoke<void>("local_rename", { oldPath, newPath }),
+  localDelete: (path: string, isDir: boolean) =>
+    invoke<void>("local_delete", { path, isDir }),
+  localOpenPath: (path: string) => invoke<void>("local_open_path", { path }),
 
   // ---- v0.3: 命令片段 ----
   snippetList: () => invoke<Snippet[]>("snippet_list"),

@@ -845,9 +845,6 @@ export function SftpView() {
   return (
     <div className="sftp-view">
       <div className="sftp-toolbar">
-        <span className="sftp-toolbar__session">
-          <Icon name="folder" size={13} />文件
-        </span>
         <div className="sftp-pathbar">
           <button
             className="ds-btn ds-btn--tertiary ds-btn--sm"
@@ -894,7 +891,7 @@ export function SftpView() {
             title="刷新：重新加载当前远程目录"
             onClick={handleRefresh}
           >
-            <Icon name="refresh" size={12} />刷新
+            <Icon name="refresh" size={12} />
           </button>
           <span className="sftp-new-wrap">
             <button
@@ -903,7 +900,7 @@ export function SftpView() {
               title="新建：创建远程文件夹或文件"
               onClick={() => setNewMenu((v) => !v)}
             >
-              <Icon name="plus" size={12} />新建
+              <Icon name="plus" size={12} />
             </button>
             {newMenu && (
               <>
@@ -939,7 +936,7 @@ export function SftpView() {
               title="下载：将选中的远程文件下载到本地（目录下载请使用右键菜单）"
               onClick={() => void doDownload(remoteSelected)}
             >
-              <Icon name="download" size={12} />下载
+              <Icon name="download" size={12} />
             </button>
           )}
           <button
