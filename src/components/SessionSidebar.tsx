@@ -34,6 +34,8 @@ export function SessionSidebar() {
   const [groupCtx, setGroupCtx] = useState<GroupCtxMenu | null>(null);
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuReturnRef = useRef<HTMLElement | null>(null);
@@ -139,6 +141,54 @@ export function SessionSidebar() {
     }
   };
 
+  const moveSessionToGroup = async (sessionId: string, groupId: string) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session || (session.groupId ?? "") === groupId) return;
+    try {
+      await ipc.sessionMove(sessionId, groupId);
+      await loadSessions();
+      setGroupsOpen((m) => ({ ...m, [groupId]: true }));
+      const groupName = groups.find((g) => g.id === groupId)?.name ?? "分组";
+      toast.success(`已将「${session.name}」移动到「${groupName}」`);
+    } catch (e) {
+      toast.error("移动会话失败：" + String(e));
+    }
+  };
+
+  const startSessionDrag = (e: React.DragEvent, session: Session) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", session.id);
+    setDraggingSessionId(session.id);
+  };
+
+  const endSessionDrag = () => {
+    setDraggingSessionId(null);
+    setDragOverGroupId(null);
+  };
+
+  const handleGroupDragOver = (e: React.DragEvent, group: Group) => {
+    if (!draggingSessionId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverGroupId !== group.id) setDragOverGroupId(group.id);
+  };
+
+  const handleGroupDragLeave = (e: React.DragEvent, group: Group) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setDragOverGroupId((current) => (current === group.id ? null : current));
+  };
+
+  const handleGroupDrop = async (e: React.DragEvent, group: Group) => {
+    if (!draggingSessionId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const sessionId =
+      e.dataTransfer.getData("text/plain") || draggingSessionId;
+    endSessionDrag();
+    if (sessionId) await moveSessionToGroup(sessionId, group.id);
+  };
+
   useEffect(() => {
     if (!ctx && !groupCtx) return;
     const frame = window.requestAnimationFrame(() => {
@@ -225,8 +275,12 @@ export function SessionSidebar() {
         className={
           "session-row" +
           (child ? " session-row--child" : "") +
-          (selectedId === s.id ? " is-active" : "")
+          (selectedId === s.id ? " is-active" : "") +
+          (draggingSessionId === s.id ? " is-dragging" : "")
         }
+        draggable
+        onDragStart={(e) => startSessionDrag(e, s)}
+        onDragEnd={endSessionDrag}
         onClick={() => handleClick(s)}
         role="button"
         tabIndex={0}
@@ -247,7 +301,6 @@ export function SessionSidebar() {
           e.preventDefault();
           openSessionMenu(s, { x: e.clientX, y: e.clientY });
         }}
-        title={s.host + ":" + s.port}
       >
         <span
           className={"ds-dot " + state.dot}
@@ -377,10 +430,16 @@ export function SessionSidebar() {
             return (
               <div key={g.id}>
                 <div
-                  className="group-row"
+                  className={
+                    "group-row" +
+                    (dragOverGroupId === g.id ? " is-drop-target" : "")
+                  }
                   onClick={() =>
                     setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
                   }
+                  onDragOver={(e) => handleGroupDragOver(e, g)}
+                  onDragLeave={(e) => handleGroupDragLeave(e, g)}
+                  onDrop={(e) => void handleGroupDrop(e, g)}
                   role="button"
                   tabIndex={0}
                   aria-expanded={open}
@@ -394,7 +453,6 @@ export function SessionSidebar() {
                     e.stopPropagation();
                     setGroupCtx({ x: e.clientX, y: e.clientY, group: g });
                   }}
-                  title={g.name}
                 >
                   <span className="session-row__chevron">
                     <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />

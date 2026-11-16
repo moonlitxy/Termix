@@ -28,6 +28,8 @@ export const ipc = {
   sessionCreate: (input: SessionInput) => invoke<string>("session_create", { input }),
   sessionUpdate: (id: string, input: SessionInput) =>
     invoke<void>("session_update", { id, input }),
+  sessionMove: (id: string, groupId: string | null) =>
+    invoke<void>("session_move", { id, groupId }),
   sessionDelete: (id: string) => invoke<void>("session_delete", { id }),
   sessionsExport: () => invoke<string>("sessions_export"),
   sessionsImport: (content: string) =>

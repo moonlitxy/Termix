@@ -2,17 +2,19 @@ import { useState } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { WindowControls } from "./WindowControls";
-import { windowControls } from "../lib/windowControls";
+import { isWindowsPlatform, windowControls } from "../lib/windowControls";
 
 export function TitleBar() {
   const activity = useApp((s) => s.activity);
   const setActivity = useApp((s) => s.setActivity);
   const openPalette = useApp((s) => s.openPalette);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [isWindows] = useState(isWindowsPlatform);
+  const shortcutMod = isWindows ? "Ctrl" : "⌘";
 
   return (
     <div
-      className="titlebar"
+      className={"titlebar" + (isWindows ? " titlebar--windows" : "")}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) void windowControls.startDragging();
       }}
@@ -31,12 +33,12 @@ export function TitleBar() {
         <button
           className="titlebar__search"
           type="button"
-          title="全局搜索（⌘K）"
+          title={`全局搜索（${shortcutMod}+K）`}
           onClick={openPalette}
         >
           <Icon name="search" size={14} />
           <span>搜索</span>
-          <span className="ds-kbd">⌘K</span>
+          <span className="ds-kbd">{shortcutMod}K</span>
         </button>
       </div>
       <div className="titlebar__right">

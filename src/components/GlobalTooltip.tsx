@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface Tip {
   text: string;
@@ -20,6 +20,7 @@ export function GlobalTooltip() {
   const timerRef = useRef<number | undefined>(undefined);
   const currentRef = useRef<HTMLElement | null>(null);
   const savedTitlesRef = useRef<Map<Element, string>>(new Map());
+  const tipRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = savedTitlesRef.current;
@@ -106,9 +107,23 @@ export function GlobalTooltip() {
     };
   }, []);
 
+  // 固定定位元素默认会受 left 到视口右侧的可用宽度限制，右侧按钮的提示会被挤成竖排。
+  // 先按内容宽度渲染，再在绘制前把提示框夹在视口内。
+  useLayoutEffect(() => {
+    if (!tip || !tipRef.current) return;
+    const el = tipRef.current;
+    const halfWidth = el.offsetWidth / 2;
+    const left = Math.min(
+      window.innerWidth - 8 - halfWidth,
+      Math.max(8 + halfWidth, tip.x)
+    );
+    el.style.left = `${left}px`;
+  }, [tip]);
+
   if (!tip) return null;
   return (
     <div
+      ref={tipRef}
       className={"global-tooltip" + (tip.above ? " is-above" : "")}
       style={{ left: tip.x, top: tip.y }}
       role="tooltip"

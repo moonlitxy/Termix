@@ -30,6 +30,7 @@ import {
   onUpdateDownloadProgress,
 } from "./lib/ipc";
 import { terminalRegistry } from "./lib/terminalRegistry";
+import { isWindowsPlatform } from "./lib/windowControls";
 import { useUpdate } from "./store/update";
 import {
   applyAppearance,
@@ -111,6 +112,7 @@ export default function App() {
   const stackRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<{ startY: number; startRatio: number } | null>(null);
   const [panelResizing, setPanelResizing] = useState(false);
+  const [isWindows] = useState(isWindowsPlatform);
   const [sftpRatio, setSftpRatio] = useState(() =>
     Math.min(0.8, Math.max(0.15, loadSettings().sftpPanelRatio || 0.4))
   );
@@ -418,7 +420,8 @@ export default function App() {
                   新建连接
                 </button>
                 <div className="workspace__empty-shortcut">
-                  <span className="ds-kbd">⌘T</span> 快速新建
+                  <span className="ds-kbd">{isWindows ? "Ctrl+T" : "⌘T"}</span>{" "}
+                  快速新建
                 </div>
               </div>
             )

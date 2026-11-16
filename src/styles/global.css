@@ -23,8 +23,9 @@ body,
 .global-tooltip {
   position: fixed;
   z-index: 500;
-  transform: translateX(-50%);
+  width: max-content;
   max-width: 280px;
+  transform: translateX(-50%);
   padding: 4px 7px;
   background: #23262b;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -644,6 +645,14 @@ a {
   z-index: 20;
 }
 
+.titlebar--windows {
+  padding: 0 0 0 16px;
+}
+
+.titlebar--windows .titlebar__left {
+  margin-left: 0;
+}
+
 .window-controls {
   display: inline-flex;
   align-items: center;
@@ -742,7 +751,7 @@ a {
 
 .window-controls--windows {
   order: 99;
-  margin-left: auto;
+  margin-left: 4px;
 }
 
 .window-controls__square {
@@ -1175,6 +1184,10 @@ a {
   box-shadow: inset 2px 0 0 var(--bg-brand);
 }
 
+.session-row.is-dragging {
+  opacity: 0.5;
+}
+
 .session-row__chevron {
   color: var(--text-tertiary);
   display: inline-flex;
@@ -1265,6 +1278,11 @@ a {
 
 .group-row:hover {
   background: var(--bg-overlay-l1);
+}
+
+.group-row.is-drop-target {
+  background: var(--bg-brand-popup);
+  box-shadow: inset 0 0 0 1px var(--border-brand);
 }
 
 .group-row__name {

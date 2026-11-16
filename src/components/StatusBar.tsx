@@ -1,7 +1,9 @@
 import { useApp } from "../store/app";
+import { isWindowsPlatform } from "../lib/windowControls";
 import { Icon } from "./Icon";
 
 export function StatusBar() {
+  const shortcutMod = isWindowsPlatform() ? "Ctrl" : "⌘";
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const remotePath = useApp((s) => s.remotePath);
@@ -51,10 +53,10 @@ export function StatusBar() {
           )}
         </button>
         <span className="status-bar__shortcut">
-          终端 <span className="ds-kbd">⌘T</span> 新建会话
+          终端 <span className="ds-kbd">{shortcutMod}T</span> 新建会话
         </span>
         <span className="status-bar__shortcut">
-          断开 <span className="ds-kbd">⌘D</span>
+          断开 <span className="ds-kbd">{shortcutMod}D</span>
         </span>
       </div>
     </div>

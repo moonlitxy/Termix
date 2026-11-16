@@ -368,6 +368,15 @@ pub async fn session_update(
 }
 
 #[tauri::command]
+pub async fn session_move(
+    id: String,
+    group_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.move_session(&id, group_id.as_deref())
+}
+
+#[tauri::command]
 pub async fn session_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.db.delete_session(&id)
 }

@@ -36,6 +36,7 @@ fn main() {
             commands::session_list,
             commands::session_create,
             commands::session_update,
+            commands::session_move,
             commands::session_delete,
             commands::sessions_export,
             commands::sessions_import,

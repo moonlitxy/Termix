@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { windowControls } from "../lib/windowControls";
-
-function controlPlatform(): "macos" | "windows" {
-  return navigator.userAgent.includes("Windows") ? "windows" : "macos";
-}
+import { isWindowsPlatform, windowControls } from "../lib/windowControls";
 
 /** 自绘窗口控制：macOS 左侧三点、Windows 右侧三键，风格与暗色标题栏统一 */
 export function WindowControls() {
-  const [platform] = useState(controlPlatform);
+  const [platform] = useState(() =>
+    isWindowsPlatform() ? "windows" : "macos"
+  );
   const [, setMaximized] = useState(false);
 
   useEffect(() => {

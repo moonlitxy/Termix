@@ -109,6 +109,17 @@ impl Db {
         Ok(())
     }
 
+    /// 仅调整会话所属分组，不触碰密码等加密字段。
+    pub fn move_session(&self, id: &str, group_id: Option<&str>) -> Result<(), String> {
+        let c = self.conn.lock().unwrap();
+        c.execute(
+            "UPDATE sessions SET group_id=? WHERE id=?",
+            params![group_id, id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn delete_session(&self, id: &str) -> Result<(), String> {
         let c = self.conn.lock().unwrap();
         c.execute("DELETE FROM sessions WHERE id=?", params![id])
@@ -445,6 +456,20 @@ mod tests {
         // touch
         db.touch_session(&id).unwrap();
         assert!(db.list_sessions().unwrap()[0].last_connected_at.is_some());
+
+        // move group without touching other fields
+        let gid = db
+            .create_group(GroupInput {
+                name: "测试".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        db.move_session(&id, Some(&gid)).unwrap();
+        let moved = db.list_sessions().unwrap();
+        assert_eq!(moved[0].group_id.as_deref(), Some(gid.as_str()));
+        assert_eq!(moved[0].password.as_deref(), Some("secret"));
+        db.move_session(&id, None).unwrap();
+        assert!(db.list_sessions().unwrap()[0].group_id.is_none());
 
         // delete
         db.delete_session(&id).unwrap();
