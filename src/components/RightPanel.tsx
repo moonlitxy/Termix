@@ -65,7 +65,7 @@ function TaskFillClass(t: TransferTask): string {
   return "res-bar__fill--brand";
 }
 
-export function RightPanel() {
+export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean }) {
   const transfers = useApp((s) => s.transfers);
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
@@ -129,7 +129,7 @@ export function RightPanel() {
   const nowTs = useMonitor((s) => s.nowTs);
 
   const connectionId = selectMonitorConnection(sftpContext, tabs);
-  const connected = !!connectionId;
+  const connected = transfersOnly ? true : !!connectionId;
 
   // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列
   useEffect(() => {
@@ -184,54 +184,25 @@ export function RightPanel() {
   // 运行时长：共享数据源统一计算（本地时钟每秒补偿，不受监控刷新间隔影响）
   const uptimeSec = computeUptimeSec(metrics, uptimeBase, lastSampleAt, nowTs);
 
+  if (!expanded) return null;
+
   return (
     <aside
       className={
-        "right-panel" + (expanded ? " is-expanded" : " is-collapsed")
+        "right-panel is-expanded" +
+        (transfersOnly ? " right-panel--transfers-only" : "")
       }
-      aria-label="资源监控"
+      aria-label={transfersOnly ? "传输队列" : "资源监控"}
     >
-      {!expanded && (
-        <div className="right-panel__rail">
-          <button
-            className="right-panel__expand"
-            type="button"
-            title="展开资源监控"
-            aria-label="展开资源监控"
-            onClick={() => changeExpanded(true)}
-          >
-            <Icon name="bar" size={15} />
-          </button>
-          <div className="right-panel__mini" title={`CPU ${cpu}%`}>
-            <span>CPU</span>
-            <strong>{connected ? cpu : "-"}</strong>
-          </div>
-          <div className="right-panel__mini" title={`内存 ${memPct}%`}>
-            <span>MEM</span>
-            <strong>{connected ? memPct : "-"}</strong>
-          </div>
-          <div
-            className="right-panel__mini"
-            title={
-              connected
-                ? `磁盘 ${disk}%`
-                : "磁盘使用率"
-            }
-          >
-            <span>DISK</span>
-            <strong>{connected ? disk : "-"}</strong>
-          </div>
-        </div>
-      )}
       {expanded && (
         <>
       <div className="right-panel__header">
-        <span>资源监控</span>
+        <span>{transfersOnly ? "传输队列" : "资源监控"}</span>
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"
-          title="收起资源监控"
-          aria-label="收起资源监控"
+          title={transfersOnly ? "收起传输队列" : "收起资源监控"}
+          aria-label={transfersOnly ? "收起传输队列" : "收起资源监控"}
           onClick={() => changeExpanded(false)}
         >
           <Icon name="chevron-right" size={15} />

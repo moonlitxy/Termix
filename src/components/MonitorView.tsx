@@ -86,7 +86,7 @@ export function MonitorView() {
     return (
       <div className="workspace__empty">
         <span className="workspace__empty-logo">
-          <Icon name="bar" size={56} />
+          <Icon name="bar" size={28} />
         </span>
         <div className="workspace__empty-text">请先连接一个会话</div>
         <div className="workspace__empty-sub">打开终端连接后即可查看实时监控</div>

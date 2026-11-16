@@ -10,10 +10,16 @@ import type {
 } from "../types";
 import { ipc } from "../lib/ipc";
 import { loadSettings, saveSettings } from "../lib/settings";
+import { setBoundedTimestampCache } from "../lib/boundedCache";
 
 interface SftpContext {
   sessionId: string;
   connectionId: string;
+}
+
+interface RemoteCacheValue {
+  items: SftpItem[];
+  enriched: boolean;
 }
 
 interface AppState {
@@ -37,16 +43,12 @@ interface AppState {
   remoteSelected: SftpItem | null;
   /** 本地下载目标目录（无本地文件面板，下载直接落到该目录） */
   localPath: string;
-  localItems: SftpItem[];
-  localSelected: SftpItem | null;
-  localLoading: boolean;
-  localError: string | null;
   /** 远程目录列表加载中标记（用于展示加载状态，避免重复触发加载） */
   remoteLoading: boolean;
   /** 远程目录加载失败的错误信息（成功/加载中时为空） */
   remoteError: string | null;
   /** 远程目录列表缓存：connectionId|path → 条目与时间戳，短 TTL 内复用避免重复请求 */
-  remoteCache: Record<string, { items: SftpItem[]; ts: number }>;
+  remoteCache: Record<string, RemoteCacheValue & { ts: number }>;
   /** SFTP 面板收起状态：收起后仅保留工具栏条 */
   sftpCollapsed: boolean;
   /** 右侧资源面板展开状态：收起时仅保留迷你指标条 */
@@ -80,10 +82,6 @@ interface AppState {
   loadRemote: () => Promise<void>;
   openRemoteDir: (item: SftpItem) => Promise<void>;
   upRemote: () => Promise<void>;
-  loadLocal: () => Promise<void>;
-  openLocalDir: (item: SftpItem) => Promise<void>;
-  upLocal: () => Promise<void>;
-  selectLocal: (item: SftpItem | null) => void;
   selectRemote: (item: SftpItem | null) => void;
   /** 目录变更（新建/重命名/删除/上传完成）后使缓存失效，下次加载强制重新请求 */
   invalidateRemoteCache: () => void;
@@ -103,8 +101,12 @@ export function nextTabId(): string {
 
 /** 远程目录列表缓存有效期（毫秒） */
 const REMOTE_CACHE_TTL = 5000;
+/** 最多保留的目录快照数量，避免长时间浏览后缓存无限增长 */
+const REMOTE_CACHE_MAX = 12;
 /** 远程目录加载 in-flight 集合（key: connectionId|path），防止同路径并发重复请求 */
 const inflightRemote = new Set<string>();
+/** 后台补充目录大小/属主信息的 in-flight 集合（key: connectionId|path） */
+const inflightEnrich = new Set<string>();
 
 export function joinPath(a: string, b: string): string {
   if (!a) return b;
@@ -135,10 +137,6 @@ export const useApp = create<AppState>((set, get) => ({
   remotePath: "/",
   remoteSelected: null,
   localPath: "",
-  localItems: [],
-  localSelected: null,
-  localLoading: false,
-  localError: null,
   remoteLoading: false,
   remoteError: null,
   remoteCache: {},
@@ -251,10 +249,38 @@ export const useApp = create<AppState>((set, get) => ({
       return;
     }
     const key = `${sftpContext.connectionId}|${remotePath}`;
+    const startEnrich = () => {
+      const latest = get().remoteCache[key];
+      if (latest?.enriched || inflightEnrich.has(key)) return;
+      inflightEnrich.add(key);
+      const startedAt = Date.now();
+      void ipc
+        .sftpEnrich(sftpContext.connectionId, remotePath)
+        .then((items) => {
+          // 目录在此期间被刷新/变更（新建、删除、再次进入）时丢弃过期结果
+          const current = get().remoteCache[key];
+          if (current && current.ts > startedAt) return;
+          set((s) => {
+            const remoteCache = setBoundedTimestampCache<RemoteCacheValue>(
+              s.remoteCache,
+              key,
+              { items, ts: Date.now(), enriched: true },
+              REMOTE_CACHE_MAX
+            );
+            return s.sftpContext?.connectionId === sftpContext.connectionId &&
+              s.remotePath === remotePath
+              ? { remoteItems: items, remoteCache }
+              : { remoteCache };
+          });
+        })
+        .catch((e) => console.warn("enrichRemote:", e))
+        .finally(() => inflightEnrich.delete(key));
+    };
     // 短 TTL 缓存命中：复用上次结果，避免进入/切换目录时重复发起 SFTP 请求
     const cached = get().remoteCache[key];
     if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL) {
       set({ remoteItems: cached.items, remoteLoading: false, remoteError: null });
+      startEnrich();
       return;
     }
     // 并发保护：同一路径已有请求在途时不再重复发起
@@ -269,8 +295,14 @@ export const useApp = create<AppState>((set, get) => ({
         remoteItems: items,
         remoteLoading: false,
         remoteError: null,
-        remoteCache: { ...s.remoteCache, [key]: { items, ts: Date.now() } },
+        remoteCache: setBoundedTimestampCache<RemoteCacheValue>(
+          s.remoteCache,
+          key,
+          { items, ts: Date.now(), enriched: false },
+          REMOTE_CACHE_MAX
+        ),
       }));
+      startEnrich();
     } catch (e) {
       inflightRemote.delete(key);
       console.warn("loadRemote:", e);
@@ -294,34 +326,6 @@ export const useApp = create<AppState>((set, get) => ({
     await get().loadRemote();
   },
   selectRemote: (item) => set({ remoteSelected: item }),
-  loadLocal: async () => {
-    const { localPath } = get();
-    if (!localPath) return;
-    set({ localLoading: true, localError: null });
-    try {
-      const items = await ipc.localList(localPath);
-      set({ localItems: items, localLoading: false, localError: null });
-    } catch (e) {
-      console.warn("loadLocal:", e);
-      set({ localItems: [], localLoading: false, localError: String(e) });
-    }
-  },
-  openLocalDir: async (item) => {
-    if (!item.isDir) return;
-    set({ localPath: item.path, localSelected: null });
-    await get().loadLocal();
-  },
-  upLocal: async () => {
-    const path = get().localPath;
-    if (!path) return;
-    const parts = path.replace(/\\/g, "/").split("/");
-    parts.pop();
-    let next = parts.join("/") || "/";
-    if (next === "") next = "/";
-    set({ localPath: next, localSelected: null });
-    await get().loadLocal();
-  },
-  selectLocal: (item) => set({ localSelected: item }),
   invalidateRemoteCache: () => set({ remoteCache: {} }),
   toggleSftpCollapsed: () =>
     set((s) => {

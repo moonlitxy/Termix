@@ -8,33 +8,34 @@ import { useApp } from "../store/app";
 import { ipc, onTerminalOutput, onConnectionStatus, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { confirmDialog } from "../store/feedback";
+import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import type { Tab } from "../types";
 
 /** 正在建立连接的标签集合：防止同一标签并发发起多次 SSH 连接 */
 const connectingTabs = new Set<string>();
 
 const TERMINAL_THEME = {
-  background: "#1a1b1d",
-  foreground: "#e0e3ee",
-  cursor: "#d1d3db",
-  cursorAccent: "#1a1b1d",
-  selectionBackground: "rgba(56,123,255,0.3)",
-  black: "#1a1b1d",
-  red: "#f65a5a",
-  green: "#33c192",
-  yellow: "#ded47e",
-  blue: "#387bff",
-  magenta: "#b38cff",
-  cyan: "#80bbff",
-  white: "#d1d3db",
-  brightBlack: "#666b75",
-  brightRed: "#f86262",
-  brightGreen: "#5ed4ad",
-  brightYellow: "#dfb949",
-  brightBlue: "#4c88ff",
-  brightMagenta: "#f0d8ff",
-  brightCyan: "#a6d9ff",
-  brightWhite: "#f5f9fe",
+  background: "#0c0c0c",
+  foreground: "#cccccc",
+  cursor: "#3fb950",
+  cursorAccent: "#0c0c0c",
+  selectionBackground: "rgba(63,185,80,0.28)",
+  black: "#0c0c0c",
+  red: "#f85149",
+  green: "#3fb950",
+  yellow: "#d29922",
+  blue: "#58a6ff",
+  magenta: "#bc8cff",
+  cyan: "#39c5cf",
+  white: "#cccccc",
+  brightBlack: "#6e7681",
+  brightRed: "#ff7b72",
+  brightGreen: "#56d364",
+  brightYellow: "#e3b341",
+  brightBlue: "#79c0ff",
+  brightMagenta: "#d2a8ff",
+  brightCyan: "#56d4dd",
+  brightWhite: "#f0f6fc",
 };
 
 export function TerminalView({ tab }: { tab: Tab }) {
@@ -62,12 +63,15 @@ export function TerminalView({ tab }: { tab: Tab }) {
     const unlisteners: UnlistenFn[] = [];
     let ro: ResizeObserver | null = null;
     let resizeTimer: number | undefined;
+    let prefs = loadSettings();
 
     const terminal = new Terminal({
       fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
-      fontSize: 12,
+      fontSize: Math.max(11, prefs.fontSize - 1),
       lineHeight: 1.5,
       cursorBlink: true,
+      cursorStyle: prefs.cursorStyle,
+      scrollback: prefs.scrollback,
       theme: TERMINAL_THEME,
       allowProposedApi: true,
     });
@@ -80,7 +84,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
     fitRef.current = fitAddon;
     terminalRegistry.set(tab.id, terminal);
     terminalRegistry.setSearch(tab.id, searchAddon);
-    terminalRegistry.clearBuffer(tab.id);
 
     try {
       fitAddon.fit();
@@ -90,11 +93,63 @@ export function TerminalView({ tab }: { tab: Tab }) {
     // 进入终端视图时立即聚焦，恢复键盘输入（切换自 SFTP 等模块后无需手动点击）
     terminal.focus();
 
+    const writeClipboardText = async (text: string) => {
+      const current = tabRef.current;
+      if (!current.connectionId || !current.shellId) return;
+      try {
+        await ipc.terminalWrite(current.connectionId, current.shellId, text);
+      } catch (e) {
+        console.error("terminal clipboard write failed:", e);
+      }
+    };
+    const copySelection = async () => {
+      const selection = terminal.getSelection();
+      if (!selection) return;
+      try {
+        await navigator.clipboard.writeText(selection);
+      } catch (e) {
+        console.error("terminal copy failed:", e);
+      }
+      terminal.focus();
+    };
+    const pasteClipboard = async () => {
+      let text = "";
+      try {
+        text = await navigator.clipboard.readText();
+      } catch (e) {
+        console.error("terminal paste read failed:", e);
+        return;
+      }
+      if (!text) return;
+      if (text.includes("\n")) {
+        setPastePending(text);
+      } else {
+        await writeClipboardText(text);
+      }
+      terminal.focus();
+    };
+    // 终端内标准复制/粘贴快捷键（macOS Cmd+C/V，Windows/Linux Ctrl+C/V 或 Ctrl+Shift+C/V）
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+      if (!event.metaKey && !event.ctrlKey) return true;
+      const key = event.key.toLowerCase();
+      if (key === "c" && terminal.hasSelection()) {
+        event.preventDefault();
+        void copySelection();
+        return false;
+      }
+      if (key === "v") {
+        event.preventDefault();
+        void pasteClipboard();
+        return false;
+      }
+      return true;
+    });
+
     // 订阅终端输出
     onTerminalOutput((e) => {
       if (e.tabId === tab.id && !cancelled) {
         terminal.write(e.data);
-        terminalRegistry.append(tab.id, e.data);
       }
     }).then((un) => {
       if (cancelled) un();
@@ -229,6 +284,35 @@ export function TerminalView({ tab }: { tab: Tab }) {
     });
     ro.observe(container);
 
+    const onSettingsChange = () => {
+      const next = loadSettings();
+      if (
+        next.fontSize === prefs.fontSize &&
+        next.scrollback === prefs.scrollback &&
+        next.cursorStyle === prefs.cursorStyle
+      ) {
+        return;
+      }
+      prefs = next;
+      terminal.options.fontSize = Math.max(11, next.fontSize - 1);
+      terminal.options.scrollback = next.scrollback;
+      terminal.options.cursorStyle = next.cursorStyle;
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        try {
+          fitAddon.fit();
+          const t = tabRef.current;
+          if (t.connectionId && t.shellId) {
+            ipc.terminalResize(t.connectionId, t.shellId, terminal.cols, terminal.rows);
+          }
+        } catch {
+          // ignore
+        }
+      }, 50);
+    };
+    window.addEventListener(SETTINGS_CHANGE_EVENT, onSettingsChange);
+
     // 连接流程（仅未连接时；同标签并发连接保护）
     const connect = async () => {
       const current = tabRef.current;
@@ -358,6 +442,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       dataDisp.dispose();
       container.removeEventListener("pointerdown", onContainerDown);
       container.removeEventListener("focusin", onContainerFocusIn);
+      window.removeEventListener(SETTINGS_CHANGE_EVENT, onSettingsChange);
       selDisp.dispose();
       unlisteners.forEach((un) => un());
       window.clearTimeout(resizeTimer);

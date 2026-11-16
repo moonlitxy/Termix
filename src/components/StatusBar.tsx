@@ -1,9 +1,13 @@
 import { useApp } from "../store/app";
+import { Icon } from "./Icon";
 
 export function StatusBar() {
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const remotePath = useApp((s) => s.remotePath);
+  const transfers = useApp((s) => s.transfers);
+  const rightPanelExpanded = useApp((s) => s.rightPanelExpanded);
+  const setRightPanelExpanded = useApp((s) => s.setRightPanelExpanded);
   const activeTab = tabs.find((t) => t.id === activeTabId && !t.hidden);
   const connected = activeTab?.status === "connected";
   const connecting = activeTab?.status === "connecting";
@@ -13,6 +17,9 @@ export function StatusBar() {
     : connected
       ? "ds-dot--success"
       : "ds-dot--muted";
+  const activeTransfers = transfers.filter(
+    (t) => t.status === "running" || t.status === "paused"
+  ).length;
 
   return (
     <div className="status-bar">
@@ -28,6 +35,21 @@ export function StatusBar() {
         {connected ? remotePath : ""}
       </div>
       <div className="status-bar__right">
+        <button
+          className={
+            "status-bar__transfer" + (rightPanelExpanded ? " is-active" : "")
+          }
+          type="button"
+          title="打开传输队列"
+          aria-pressed={rightPanelExpanded}
+          onClick={() => setRightPanelExpanded(!rightPanelExpanded)}
+        >
+          <Icon name="arrow-right-to-line" size={11} />
+          传输
+          {activeTransfers > 0 && (
+            <span className="status-bar__transfer-count">{activeTransfers}</span>
+          )}
+        </button>
         <span className="status-bar__shortcut">
           终端 <span className="ds-kbd">⌘T</span> 新建会话
         </span>

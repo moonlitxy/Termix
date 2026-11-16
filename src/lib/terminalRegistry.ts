@@ -3,8 +3,6 @@ import type { SearchAddon } from "@xterm/addon-search";
 
 const terms = new Map<string, Terminal>();
 const searches = new Map<string, SearchAddon>();
-const buffers = new Map<string, string>();
-const MAX_BUF = 400_000;
 let focusedTabId: string | null = null;
 
 /** 终端实例与输出缓冲注册表（按 tabId），供工具栏/快捷键跨组件访问。 */
@@ -42,18 +40,4 @@ export const terminalRegistry = {
     return searches.get(tabId);
   },
 
-  append(tabId: string, data: string): void {
-    const cur = buffers.get(tabId) ?? "";
-    const next = cur.length + data.length > MAX_BUF ? cur.slice(data.length) + data : cur + data;
-    buffers.set(tabId, next);
-  },
-  clearBuffer(tabId: string): void {
-    buffers.delete(tabId);
-  },
-
-  setFontSize(size: number): void {
-    terms.forEach((t) => {
-      t.options.fontSize = size;
-    });
-  },
 };

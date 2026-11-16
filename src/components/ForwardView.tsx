@@ -112,7 +112,17 @@ export function ForwardView() {
         </button>
       </div>
       <div className="fw-list">
-        {rules.length === 0 && <div className="fw-empty">暂无转发规则</div>}
+        {rules.length === 0 && (
+          <div className="fw-empty">
+            <span className="fw-empty__icon">
+              <Icon name="arrow-right-to-line" size={28} />
+            </span>
+            <div className="fw-empty__title">暂无转发规则</div>
+            <div className="fw-empty__sub">
+              创建规则后，流量会通过已连接的 SSH 会话转发
+            </div>
+          </div>
+        )}
         {rules.map((r) => (
           <div className="ds-card fw-row" key={r.id}>
             <div className="fw-row__main">

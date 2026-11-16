@@ -23,8 +23,10 @@ export function TitleBar() {
       <WindowControls />
       <div className="titlebar__left">
         <span className="titlebar__brand">
-          <Icon name="terminal" size={14} />
-          Termix
+          <span className="titlebar__brand-mark">
+            <Icon name="terminal" size={13} />
+          </span>
+          <span className="titlebar__brand-text">Termix</span>
         </span>
         <button
           className="titlebar__search"

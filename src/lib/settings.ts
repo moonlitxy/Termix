@@ -39,3 +39,25 @@ export function saveSettings(settings: Settings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   window.dispatchEvent(new Event(SETTINGS_CHANGE_EVENT));
 }
+
+function resolveTheme(theme: Settings["theme"]): "dark" | "light" {
+  if (theme !== "system") return theme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+/** Apply startup-safe appearance before React mounts, then reuse for live setting changes. */
+export function applyAppearance(settings: Settings = loadSettings()) {
+  const resolved = resolveTheme(settings.theme);
+  const root = document.documentElement;
+  root.dataset.theme = resolved;
+  root.style.colorScheme = resolved;
+
+  const ui = (n: number) => `clamp(${n}px, calc(${n}px + 0.15vw), ${n + 4}px)`;
+  root.style.setProperty("--body-xs-font-size", ui(settings.fontSize - 3));
+  root.style.setProperty("--body-sm-font-size", ui(settings.fontSize - 2));
+  root.style.setProperty("--body-md-font-size", ui(settings.fontSize - 1));
+  root.style.setProperty("--body-base-font-size", ui(settings.fontSize));
+  root.style.setProperty("--code-terminal-font-size", ui(settings.fontSize - 1));
+}

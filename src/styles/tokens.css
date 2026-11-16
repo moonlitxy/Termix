@@ -1,16 +1,25 @@
 :root {
   /* radius */
   --radius-2: 2px;
-  --radius-4: 4px;
-  --radius-6: 6px;
-  --radius-8: 8px;
-  --radius-10: 10px;
+  --radius-4: 3px;
+  --radius-6: 5px;
+  --radius-8: 6px;
+  --radius-10: 7px;
+  --radius-12: 8px;
+  --radius-14: 10px;
+  --radius-18: 12px;
   --radius-full: 9999px;
 
   /* motion */
-  --motion-duration-fast: 120ms;
-  --motion-duration-base: 180ms;
-  --motion-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-duration-fast: 90ms;
+  --motion-duration-base: 140ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --motion-ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* material */
+  --material-blur: 0px;
+  --material-saturate: 100%;
+  --focus-ring: rgba(10, 132, 255, 0.26);
 
   /* spacers */
   --spacer-4: 4px;
@@ -23,55 +32,123 @@
   --spacer-40: 40px;
 
   /* font */
-  --font-family-default: "SF Pro Text", system-ui, -apple-system, sans-serif;
-  --font-family-heading: "SF Pro", system-ui, sans-serif;
-  --font-family-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --font-family-default: "SF Pro Text", -apple-system, BlinkMacSystemFont,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-family-heading: "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-family-mono: "SF Mono", Menlo, Monaco, "JetBrains Mono", monospace;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
 
-  --body-xs-font-size: clamp(10px, calc(10px + 0.15vw), 14px);
-  --body-sm-font-size: clamp(11px, calc(11px + 0.15vw), 15px);
-  --body-md-font-size: clamp(12px, calc(12px + 0.15vw), 16px);
-  --body-base-font-size: clamp(13px, calc(13px + 0.15vw), 17px);
+  --body-xs-font-size: clamp(10px, calc(10px + 0.1vw), 12px);
+  --body-sm-font-size: clamp(11px, calc(11px + 0.1vw), 13px);
+  --body-md-font-size: clamp(12px, calc(12px + 0.1vw), 14px);
+  --body-base-font-size: clamp(12px, calc(12px + 0.1vw), 14px);
 
   /* code */
   --code-editor-font-family: var(--font-family-mono);
   --code-terminal-font-family: var(--font-family-mono);
   --code-terminal-font-size: clamp(12px, calc(12px + 0.15vw), 16px);
   --code-terminal-line-height: 18px;
-  --code-text: #e0e3ee;
-  --code-doc: #7f838c;
-  --code-link: #3c7eff;
+  --code-text: #d4d4d4;
+  --code-doc: #8b949e;
+  --code-link: #58a6ff;
   --code-number: #f48cca;
   --code-instruction: #f0d8ff;
   --code-parameter: #82d99f;
   --code-attribute: #ded47e;
 
   /* bg */
-  --bg-base-default: #1a1b1d;
-  --bg-base-secondary: #222427;
-  --bg-base-tertiary: #2a2d31;
-  --bg-overlay-l1: rgba(224, 226, 242, 0.04);
-  --bg-overlay-l2: rgba(224, 226, 242, 0.06);
-  --bg-overlay-l3: rgba(224, 226, 242, 0.08);
-  --bg-overlay-l4: rgba(224, 226, 242, 0.12);
-  --bg-brand: #32f08c;
-  --bg-brand-hover: #0fdc78;
-  --bg-brand-popup: rgba(50, 240, 140, 0.12);
+  --bg-base-default: #14171c;
+  --bg-base-secondary: #14171c;
+  --bg-base-tertiary: #14171c;
+  --bg-overlay-l1: rgba(255, 255, 255, 0.04);
+  --bg-overlay-l2: rgba(255, 255, 255, 0.07);
+  --bg-overlay-l3: rgba(255, 255, 255, 0.1);
+  --bg-overlay-l4: rgba(255, 255, 255, 0.14);
+  --bg-brand: #0a84ff;
+  --bg-brand-hover: #0071e3;
+  --bg-brand-popup: rgba(10, 132, 255, 0.12);
+  --bg-success-popup: rgba(48, 209, 88, 0.12);
+  --app-background: #14171c;
+
+  /* layered surfaces */
+  --surface-titlebar: #14171c;
+  --surface-sidebar: #14171c;
+  --surface-panel: #14171c;
+  --surface-tabbar: #0f1217;
+  --surface-tab-active: #1b2028;
+  --surface-tab-hover: rgba(255, 255, 255, 0.055);
+  --tab-border: rgba(255, 255, 255, 0.13);
+  --surface-raised: none;
+  --shadow-soft: none;
+  --shadow-float: none;
+  --highlight-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --field-background: #171b21;
 
   /* text */
-  --text-default: #d1d3db;
-  --text-secondary: #9599a6;
-  --text-tertiary: #666b75;
-  --text-onbrand: #0c0c0d;
+  --text-default: #f4f6fa;
+  --text-secondary: #bac4d2;
+  --text-tertiary: #8b97a6;
+  --text-onbrand: #ffffff;
 
   /* border */
-  --border-neutral-l1: rgba(224, 226, 242, 0.1);
-  --border-neutral-l2: rgba(224, 226, 242, 0.16);
-  --border-neutral-l3: rgba(224, 226, 242, 0.2);
-  --border-brand: #32f08c;
+  --line: rgba(255, 255, 255, 0.11);
+  --border-neutral-l1: var(--line);
+  --border-neutral-l2: rgba(255, 255, 255, 0.13);
+  --border-neutral-l3: rgba(255, 255, 255, 0.18);
+  --border-brand: #0a84ff;
+  --divider-vertical: rgba(255, 255, 255, 0.16);
 
   /* status */
-  --status-primary-default: #387bff;
-  --status-success-default: #33c192;
-  --status-warning-default: #d27e24;
-  --status-error-default: #f65a5a;
+  --status-primary-default: #0a84ff;
+  --status-success-default: #30d158;
+  --status-warning-default: #ff9f0a;
+  --status-error-default: #ff453a;
+}
+
+[data-theme="light"] {
+  --bg-base-default: #edf0f5;
+  --bg-base-secondary: #e9edf3;
+  --bg-base-tertiary: #ffffff;
+  --bg-overlay-l1: rgba(0, 0, 0, 0.035);
+  --bg-overlay-l2: rgba(0, 0, 0, 0.06);
+  --bg-overlay-l3: rgba(0, 0, 0, 0.1);
+  --bg-overlay-l4: rgba(0, 0, 0, 0.14);
+  --bg-brand: #0a84ff;
+  --bg-brand-hover: #0071e3;
+  --bg-brand-popup: rgba(10, 132, 255, 0.08);
+  --bg-success-popup: rgba(22, 163, 74, 0.1);
+  --app-background: #e7ebf1;
+  --surface-titlebar: #e9edf3;
+  --surface-sidebar: #edf0f5;
+  --surface-panel: #f2f5f9;
+  --surface-tabbar: #e1e6ee;
+  --surface-tab-active: #ffffff;
+  --surface-tab-hover: rgba(255, 255, 255, 0.62);
+  --tab-border: #ced6e1;
+  --surface-raised: none;
+  --shadow-soft: none;
+  --shadow-float: none;
+  --highlight-inset: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --surface-hover: rgba(0, 0, 0, 0.045);
+  --field-background: #ffffff;
+  --text-default: #1a2230;
+  --text-secondary: #4d5a6b;
+  --text-tertiary: #7b8797;
+  --text-onbrand: #ffffff;
+  --line: #d1d8e2;
+  --border-neutral-l1: var(--line);
+  --border-neutral-l2: #ccd4df;
+  --border-neutral-l3: #bdc7d4;
+  --border-brand: #0a84ff;
+  --divider-vertical: #c2ccda;
+  --status-primary-default: #0a84ff;
+  --status-success-default: #16a34a;
+  --status-warning-default: #d97706;
+  --status-error-default: #dc2626;
+  --focus-ring: rgba(10, 132, 255, 0.18);
+  --code-text: #1b2431;
+  --code-doc: #64748b;
 }

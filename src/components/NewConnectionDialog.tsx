@@ -170,7 +170,12 @@ export function NewConnectionDialog() {
         </div>
 
         <div className="dialog__field">
-          <label className="dialog__field-label">名称 *</label>
+          <label className="dialog__field-label">
+            名称
+            <span className="dialog__required" aria-hidden="true">
+              *
+            </span>
+          </label>
           <div className="ds-input ds-input--block">
             <input
               type="text"
@@ -187,7 +192,12 @@ export function NewConnectionDialog() {
 
         <div className="dialog__field-row">
           <div className="dialog__field">
-            <label className="dialog__field-label">主机 / IP *</label>
+            <label className="dialog__field-label">
+              主机 / IP
+              <span className="dialog__required" aria-hidden="true">
+                *
+              </span>
+            </label>
             <div className="ds-input ds-input--block">
               <input
                 type="text"
@@ -212,7 +222,12 @@ export function NewConnectionDialog() {
         </div>
 
         <div className="dialog__field">
-          <label className="dialog__field-label">用户名 *</label>
+          <label className="dialog__field-label">
+            用户名
+            <span className="dialog__required" aria-hidden="true">
+              *
+            </span>
+          </label>
           <div className="ds-input ds-input--block">
             <span className="ds-input__icon">
               <Icon name="key" size={13} />
@@ -314,7 +329,7 @@ export function NewConnectionDialog() {
             <span>备注</span>
             <span className="dialog__field-optional">（可选）</span>
           </div>
-          <div className="ds-input ds-input--block">
+          <div className="ds-input ds-input--block ds-input--textarea">
             <textarea
               value={form.memo}
               onChange={(e) => set("memo", e.target.value)}

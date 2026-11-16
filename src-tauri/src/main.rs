@@ -53,6 +53,7 @@ fn main() {
             commands::history_add,
             commands::history_clear,
             commands::sftp_list,
+            commands::sftp_list_enriched,
             commands::sftp_cwd,
             commands::sftp_mkdir,
             commands::sftp_create_file,

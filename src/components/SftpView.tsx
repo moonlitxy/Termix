@@ -6,6 +6,8 @@ import { sftpContextMenu, type SftpMenuItem } from "../lib/sftpMenu";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { applyVariables, buildVarDefs } from "../lib/variables";
 import { useClampedMenuPosition } from "../lib/contextMenu";
+import { filterItems } from "../lib/fileFilter";
+import { rangeSelection, selectAllPaths, toggleSelection } from "../lib/selection";
 import { getVirtualRange } from "../lib/virtualList";
 import { confirmDialog, promptDialog, toast } from "../store/feedback";
 import type { SftpItem, Snippet } from "../types";
@@ -175,7 +177,6 @@ export function SftpView() {
   const sftpContext = useApp((s) => s.sftpContext);
   const remotePath = useApp((s) => s.remotePath);
   const remoteItems = useApp((s) => s.remoteItems);
-  const remoteSelected = useApp((s) => s.remoteSelected);
   const remoteLoading = useApp((s) => s.remoteLoading);
   const remoteError = useApp((s) => s.remoteError);
   const tabs = useApp((s) => s.tabs);
@@ -184,6 +185,11 @@ export function SftpView() {
   const toggleSftpCollapsed = useApp((s) => s.toggleSftpCollapsed);
 
   const [remoteDraft, setRemoteDraft] = useState(remotePath);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [anchorPath, setAnchorPath] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
+  const filterRef = useRef<HTMLInputElement>(null);
   const [dropHover, setDropHover] = useState(false);
   const hoverRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -231,6 +237,30 @@ export function SftpView() {
     });
     return arr;
   }, [remoteItems, sort]);
+  const filteredItems = useMemo(
+    () => filterItems(sortedItems, filterQuery),
+    [sortedItems, filterQuery]
+  );
+  const selectedItems = useMemo(
+    () => filteredItems.filter((item) => selectedPaths.includes(item.path)),
+    [filteredItems, selectedPaths]
+  );
+
+  useEffect(() => {
+    setSelectedPaths([]);
+    setAnchorPath(null);
+  }, [remotePath]);
+
+  useEffect(() => {
+    setSelectedPaths([]);
+    setAnchorPath(null);
+  }, [filterQuery]);
+
+  useEffect(() => {
+    setSelectedPaths((paths) =>
+      paths.filter((path) => remoteItems.some((item) => item.path === path))
+    );
+  }, [remoteItems]);
 
   useEffect(() => {
     if (!sftpContext || sftpCollapsed) return;
@@ -489,7 +519,6 @@ export function SftpView() {
     if (t && id) {
       t.clear();
       t.clearSelection();
-      terminalRegistry.clearBuffer(id);
       t.focus();
     }
   };
@@ -497,19 +526,29 @@ export function SftpView() {
   // ---- 快捷命令 ----
 
   const sendCommand = async (command: string) => {
-    if (!activeTab?.connectionId || !activeTab.shellId) {
+    const connectedTabs = tabs.filter((t) => t.connectionId && t.shellId);
+    const target =
+      activeTab?.connectionId && activeTab.shellId
+        ? activeTab
+        : connectedTabs.find(
+            (t) => t.connectionId === sftpContext?.connectionId
+          ) ?? connectedTabs[0];
+    if (!target?.connectionId || !target.shellId) {
       toast.warning("请先打开一个已连接的终端标签页");
       return;
     }
     try {
-      await ipc.terminalWrite(activeTab.connectionId, activeTab.shellId, command + "\n");
+      useApp.getState().setActiveTab(target.id);
+      await ipc.terminalWrite(target.connectionId, target.shellId, command + "\n");
       // 快捷命令同样写入历史，与终端直接输入/底部输入框保持同一份历史
-      if (activeTab.sessionId) {
-        await ipc.historyAdd(activeTab.sessionId, command);
+      if (target.sessionId) {
+        await ipc.historyAdd(target.sessionId, command);
         document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT));
       }
+      terminalRegistry.focus(target.id);
     } catch (e) {
       console.error("[quick-cmd] send failed:", e);
+      toast.error("发送命令失败：" + String(e));
     }
   };
 
@@ -646,9 +685,103 @@ export function SftpView() {
     }
   };
 
+  const handleRowClick = (
+    item: SftpItem,
+    modifiers: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }
+  ) => {
+    if (modifiers.shiftKey) {
+      setSelectedPaths(rangeSelection(filteredItems, anchorPath, item.path));
+    } else if (modifiers.metaKey || modifiers.ctrlKey) {
+      setSelectedPaths((paths) => toggleSelection(paths, item.path));
+      setAnchorPath(item.path);
+    } else {
+      setSelectedPaths([item.path]);
+      setAnchorPath(item.path);
+    }
+    useApp.getState().selectRemote(item);
+  };
+
+  const handleListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      setSelectedPaths(selectAllPaths(filteredItems));
+      return;
+    }
+    if (e.key === "Escape") {
+      setSelectedPaths([]);
+      setAnchorPath(null);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedPaths([]);
+    setAnchorPath(null);
+    useApp.getState().selectRemote(null);
+  };
+
+  const copySelectedPaths = async () => {
+    const paths = selectedItems.map((item) => item.path);
+    if (paths.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(paths.join("\n"));
+      toast.success(`已复制 ${paths.length} 个路径`);
+    } catch {
+      toast.error("复制路径失败");
+    }
+  };
+
+  const downloadSelected = async () => {
+    if (selectedItems.length === 0) return;
+    for (const item of selectedItems) {
+      if (item.isDir) await doDownloadDir(item);
+      else await doDownload(item);
+    }
+  };
+
+  const deleteSelected = async () => {
+    if (!sftpContext || selectedItems.length === 0) return;
+    const dirCount = selectedItems.filter((item) => item.isDir).length;
+    const confirmed = await confirmDialog({
+      title: "批量删除",
+      message:
+        `确定删除 ${selectedItems.length} 项？` +
+        (dirCount > 0
+          ? `\n包含 ${dirCount} 个目录，目录内容将被递归删除。`
+          : "") +
+        "\n此操作不可恢复。",
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!confirmed) return;
+    const failures: string[] = [];
+    for (const item of selectedItems) {
+      try {
+        await ipc.sftpRemove(sftpContext.connectionId, item.path, item.isDir);
+      } catch (e) {
+        failures.push(`${item.name}: ${String(e)}`);
+      }
+    }
+    const st = useApp.getState();
+    st.invalidateRemoteCache();
+    await st.loadRemote();
+    clearSelection();
+    if (failures.length > 0) {
+      toast.error(
+        `已删除 ${selectedItems.length - failures.length} 项，失败 ${failures.length} 项：\n${failures.join("\n")}`,
+        "批量删除完成"
+      );
+    } else {
+      toast.success(`已删除 ${selectedItems.length} 项`);
+    }
+  };
+
   const openItemMenu = (item: SftpItem, position: { x: number; y: number }) => {
     menuReturnRef.current = document.activeElement as HTMLElement | null;
     useApp.getState().selectRemote(item);
+    if (!selectedPaths.includes(item.path)) {
+      setSelectedPaths([item.path]);
+      setAnchorPath(item.path);
+    }
     setCtx({ ...position, item });
   };
 
@@ -802,7 +935,7 @@ export function SftpView() {
     return (
       <div className="workspace__empty">
         <span className="workspace__empty-logo">
-          <Icon name="folder" size={56} />
+          <Icon name="folder" size={28} />
         </span>
         <div className="workspace__empty-text">
           {pending ? "加载中…" : "连接会话后查看远程文件"}
@@ -828,10 +961,10 @@ export function SftpView() {
 
   const sortState = (key: SortKey): "asc" | "desc" | "none" =>
     sort.key === key ? sort.dir : "none";
-  const initialLoading = remoteLoading && sortedItems.length === 0;
-  const virtualize = sortedItems.length > SFTP_VIRTUALIZE_THRESHOLD;
+  const initialLoading = remoteLoading && filteredItems.length === 0;
+  const virtualize = filteredItems.length > SFTP_VIRTUALIZE_THRESHOLD;
   const virtualRange = getVirtualRange(
-    sortedItems.length,
+    filteredItems.length,
     listViewport.scrollTop,
     listViewport.height,
     SFTP_ROW_HEIGHT,
@@ -839,8 +972,8 @@ export function SftpView() {
     SFTP_HEADER_OFFSET
   );
   const renderedItems = virtualize
-    ? sortedItems.slice(virtualRange.start, virtualRange.end)
-    : sortedItems;
+    ? filteredItems.slice(virtualRange.start, virtualRange.end)
+    : filteredItems;
 
   return (
     <div className="sftp-view">
@@ -869,6 +1002,25 @@ export function SftpView() {
           />
         </div>
         <div className="sftp-toolbar__actions">
+          <button
+            className={
+              "ds-btn ds-btn--secondary ds-btn--sm" +
+              (filterOpen ? " is-active" : "")
+            }
+            type="button"
+            title="过滤当前文件列表"
+            onClick={() => {
+              const next = !filterOpen;
+              setFilterOpen(next);
+              if (next) {
+                window.setTimeout(() => filterRef.current?.focus(), 30);
+              } else {
+                setFilterQuery("");
+              }
+            }}
+          >
+            <Icon name="search" size={12} />
+          </button>
           <button
             className="ds-btn ds-btn--secondary ds-btn--sm"
             type="button"
@@ -929,16 +1081,6 @@ export function SftpView() {
               </>
             )}
           </span>
-          {remoteSelected && !remoteSelected.isDir && (
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm"
-              type="button"
-              title="下载：将选中的远程文件下载到本地（目录下载请使用右键菜单）"
-              onClick={() => void doDownload(remoteSelected)}
-            >
-              <Icon name="download" size={12} />
-            </button>
-          )}
           <button
             className="ds-btn ds-btn--tertiary ds-btn--icon"
             type="button"
@@ -953,6 +1095,67 @@ export function SftpView() {
           </button>
         </div>
       </div>
+
+      {filterOpen && (
+        <div className="sftp-filterbar">
+          <Icon name="search" size={12} />
+          <input
+            ref={filterRef}
+            value={filterQuery}
+            placeholder="过滤文件：*.log、error|warn、2026 *.gz"
+            spellCheck={false}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              if (filterQuery) setFilterQuery("");
+              else setFilterOpen(false);
+            }}
+          />
+          <span className="sftp-filterbar__count">
+            {filterQuery ? `${filteredItems.length} 项` : ""}
+          </span>
+        </div>
+      )}
+
+      {selectedPaths.length > 0 && (
+        <div className="sftp-batchbar">
+          <span className="sftp-batchbar__count">
+            已选 {selectedPaths.length} 项
+          </span>
+          <button
+            className="ds-btn ds-btn--secondary ds-btn--sm"
+            type="button"
+            title={`下载 ${selectedPaths.length} 项`}
+            onClick={() => void downloadSelected()}
+          >
+            <Icon name="download" size={12} />下载
+          </button>
+          <button
+            className="ds-btn ds-btn--secondary ds-btn--sm"
+            type="button"
+            title={`复制 ${selectedPaths.length} 个路径`}
+            onClick={() => void copySelectedPaths()}
+          >
+            <Icon name="copy" size={12} />复制路径
+          </button>
+          <button
+            className="ds-btn ds-btn--danger-subtle ds-btn--sm"
+            type="button"
+            title={`删除 ${selectedPaths.length} 项`}
+            onClick={() => void deleteSelected()}
+          >
+            <Icon name="trash" size={12} />删除
+          </button>
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            type="button"
+            title="清空选择"
+            onClick={clearSelection}
+          >
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+      )}
 
       {searchOpen && (
         <div className="toolbar__search sftp-search">
@@ -1013,6 +1216,7 @@ export function SftpView() {
           }
           style={colVars}
           aria-busy={remoteLoading}
+          onKeyDown={handleListKeyDown}
           onDragOver={(e) => {
             e.preventDefault();
             hoverRef.current = true;
@@ -1125,19 +1329,23 @@ export function SftpView() {
               <div
                 key={it.path}
                 className={
-                  "sftp-row" + (remoteSelected?.path === it.path ? " is-active" : "")
+                  "sftp-row" + (selectedPaths.includes(it.path) ? " is-active" : "")
                 }
-                onClick={() => useApp.getState().selectRemote(it)}
+                onClick={(e) => handleRowClick(it, e)}
                 role="button"
                 tabIndex={0}
-                aria-current={remoteSelected?.path === it.path ? "true" : undefined}
+                aria-current={selectedPaths.includes(it.path) ? "true" : undefined}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
+                    setSelectedPaths([it.path]);
+                    setAnchorPath(it.path);
                     useApp.getState().selectRemote(it);
                     handleOpen(it);
                   } else if (e.key === " ") {
                     e.preventDefault();
+                    setSelectedPaths((paths) => toggleSelection(paths, it.path));
+                    setAnchorPath(it.path);
                     useApp.getState().selectRemote(it);
                   } else if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
                     e.preventDefault();
@@ -1154,7 +1362,11 @@ export function SftpView() {
                 title={it.path}
               >
                 <span className="sftp-row__name">
-                  <span className="sftp-row__icon">
+                  <span
+                    className={
+                      "sftp-row__icon " + (it.isDir ? "is-dir" : "is-file")
+                    }
+                  >
                     <Icon name={it.isDir ? "folder" : "file"} size={13} />
                   </span>
                   <span className="sftp-row__label">{it.name}</span>
@@ -1205,8 +1417,10 @@ export function SftpView() {
               </button>
             </div>
           )}
-          {!remoteLoading && !remoteError && remoteItems.length === 0 && (
-            <div className="sftp-empty">空目录</div>
+          {!remoteLoading && !remoteError && filteredItems.length === 0 && (
+            <div className="sftp-empty">
+              {filterQuery ? "无匹配文件" : "空目录"}
+            </div>
           )}
           <div className="sftp-pane__hint">可拖拽本地文件到此处上传</div>
         </div>
@@ -1335,22 +1549,64 @@ export function SftpView() {
           style={{ left: ctxPosition?.x ?? ctx.x, top: ctxPosition?.y ?? ctx.y }}
           onClick={(e) => e.stopPropagation()}
         >
-          {sftpContextMenu("remote", ctx.item).map((m) => (
-            <Fragment key={m.id}>
-              {m.dividerBefore && <div className="ctx-menu__sep" />}
+          {ctx.item && selectedPaths.length > 1 && selectedPaths.includes(ctx.item.path) ? (
+            <>
               <button
                 type="button"
-                className={
-                  "ctx-menu__item" + (m.dangerous ? " ctx-menu__item--danger" : "")
-                }
-                title={m.label}
-                onClick={() => runMenuAction(m)}
+                className="ctx-menu__item"
+                title={`下载 ${selectedPaths.length} 项`}
+                onClick={() => {
+                  setCtx(null);
+                  void downloadSelected();
+                }}
               >
-                <Icon name={m.icon} size={12} />
-                {m.label}
+                <Icon name="download" size={12} />
+                下载 {selectedPaths.length} 项
               </button>
-            </Fragment>
-          ))}
+              <button
+                type="button"
+                className="ctx-menu__item"
+                title={`复制 ${selectedPaths.length} 个路径`}
+                onClick={() => {
+                  setCtx(null);
+                  void copySelectedPaths();
+                }}
+              >
+                <Icon name="copy" size={12} />
+                复制 {selectedPaths.length} 个路径
+              </button>
+              <div className="ctx-menu__sep" />
+              <button
+                type="button"
+                className="ctx-menu__item ctx-menu__item--danger"
+                title={`删除 ${selectedPaths.length} 项`}
+                onClick={() => {
+                  setCtx(null);
+                  void deleteSelected();
+                }}
+              >
+                <Icon name="trash" size={12} />
+                删除 {selectedPaths.length} 项
+              </button>
+            </>
+          ) : (
+            sftpContextMenu("remote", ctx.item).map((m) => (
+              <Fragment key={m.id}>
+                {m.dividerBefore && <div className="ctx-menu__sep" />}
+                <button
+                  type="button"
+                  className={
+                    "ctx-menu__item" + (m.dangerous ? " ctx-menu__item--danger" : "")
+                  }
+                  title={m.label}
+                  onClick={() => runMenuAction(m)}
+                >
+                  <Icon name={m.icon} size={12} />
+                  {m.label}
+                </button>
+              </Fragment>
+            ))
+          )}
         </div>
       )}
     </div>

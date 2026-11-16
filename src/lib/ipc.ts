@@ -66,6 +66,8 @@ export const ipc = {
   // ---- v0.2: SFTP ----
   sftpList: (connectionId: string, path: string) =>
     invoke<SftpItem[]>("sftp_list", { connectionId, path }),
+  sftpEnrich: (connectionId: string, path: string) =>
+    invoke<SftpItem[]>("sftp_list_enriched", { connectionId, path }),
   sftpCwd: (connectionId: string) =>
     invoke<string>("sftp_cwd", { connectionId }),
   sftpMkdir: (connectionId: string, path: string) =>

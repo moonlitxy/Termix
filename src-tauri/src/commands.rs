@@ -638,6 +638,15 @@ pub async fn sftp_list(
 }
 
 #[tauri::command]
+pub async fn sftp_list_enriched(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SftpItem>, String> {
+    state.sftp.list_enriched(&connection_id, &path).await
+}
+
+#[tauri::command]
 pub async fn sftp_cwd(
     connection_id: String,
     state: State<'_, AppState>,

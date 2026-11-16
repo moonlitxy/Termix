@@ -110,7 +110,17 @@ export function SnippetsView() {
         </button>
       </div>
       <div className="sn-list">
-        {snippets.length === 0 && <div className="fw-empty">暂无命令片段</div>}
+        {snippets.length === 0 && (
+          <div className="fw-empty">
+            <span className="fw-empty__icon">
+              <Icon name="scroll-text" size={28} />
+            </span>
+            <div className="fw-empty__title">暂无命令片段</div>
+            <div className="fw-empty__sub">
+              保存常用命令，之后可一键发送到当前终端
+            </div>
+          </div>
+        )}
         {snippets.map((s) => (
           <div className="ds-card sn-item" key={s.id}>
             <div className="sn-item__head">

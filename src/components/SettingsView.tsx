@@ -1,49 +1,23 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
-import { loadSettings, saveSettings, type Settings } from "../lib/settings";
+import {
+  applyAppearance,
+  loadSettings,
+  saveSettings,
+  type Settings,
+} from "../lib/settings";
 import { useUpdate } from "../store/update";
 import { confirmDialog, toast } from "../store/feedback";
 import type { MasterStatus } from "../types";
-
-function systemTheme(): "dark" | "light" {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function applyTheme(theme: string) {
-  document.documentElement.setAttribute(
-    "data-theme",
-    theme === "system" ? systemTheme() : theme
-  );
-}
-
-function applyFont(size: number) {
-  // 以用户字号为基准，叠加视口自适应（窗口变化时字体随之缩放）
-  const ui = (n: number) => `clamp(${n}px, calc(${n}px + 0.15vw), ${n + 4}px)`;
-  document.documentElement.style.setProperty("--body-xs-font-size", ui(size - 3));
-  document.documentElement.style.setProperty("--body-sm-font-size", ui(size - 2));
-  document.documentElement.style.setProperty("--body-md-font-size", ui(size - 1));
-  document.documentElement.style.setProperty("--body-base-font-size", ui(size));
-  document.documentElement.style.setProperty("--code-terminal-font-size", ui(size - 1));
-}
 
 export function SettingsView() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
 
   useEffect(() => {
-    applyTheme(settings.theme);
-    applyFont(settings.fontSize);
+    applyAppearance(settings);
     saveSettings(settings);
   }, [settings]);
-
-  // 跟随系统：监听系统主题变化
-  useEffect(() => {
-    if (settings.theme !== "system") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => applyTheme("system");
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [settings.theme]);
 
   const set = (patch: Partial<Settings>) => setSettings((s) => ({ ...s, ...patch }));
 

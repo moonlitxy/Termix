@@ -215,7 +215,7 @@ export function EditorTabs() {
             onClick={() => void toggleConnection()}
           >
             <Icon
-              name={activeTab.status === "connected" ? "zap" : "plug"}
+              name={activeTab.status === "connected" ? "plug" : "zap"}
               size={15}
             />
           </button>

@@ -31,7 +31,12 @@ import {
 } from "./lib/ipc";
 import { terminalRegistry } from "./lib/terminalRegistry";
 import { useUpdate } from "./store/update";
-import { loadSettings, saveSettings } from "./lib/settings";
+import {
+  applyAppearance,
+  loadSettings,
+  saveSettings,
+  SETTINGS_CHANGE_EVENT,
+} from "./lib/settings";
 
 // 非终端视图按需加载（首屏不下载，减小初始 bundle）
 // 组件为命名导出，转换为 default 供 lazy 使用
@@ -58,19 +63,9 @@ const PLACEHOLDERS: Record<string, { icon: string; title: string }> = {
 
 function adjustFontSize(delta: number) {
   try {
-    const raw = localStorage.getItem("termix.settings");
-    const settings = raw ? JSON.parse(raw) : { fontSize: 13 };
-    const next = Math.min(18, Math.max(11, (settings.fontSize ?? 13) + delta));
-    settings.fontSize = next;
-    localStorage.setItem("termix.settings", JSON.stringify(settings));
-    // 以用户字号为基准，叠加视口自适应（窗口变化时字体随之缩放）
-    const ui = (n: number) => `clamp(${n}px, calc(${n}px + 0.15vw), ${n + 4}px)`;
-    document.documentElement.style.setProperty("--body-xs-font-size", ui(next - 3));
-    document.documentElement.style.setProperty("--body-sm-font-size", ui(next - 2));
-    document.documentElement.style.setProperty("--body-md-font-size", ui(next - 1));
-    document.documentElement.style.setProperty("--body-base-font-size", ui(next));
-    document.documentElement.style.setProperty("--code-terminal-font-size", ui(next - 1));
-    terminalRegistry.setFontSize(next);
+    const settings = loadSettings();
+    const fontSize = Math.min(18, Math.max(11, settings.fontSize + delta));
+    saveSettings({ ...settings, fontSize });
   } catch {
     // ignore
   }
@@ -81,7 +76,7 @@ function Placeholder({ id }: { id: string }) {
   return (
     <div className="workspace__empty">
       <span className="workspace__empty-logo">
-        <Icon name={p.icon} size={56} />
+        <Icon name={p.icon} size={24} />
       </span>
       <div className="workspace__empty-text">{p.title}</div>
       <div className="workspace__empty-sub">该功能即将上线</div>
@@ -137,7 +132,8 @@ export default function App() {
     if (!drag || !stack) return;
     const delta = (e.clientY - drag.startY) / Math.max(1, stack.clientHeight);
     setSftpRatio(
-      Math.min(0.8, Math.max(0.15, drag.startRatio + delta))
+      // sftpRatio 表示下方文件面板占比：向下拖拽应缩小文件面板、放大终端
+      Math.min(0.8, Math.max(0.15, drag.startRatio - delta))
     );
   };
 
@@ -158,6 +154,23 @@ export default function App() {
       return ratio;
     });
   };
+
+  // Theme and typography are application-wide; keep system-theme changes live
+  // even when the settings page is not mounted.
+  useEffect(() => {
+    const sync = () => applyAppearance(loadSettings());
+    sync();
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemTheme = () => {
+      if (loadSettings().theme === "system") sync();
+    };
+    media.addEventListener("change", onSystemTheme);
+    window.addEventListener(SETTINGS_CHANGE_EVENT, sync);
+    return () => {
+      media.removeEventListener("change", onSystemTheme);
+      window.removeEventListener(SETTINGS_CHANGE_EVENT, sync);
+    };
+  }, []);
 
   // 全局唯一监控轮询：跟随连接状态（终端右侧资源监控与「监控」模块共享同一数据源，
   // 由本组件统一驱动 useMonitor.sync，两处展示的数据完全一致）
@@ -189,7 +202,6 @@ export default function App() {
       try {
         const home = await ipc.localHome();
         useApp.setState({ localPath: home });
-        void useApp.getState().loadLocal();
       } catch {
         /* browser mode */
       }
@@ -391,9 +403,12 @@ export default function App() {
             ) : (
               <div className="workspace__empty">
                 <span className="workspace__empty-logo">
-                  <Icon name="logo" size={56} />
+                  <Icon name="terminal" size={28} />
                 </span>
-                <div className="workspace__empty-text">双击左侧会话开始连接</div>
+                <div className="workspace__empty-text">开始你的远程会话</div>
+                <div className="workspace__empty-sub">
+                  双击左侧会话，或新建一个 SSH 连接
+                </div>
                 <button
                   className="ds-btn ds-btn--brand workspace__empty-btn"
                   type="button"
@@ -426,10 +441,10 @@ export default function App() {
               onKeyDown={(e) => {
                 if (e.key === "ArrowUp") {
                   e.preventDefault();
-                  adjustSftpRatio(-0.02);
+                  adjustSftpRatio(0.02);
                 } else if (e.key === "ArrowDown") {
                   e.preventDefault();
-                  adjustSftpRatio(0.02);
+                  adjustSftpRatio(-0.02);
                 }
               }}
             />
@@ -469,7 +484,7 @@ export default function App() {
           <ActivityRail />
           <SessionSidebar />
           <div className="workspace">{renderMain()}</div>
-          <RightPanel />
+          <RightPanel transfersOnly />
         </div>
       </div>
       <StatusBar />

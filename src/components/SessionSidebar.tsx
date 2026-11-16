@@ -4,6 +4,7 @@ import { useApp, selectFilteredSessions, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { useClampedMenuPosition } from "../lib/contextMenu";
 import { confirmDialog, toast } from "../store/feedback";
+import { SidebarStats } from "./SidebarStats";
 import type { Group, Session } from "../types";
 
 interface CtxMenu {
@@ -77,6 +78,7 @@ export function SessionSidebar() {
   };
 
   const openSession = (session: Session) => {
+    setSelectedId(session.id);
     useApp.setState({ activity: "terminal" });
     addTab({
       id: nextTabId(),
@@ -167,8 +169,19 @@ export function SessionSidebar() {
     };
   }, [ctx, groupCtx]);
 
-  const isOnline = (sessionId: string) =>
-    tabs.some((t) => t.sessionId === sessionId && t.status === "connected");
+  const sessionState = (sessionId: string) => {
+    const matches = tabs.filter((t) => t.sessionId === sessionId);
+    if (matches.some((t) => t.status === "connected")) {
+      return { key: "online", text: "已连接", dot: "ds-dot--success-glow" };
+    }
+    if (matches.some((t) => t.status === "connecting")) {
+      return { key: "connecting", text: "连接中", dot: "ds-dot--warning" };
+    }
+    if (matches.some((t) => t.status === "error")) {
+      return { key: "error", text: "失败", dot: "ds-dot--error" };
+    }
+    return { key: "offline", text: "未连接", dot: "ds-dot--muted" };
+  };
 
   // ---- 分组管理 ----
   const submitGroup = async () => {
@@ -205,7 +218,7 @@ export function SessionSidebar() {
   const isGroupOpen = (id: string) => groupsOpen[id] !== false;
 
   const renderSessionRow = (s: Session, child = false) => {
-    const online = isOnline(s.id);
+    const state = sessionState(s.id);
     return (
       <div
         key={s.id}
@@ -236,23 +249,17 @@ export function SessionSidebar() {
         }}
         title={s.host + ":" + s.port}
       >
-        {!child && (
-          <span className="session-row__chevron">
-            <Icon name="chevron-down" size={12} />
-          </span>
-        )}
         <span
-          className={
-            "ds-dot " + (online ? "ds-dot--success-glow" : "ds-dot--muted")
-          }
+          className={"ds-dot " + state.dot}
         />
-        <span className="session-row__name">{s.name}</span>
-        <span className="session-row__status">
-          {online ? (
-            <span className="ds-tag ds-tag--success">在线</span>
-          ) : (
-            <span className="ds-tag ds-tag--neutral">离线</span>
-          )}
+        <span className="session-row__label">
+          <span className="session-row__name">{s.name}</span>
+          <span className="session-row__host">
+            {s.username}@{s.host}
+          </span>
+        </span>
+        <span className={"session-row__state session-row__state--" + state.key}>
+          {state.text}
         </span>
       </div>
     );
@@ -260,8 +267,12 @@ export function SessionSidebar() {
 
   return (
     <div className="session-sidebar">
+      <SidebarStats />
       <div className="session-sidebar__header">
-        <span>会话列表</span>
+        <span className="session-sidebar__heading">
+          会话
+          <span className="session-sidebar__count">{sessions.length}</span>
+        </span>
         <div className="session-sidebar__header-actions">
           <button
             className="ds-btn ds-btn--tertiary ds-btn--icon"
@@ -303,15 +314,7 @@ export function SessionSidebar() {
       <div className="session-sidebar__body">
         <div className="session-sidebar__section-title">最近连接</div>
         {sessions.length === 0 ? (
-          <div
-            style={{
-              padding: "8px 12px",
-              color: "var(--text-tertiary)",
-              fontSize: "var(--body-sm-font-size)",
-            }}
-          >
-            暂无会话，点击 + 新建
-          </div>
+          <div className="session-sidebar__empty">暂无会话，点击 + 新建</div>
         ) : (
           sessions.map((s) => renderSessionRow(s))
         )}

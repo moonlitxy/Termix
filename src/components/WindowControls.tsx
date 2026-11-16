@@ -12,12 +12,21 @@ export function WindowControls() {
   const [, setMaximized] = useState(false);
 
   useEffect(() => {
-    void windowControls.isMaximized().then(setMaximized).catch(() => {});
-    const promise = getCurrentWindow().onResized(() => {
-      void windowControls.isMaximized().then(setMaximized).catch(() => {});
-    });
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let cancelled = false;
+    void windowControls.isMaximized()
+      .then((value) => { if (!cancelled) setMaximized(value); })
+      .catch(() => {});
+    const promise = getCurrentWindow()
+      .onResized(() => {
+        void windowControls.isMaximized()
+          .then((value) => { if (!cancelled) setMaximized(value); })
+          .catch(() => {});
+      })
+      .catch(() => undefined);
     return () => {
-      void promise.then((unlisten) => unlisten());
+      cancelled = true;
+      void promise.then((unlisten) => unlisten?.());
     };
   }, []);
 

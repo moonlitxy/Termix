@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
@@ -135,6 +135,26 @@ impl SftpService {
     }
 
     pub async fn list(&self, connection_id: &str, path: &str) -> Result<Vec<SftpItem>, String> {
+        self.list_inner(connection_id, path, false).await
+    }
+
+    /// 带补充信息的目录列表：目录真实占用与 uid/gid 名称映射。
+    /// `du` 需要递归统计目录，耗时不可控，因此只供前端后台二次刷新使用，
+    /// 不能阻塞首次文件列表展示。
+    pub async fn list_enriched(
+        &self,
+        connection_id: &str,
+        path: &str,
+    ) -> Result<Vec<SftpItem>, String> {
+        self.list_inner(connection_id, path, true).await
+    }
+
+    async fn list_inner(
+        &self,
+        connection_id: &str,
+        path: &str,
+        enriched: bool,
+    ) -> Result<Vec<SftpItem>, String> {
         let sftp = self.session(connection_id).await?;
         let entries = sftp.read_dir(path).await.map_err(|e| {
             log::error!("sftp: list failed conn={connection_id} path={path}: {e}");
@@ -158,8 +178,10 @@ impl SftpService {
             });
         }
         sort_items(&mut items);
-        // 补充信息：目录真实占用（du）与 uid/gid 名称映射（懒加载，失败静默降级）
-        self.enrich(connection_id, path, &mut items).await;
+        if enriched {
+            // 补充信息：目录真实占用（du）与 uid/gid 名称映射（失败静默降级）
+            self.enrich(connection_id, path, &mut items).await;
+        }
         log::debug!("sftp: list conn={connection_id} path={path} -> {} entries", items.len());
         Ok(items)
     }
@@ -344,7 +366,7 @@ impl SftpService {
         let pause_inner = flags.pause.clone();
         tokio::spawn(async move {
             let result = run(sftp, cancel_inner.clone(), pause_inner.clone(), app).await;
-            match result {
+            let keep_for_resume = match result {
                 Ok(()) => {
                     log::info!("sftp: {dir} task {tid_inner} completed");
                     set_task(&tasks, &tid_inner, |t| {
@@ -352,6 +374,7 @@ impl SftpService {
                         t.progress = 100.0;
                     })
                     .await;
+                    false
                 }
                 Err(e) => {
                     let status = if pause_inner.load(Ordering::Relaxed) {
@@ -379,10 +402,21 @@ impl SftpService {
                             "progress": 0.0, "speed": 0.0, "status": status, "error": msg,
                         }),
                     );
+                    status == "paused"
                 }
+            };
+            if !keep_for_resume {
+                cancels.lock().await.remove(&tid_inner);
+                pauses.lock().await.remove(&tid_inner);
+                let cleanup_tasks = tasks.clone();
+                let cleanup_id = tid_inner.clone();
+                tokio::spawn(async move {
+                    // The UI removes terminal rows quickly; keep the backend
+                    // snapshot a little longer for late refreshes.
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    cleanup_tasks.lock().await.remove(&cleanup_id);
+                });
             }
-            cancels.lock().await.remove(&tid_inner);
-            pauses.lock().await.remove(&tid_inner);
         });
         Ok(tid)
     }
@@ -624,10 +658,30 @@ impl SftpService {
     }
 
     pub async fn transfer_cancel(&self, task_id: &str) -> Result<(), String> {
-        let cancels = self.cancels.lock().await;
-        if let Some(f) = cancels.get(task_id) {
+        let cancel = self.cancels.lock().await.get(task_id).cloned();
+        if let Some(f) = cancel {
             log::info!("sftp: cancel transfer task {task_id}");
             f.store(true, Ordering::Relaxed);
+            let paused = self
+                .tasks
+                .lock()
+                .await
+                .get(task_id)
+                .is_some_and(|task| task.status == "paused");
+            if paused {
+                set_task(&self.tasks, task_id, |task| {
+                    task.status = "cancelled".into();
+                })
+                .await;
+                self.cancels.lock().await.remove(task_id);
+                self.pauses.lock().await.remove(task_id);
+                let cleanup_tasks = self.tasks.clone();
+                let cleanup_id = task_id.to_string();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    cleanup_tasks.lock().await.remove(&cleanup_id);
+                });
+            }
             Ok(())
         } else {
             log::warn!("sftp: cancel task {task_id} not found or already finished");
