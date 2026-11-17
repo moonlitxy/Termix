@@ -234,8 +234,9 @@ export const useApp = create<AppState>((set, get) => ({
     }),
 
   setSftpContext: async (sessionId, connectionId) => {
+    const previous = get().sftpContext;
     set({ sftpContext: connectionId ? { sessionId, connectionId } : null });
-    if (connectionId) {
+    if (connectionId && previous?.connectionId !== connectionId) {
       // 初始固定展示根目录 "/"：确保进入 SFTP 时根目录下的文件与文件夹
       // 立即可见，不依赖点击上级目录触发刷新；同时避免复用上一次的残留路径。
       set({ remotePath: "/", remoteSelected: null });
@@ -291,29 +292,42 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const items = await ipc.sftpList(sftpContext.connectionId, remotePath);
       inflightRemote.delete(key);
-      set((s) => ({
-        remoteItems: items,
-        remoteLoading: false,
-        remoteError: null,
-        remoteCache: setBoundedTimestampCache<RemoteCacheValue>(
+      set((s) => {
+        const remoteCache = setBoundedTimestampCache<RemoteCacheValue>(
           s.remoteCache,
           key,
           { items, ts: Date.now(), enriched: false },
           REMOTE_CACHE_MAX
-        ),
-      }));
+        );
+        // 快速切换标签/目录后，旧请求可能晚于新请求返回，不能覆盖当前面板
+        return s.sftpContext?.connectionId === sftpContext.connectionId &&
+          s.remotePath === remotePath
+          ? { remoteItems: items, remoteLoading: false, remoteError: null, remoteCache }
+          : { remoteCache };
+      });
       startEnrich();
     } catch (e) {
       inflightRemote.delete(key);
       console.warn("loadRemote:", e);
+      const isCurrent = () => {
+        const current = get();
+        return (
+          current.sftpContext?.connectionId === sftpContext.connectionId &&
+          current.remotePath === remotePath
+        );
+      };
       // 连接失效（重连后 connectionId 变化 / 后端连接被清理）：
       // 立即解除文件面板上下文，避免目录请求持续失败导致列表空白，随后由 SftpView 自动重新绑定
       if (String(e).includes("connection not found")) {
-        set({ sftpContext: null, remotePath: "/", remoteItems: [], remoteLoading: false, remoteError: null });
+        if (isCurrent()) {
+          set({ sftpContext: null, remotePath: "/", remoteItems: [], remoteLoading: false, remoteError: null });
+        }
         return;
       }
       // 其他失败（权限、超时、后端 SFTP 错误等）：保留具体错误信息供面板展示
-      set({ remoteItems: [], remoteLoading: false, remoteError: String(e) });
+      if (isCurrent()) {
+        set({ remoteItems: [], remoteLoading: false, remoteError: String(e) });
+      }
     }
   },
   openRemoteDir: async (item) => {

@@ -29,6 +29,7 @@ function polyline(points: number[], width = 600, height = 160): string {
 export function MonitorView() {
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
+  const activeTabId = useApp((s) => s.activeTabId);
   const [procs, setProcs] = useState<ProcInfo[]>([]);
   const [sysInfo, setSysInfo] = useState<SysInfo | null>(null);
 
@@ -37,7 +38,7 @@ export function MonitorView() {
   const netSpeed = useMonitor((s) => s.netSpeed);
   const cpuHist = useMonitor((s) => s.cpuHist);
 
-  const connectionId = selectMonitorConnection(sftpContext, tabs);
+  const connectionId = selectMonitorConnection(sftpContext, tabs, activeTabId);
 
   useEffect(() => {
     if (!connectionId) {

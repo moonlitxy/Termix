@@ -103,13 +103,6 @@ export function SessionSidebar() {
 
   const handleClick = (session: Session) => {
     setSelectedId(session.id);
-    // 文件面板跟随点击的已连接会话
-    const conn = tabs.find(
-      (t) => t.sessionId === session.id && t.connectionId
-    );
-    if (conn?.connectionId) {
-      void useApp.getState().setSftpContext(session.id, conn.connectionId);
-    }
   };
 
   const handleDelete = async (session: Session) => {

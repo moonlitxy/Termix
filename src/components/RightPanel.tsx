@@ -69,6 +69,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
   const transfers = useApp((s) => s.transfers);
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
+  const activeTabId = useApp((s) => s.activeTabId);
   const expanded = useApp((s) => s.rightPanelExpanded);
   const setExpanded = useApp((s) => s.setRightPanelExpanded);
   const initialLayoutLoaded = useRef(false);
@@ -128,7 +129,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
   const uptimeBase = useMonitor((s) => s.uptimeBase);
   const nowTs = useMonitor((s) => s.nowTs);
 
-  const connectionId = selectMonitorConnection(sftpContext, tabs);
+  const connectionId = selectMonitorConnection(sftpContext, tabs, activeTabId);
   const connected = transfersOnly ? true : !!connectionId;
 
   // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列

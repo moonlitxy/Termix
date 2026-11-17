@@ -22,12 +22,22 @@ export function extractCpuFreq(model: string): string {
   return m ? `${m[1]} GHz` : "";
 }
 
-/** 统一监控连接推导：优先 SFTP 面板绑定的已连接会话，其次第一个已连接会话。
-    两个展示模块共用同一规则，保证数据源完全一致。 */
+/** 统一监控连接推导：优先当前激活的已连接标签，其次 SFTP 面板绑定的已连接会话。
+    两个展示模块共用同一规则，保证切换标签后数据源同步。 */
 export function selectMonitorConnection(
   sftpContext: { connectionId: string } | null,
-  tabs: { connectionId?: string; status: string }[]
+  tabs: { id?: string; connectionId?: string; status: string }[],
+  activeTabId?: string | null
 ): string | null {
+  const active = activeTabId
+    ? tabs.find(
+        (t) =>
+          t.id === activeTabId &&
+          t.status === "connected" &&
+          !!t.connectionId
+      )
+    : undefined;
+  if (active?.connectionId) return active.connectionId;
   if (
     sftpContext &&
     tabs.some(
@@ -36,10 +46,7 @@ export function selectMonitorConnection(
   ) {
     return sftpContext.connectionId;
   }
-  return (
-    tabs.find((t) => t.status === "connected" && t.connectionId)?.connectionId ??
-    null
-  );
+  return null;
 }
 
 /** 运行时长 = 最近采样 uptime + 本地流逝时间（秒级实时补偿）。

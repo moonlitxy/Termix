@@ -174,9 +174,23 @@ export default function App() {
     };
   }, []);
 
+  // 文件面板跟随当前激活标签：切换标签/连接状态变化时重新绑定 SFTP 上下文，
+  // 避免多会话场景继续显示上一条连接的目录与监控数据。
+  useEffect(() => {
+    const st = useApp.getState();
+    const active = st.tabs.find((tab) => tab.id === st.activeTabId && !tab.hidden);
+    if (active?.status === "connected" && active.connectionId) {
+      if (st.sftpContext?.connectionId !== active.connectionId) {
+        void st.setSftpContext(active.sessionId, active.connectionId);
+      }
+    } else if (st.sftpContext) {
+      void st.setSftpContext(st.sftpContext.sessionId, null);
+    }
+  }, [activeTabId, tabs]);
+
   // 全局唯一监控轮询：跟随连接状态（终端右侧资源监控与「监控」模块共享同一数据源，
   // 由本组件统一驱动 useMonitor.sync，两处展示的数据完全一致）
-  const monitorConnId = selectMonitorConnection(sftpContext, tabs);
+  const monitorConnId = selectMonitorConnection(sftpContext, tabs, activeTabId);
   useEffect(() => {
     useMonitor.getState().sync(monitorConnId);
   }, [monitorConnId]);

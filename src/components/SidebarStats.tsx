@@ -85,7 +85,7 @@ export function SidebarStats() {
 
   const metrics = useMonitor((s) => s.metrics);
   const netSpeed = useMonitor((s) => s.netSpeed);
-  const connectionId = selectMonitorConnection(sftpContext, tabs);
+  const connectionId = selectMonitorConnection(sftpContext, tabs, activeTabId);
   const connectionTab =
     tabs.find((tab) => tab.connectionId === connectionId) ??
     tabs.find((tab) => tab.id === activeTabId);

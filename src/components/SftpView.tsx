@@ -404,14 +404,6 @@ export function SftpView() {
       st.setSftpContext(st.sftpContext.sessionId, null);
       return;
     }
-    if (!st.sftpContext) {
-      const conn = st.tabs.find(
-        (t) => t.connectionId && t.status === "connected"
-      );
-      if (conn?.connectionId) {
-        void st.setSftpContext(conn.sessionId, conn.connectionId);
-      }
-    }
   }, [tabs, sftpContext]);
 
   // 上传任务完成后刷新当前远程目录（先失效缓存再重载）
@@ -490,6 +482,8 @@ export function SftpView() {
   // 搜索入口：Ctrl+F 与终端右键「查找」统一触发
   useEffect(() => {
     const onSearch = () => {
+      const st = useApp.getState();
+      if (st.sftpCollapsed) st.toggleSftpCollapsed();
       setSearchOpen(true);
       setTimeout(() => searchRef.current?.focus(), 30);
     };
