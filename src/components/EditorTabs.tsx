@@ -4,6 +4,7 @@ import { useApp, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { useClampedMenuPosition } from "../lib/contextMenu";
 import { promptDialog } from "../store/feedback";
+import { createSplitTab } from "../lib/tabs";
 
 interface CtxMenu {
   x: number;
@@ -65,7 +66,7 @@ export function EditorTabs() {
     );
   };
 
-  // 分屏 pane 由历史数据兼容渲染（新标签不再提供分屏入口）
+  // 分屏 pane 作为隐藏标签渲染在所属主标签右侧
 
   // 复制标签：基于同一会话新建一个独立连接的新标签
   const duplicateTab = () => {
@@ -80,6 +81,14 @@ export function EditorTabs() {
       title: t.title + "（副本）",
       status: "connecting",
     });
+  };
+
+  const splitTab = () => {
+    if (!ctx) return;
+    const t = tabs.find((x) => x.id === ctx.tabId);
+    if (!t || t.hidden) return;
+    addTab(createSplitTab(t, nextTabId()));
+    setCtx(null);
   };
 
   // 重命名标签：仅修改标题
@@ -277,6 +286,15 @@ export function EditorTabs() {
           >
             <Icon name="copy" size={12} />
             复制标签
+          </button>
+          <button
+            type="button"
+            className="ctx-menu__item"
+            title="分屏：在主标签右侧新开一个独立终端"
+            onClick={splitTab}
+          >
+            <Icon name="columns" size={12} />
+            分屏
           </button>
           <button
             type="button"

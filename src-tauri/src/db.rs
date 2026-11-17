@@ -52,7 +52,7 @@ impl Db {
         let c = self.conn.lock().unwrap();
         let mut stmt = c
             .prepare(
-                "SELECT id,name,host,port,username,auth_type,password,private_key_path,private_key_passphrase,group_id,memo,encoding,created_at,last_connected_at FROM sessions ORDER BY name",
+                "SELECT id,name,host,port,username,auth_type,password,private_key_path,private_key_passphrase,group_id,memo,encoding,created_at,last_connected_at FROM sessions ORDER BY (last_connected_at IS NULL), last_connected_at DESC, name",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], |r| {
@@ -474,6 +474,26 @@ mod tests {
         // delete
         db.delete_session(&id).unwrap();
         assert!(db.list_sessions().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_sessions_orders_recent_connections_first() {
+        let db = test_db();
+        let older = db.create_session(session_input("zeta")).unwrap();
+        db.create_session(session_input("alpha")).unwrap();
+        let recent = db.create_session(session_input("beta")).unwrap();
+
+        db.touch_session(&older).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        db.touch_session(&recent).unwrap();
+
+        let names: Vec<String> = db
+            .list_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|session| session.name)
+            .collect();
+        assert_eq!(names, vec!["beta", "zeta", "alpha"]);
     }
 
     #[test]

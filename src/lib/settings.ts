@@ -10,6 +10,7 @@ export interface Settings {
   sftpPanelRatio: number; // 文件面板占工作区高度的比例（0-1）
   rightPanelExpanded: boolean;
   sftpCollapsed: boolean;
+  lastLocalPath: string;
 }
 
 export const SETTINGS_KEY = "termix.settings";
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sftpPanelRatio: 0.4,
   rightPanelExpanded: false,
   sftpCollapsed: false,
+  lastLocalPath: "",
 };
 
 export function loadSettings(): Settings {

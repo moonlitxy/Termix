@@ -36,10 +36,12 @@ export function SessionSidebar() {
   const [newGroupName, setNewGroupName] = useState("");
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
+  const [dragOverUngrouped, setDragOverUngrouped] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuReturnRef = useRef<HTMLElement | null>(null);
   const menuPosition = useClampedMenuPosition(ctx ?? groupCtx, menuRef);
+  const draggingSession = sessions.find((s) => s.id === draggingSessionId);
 
   // 导出会话（JSON 备份下载）
   const handleExport = async () => {
@@ -134,14 +136,16 @@ export function SessionSidebar() {
     }
   };
 
-  const moveSessionToGroup = async (sessionId: string, groupId: string) => {
+  const moveSessionToGroup = async (sessionId: string, groupId: string | null) => {
     const session = sessions.find((s) => s.id === sessionId);
-    if (!session || (session.groupId ?? "") === groupId) return;
+    if (!session || (session.groupId ?? "") === (groupId ?? "")) return;
     try {
       await ipc.sessionMove(sessionId, groupId);
       await loadSessions();
-      setGroupsOpen((m) => ({ ...m, [groupId]: true }));
-      const groupName = groups.find((g) => g.id === groupId)?.name ?? "分组";
+      if (groupId) setGroupsOpen((m) => ({ ...m, [groupId]: true }));
+      const groupName = groupId
+        ? (groups.find((g) => g.id === groupId)?.name ?? "分组")
+        : "未分组";
       toast.success(`已将「${session.name}」移动到「${groupName}」`);
     } catch (e) {
       toast.error("移动会话失败：" + String(e));
@@ -157,12 +161,14 @@ export function SessionSidebar() {
   const endSessionDrag = () => {
     setDraggingSessionId(null);
     setDragOverGroupId(null);
+    setDragOverUngrouped(false);
   };
 
   const handleGroupDragOver = (e: React.DragEvent, group: Group) => {
     if (!draggingSessionId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
+    setDragOverUngrouped(false);
     if (dragOverGroupId !== group.id) setDragOverGroupId(group.id);
   };
 
@@ -180,6 +186,29 @@ export function SessionSidebar() {
       e.dataTransfer.getData("text/plain") || draggingSessionId;
     endSessionDrag();
     if (sessionId) await moveSessionToGroup(sessionId, group.id);
+  };
+
+  const handleUngroupedDragOver = (e: React.DragEvent) => {
+    if (!draggingSessionId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverGroupId(null);
+    setDragOverUngrouped(true);
+  };
+
+  const handleUngroupedDragLeave = (e: React.DragEvent) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setDragOverUngrouped(false);
+  };
+
+  const handleUngroupedDrop = async (e: React.DragEvent) => {
+    if (!draggingSessionId) return;
+    e.preventDefault();
+    const sessionId =
+      e.dataTransfer.getData("text/plain") || draggingSessionId;
+    endSessionDrag();
+    if (sessionId) await moveSessionToGroup(sessionId, null);
   };
 
   useEffect(() => {
@@ -471,6 +500,20 @@ export function SessionSidebar() {
               </div>
             );
           })
+        )}
+        {draggingSession?.groupId && (
+          <div
+            className={
+              "session-drop-ungrouped" +
+              (dragOverUngrouped ? " is-drop-target" : "")
+            }
+            onDragOver={handleUngroupedDragOver}
+            onDragLeave={handleUngroupedDragLeave}
+            onDrop={(e) => void handleUngroupedDrop(e)}
+          >
+            <Icon name="folder" size={13} />
+            移到未分组
+          </div>
         )}
       </div>
 

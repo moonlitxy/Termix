@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:ssh": "bash scripts/ssh-test.sh all",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -25,6 +27,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/coverage-v8": "4.1.12",
     "sharp": "^0.35.3",
     "typescript": "^5.5.3",
     "vite": "^5.4.0",

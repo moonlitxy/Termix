@@ -130,7 +130,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
   const nowTs = useMonitor((s) => s.nowTs);
 
   const connectionId = selectMonitorConnection(sftpContext, tabs, activeTabId);
-  const connected = transfersOnly ? true : !!connectionId;
+  const connected = !!connectionId;
 
   // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列
   useEffect(() => {
@@ -193,17 +193,17 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
         "right-panel is-expanded" +
         (transfersOnly ? " right-panel--transfers-only" : "")
       }
-      aria-label={transfersOnly ? "传输队列" : "资源监控"}
+      aria-label={transfersOnly ? "资源与传输" : "资源监控"}
     >
       {expanded && (
         <>
       <div className="right-panel__header">
-        <span>{transfersOnly ? "传输队列" : "资源监控"}</span>
+        <span>{transfersOnly ? "资源与传输" : "资源监控"}</span>
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"
-          title={transfersOnly ? "收起传输队列" : "收起资源监控"}
-          aria-label={transfersOnly ? "收起传输队列" : "收起资源监控"}
+          title={transfersOnly ? "收起资源与传输" : "收起资源监控"}
+          aria-label={transfersOnly ? "收起资源与传输" : "收起资源监控"}
           onClick={() => changeExpanded(false)}
         >
           <Icon name="chevron-right" size={15} />

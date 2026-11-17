@@ -1285,6 +1285,24 @@ a {
   box-shadow: inset 0 0 0 1px var(--border-brand);
 }
 
+.session-drop-ungrouped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 6px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-neutral-l2);
+  border-radius: var(--radius-4);
+  color: var(--text-tertiary);
+  font-size: var(--body-xs-font-size);
+}
+
+.session-drop-ungrouped.is-drop-target {
+  background: var(--bg-brand-popup);
+  border-color: var(--border-brand);
+  color: var(--text-default);
+}
+
 .group-row__name {
   flex: 1;
   min-width: 0;
@@ -1791,6 +1809,160 @@ a {
   overflow: auto;
   /* 左右无外边距，使表头（文件名/大小…）紧贴列表容器两侧 */
   padding: 0 0 6px;
+}
+
+.sftp-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.sftp-panes.has-local .sftp-list--remote {
+  border-left: 1px solid var(--border-neutral-l1);
+}
+
+.local-files {
+  flex: 0 0 42%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.local-files__head {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 32px;
+  padding: 0 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-neutral-l1);
+}
+
+.local-files__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: var(--body-xs-font-size);
+  font-weight: 600;
+}
+
+.local-files__path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  flex-shrink: 0;
+}
+
+.local-files__path-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: 2px;
+  background: var(--bg-base-default);
+  color: var(--text-default);
+  font-family: var(--font-family-mono);
+  font-size: var(--body-xs-font-size);
+  outline: none;
+}
+
+.local-files__path-input:focus {
+  border-color: var(--border-brand);
+}
+
+.local-files__filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 6px 3px;
+  padding: 0 6px;
+  height: 22px;
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: 2px;
+  background: var(--bg-base-default);
+  color: var(--text-tertiary);
+}
+
+.local-files__filter input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-default);
+  font-size: var(--body-xs-font-size);
+}
+
+.local-files__list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 6px;
+}
+
+.local-files__list.is-drop-target {
+  background: var(--bg-brand-popup);
+  box-shadow: inset 0 0 0 1px var(--border-brand);
+}
+
+.local-files__row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 58px 96px;
+  gap: 4px;
+  align-items: center;
+  min-height: 27px;
+  padding: 0 6px;
+  color: var(--text-secondary);
+  font-size: var(--body-xs-font-size);
+  cursor: default;
+}
+
+.local-files__row:hover {
+  background: var(--bg-overlay-l1);
+  color: var(--text-default);
+}
+
+.local-files__row.is-active {
+  background: var(--bg-brand-popup);
+  color: var(--text-default);
+}
+
+.local-files__icon {
+  display: inline-flex;
+  color: var(--text-tertiary);
+}
+
+.local-files__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-files__meta,
+.local-files__time {
+  color: var(--text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.local-files__time {
+  text-align: right;
+}
+
+.local-files__empty {
+  padding: 18px 8px;
+  color: var(--text-tertiary);
+  font-size: var(--body-xs-font-size);
+  text-align: center;
 }
 
 /* 六列网格：文件名 | 大小 | 类型 | 修改时间 | 权限 | 用户/组（列宽可拖动调整，末列吸收剩余空间） */

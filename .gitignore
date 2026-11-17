@@ -1,8 +1,10 @@
 node_modules
 dist
+coverage
 src-tauri/target
 src-tauri/gen
 .termix-data
+tmp/
 .DS_Store
 AGENTS.md
 CLAUDE.md

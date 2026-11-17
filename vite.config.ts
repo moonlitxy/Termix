@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import pkg from "./package.json" with { type: "json" };
 
@@ -15,6 +15,21 @@ export default defineConfig({
     host: "127.0.0.1",
   },
   envPrefix: ["VITE_", "TAURI_"],
+  test: {
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html", "json-summary"],
+      reportsDirectory: "coverage",
+      include: ["src/lib/**/*.ts"],
+      exclude: ["src/lib/__tests__/**"],
+      thresholds: {
+        statements: 80,
+        branches: 70,
+        functions: 85,
+        lines: 80,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {

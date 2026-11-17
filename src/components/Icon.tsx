@@ -1,9 +1,12 @@
 import alertCircle from "../assets/icons/alert-circle.svg?raw";
+import alertTriangle from "../assets/icons/alert-triangle.svg?raw";
+import arrowDown from "../assets/icons/arrow-down.svg?raw";
 import arrowExpand from "../assets/icons/arrow-expand.svg?raw";
 import arrowRightToLine from "../assets/icons/arrow-right-to-line.svg?raw";
 import arrowUp from "../assets/icons/arrow-up.svg?raw";
 import bar from "../assets/icons/bar.svg?raw";
 import bell from "../assets/icons/bell.svg?raw";
+import checkCircle from "../assets/icons/check-circle.svg?raw";
 import chevronDown from "../assets/icons/chevron-down.svg?raw";
 import chevronRight from "../assets/icons/chevron-right.svg?raw";
 import chevronUp from "../assets/icons/chevron-up.svg?raw";
@@ -43,11 +46,14 @@ import zap from "../assets/icons/zap.svg?raw";
 
 const ICONS: Record<string, string> = {
   "alert-circle": alertCircle,
+  "alert-triangle": alertTriangle,
+  "arrow-down": arrowDown,
   "arrow-expand": arrowExpand,
   "arrow-right-to-line": arrowRightToLine,
   "arrow-up": arrowUp,
   bar,
   bell,
+  "check-circle": checkCircle,
   "chevron-down": chevronDown,
   "chevron-right": chevronRight,
   "chevron-up": chevronUp,

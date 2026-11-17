@@ -10,6 +10,7 @@ import { filterItems } from "../lib/fileFilter";
 import { rangeSelection, selectAllPaths, toggleSelection } from "../lib/selection";
 import { getVirtualRange } from "../lib/virtualList";
 import { confirmDialog, promptDialog, toast } from "../store/feedback";
+import { LocalFilesPane } from "./LocalFilesPane";
 import type { SftpItem, Snippet } from "../types";
 
 function formatSize(n: number): string {
@@ -217,6 +218,7 @@ export function SftpView() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const [localOpen, setLocalOpen] = useState(false);
 
   // 快捷命令（原工具栏合并）
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -449,16 +451,23 @@ export function SftpView() {
           }
           const failures: string[] = [];
           const ctx = st.sftpContext;
-          const uploads = p.paths.map((path) => {
+          const uploads = p.paths.map(async (path) => {
             const name = path.split(/[\\/]/).pop() || path;
             const dest = joinPath(st.remotePath, name);
-            return ipc
-              .sftpUpload(ctx.connectionId, ctx.sessionId, path, dest)
-              .then((tid) => console.log("[sftp] system upload task started:", tid))
-              .catch((e) => {
-                console.error("[sftp] system upload failed:", path, e);
-                failures.push(`${name}: ${String(e)}`);
-              });
+            try {
+              // 本地目录走目录上传（localList 成功即为目录），文件走单文件上传
+              const isDir = await ipc.localList(path).then(
+                () => true,
+                () => false
+              );
+              const tid = isDir
+                ? await ipc.sftpUploadDir(ctx.connectionId, ctx.sessionId, path, dest)
+                : await ipc.sftpUpload(ctx.connectionId, ctx.sessionId, path, dest);
+              console.log("[sftp] system upload task started:", tid);
+            } catch (e) {
+              console.error("[sftp] system upload failed:", path, e);
+              failures.push(`${name}: ${String(e)}`);
+            }
           });
           void Promise.all(uploads).then(() => {
             if (failures.length > 0) {
@@ -792,6 +801,32 @@ export function SftpView() {
     void st.loadRemote();
   };
 
+  const uploadLocalPath = async (path: string, isDir: boolean) => {
+    if (!sftpContext) return;
+    const name = path.split(/[\\/]/).pop();
+    if (!name) return;
+    try {
+      if (isDir) {
+        await ipc.sftpUploadDir(
+          sftpContext.connectionId,
+          sftpContext.sessionId,
+          path,
+          joinPath(remotePath, name)
+        );
+      } else {
+        await ipc.sftpUpload(
+          sftpContext.connectionId,
+          sftpContext.sessionId,
+          path,
+          joinPath(remotePath, name)
+        );
+      }
+      toast.success(`已加入上传队列：${name}`);
+    } catch (e) {
+      toast.error("上传失败：" + String(e));
+    }
+  };
+
   const handleMkdir = async () => {
     const st = useApp.getState();
     if (!st.sftpContext) return;
@@ -999,6 +1034,17 @@ export function SftpView() {
           <button
             className={
               "ds-btn ds-btn--secondary ds-btn--sm" +
+              (localOpen ? " is-active" : "")
+            }
+            type="button"
+            title="本地文件：显示或隐藏本地文件面板"
+            onClick={() => setLocalOpen((open) => !open)}
+          >
+            <Icon name="columns" size={12} />
+          </button>
+          <button
+            className={
+              "ds-btn ds-btn--secondary ds-btn--sm" +
               (filterOpen ? " is-active" : "")
             }
             type="button"
@@ -1201,35 +1247,43 @@ export function SftpView() {
       )}
 
       {!sftpCollapsed && (
-        <div
-          ref={listRef}
-          className={
-            "sftp-list sftp-list--remote" +
-            (dropHover ? " is-drop-target" : "") +
-            (remoteLoading ? " is-loading" : "")
-          }
-          style={colVars}
-          aria-busy={remoteLoading}
-          onKeyDown={handleListKeyDown}
-          onDragOver={(e) => {
-            e.preventDefault();
-            hoverRef.current = true;
-            setDropHover(true);
-          }}
-          onDragLeave={() => {
-            hoverRef.current = false;
-            setDropHover(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            hoverRef.current = false;
-            setDropHover(false);
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setCtx({ x: e.clientX, y: e.clientY, item: null });
-          }}
-        >
+        <div className={"sftp-panes" + (localOpen ? " has-local" : "")}>
+          {localOpen && <LocalFilesPane />}
+          <div
+            ref={listRef}
+            className={
+              "sftp-list sftp-list--remote" +
+              (dropHover ? " is-drop-target" : "") +
+              (remoteLoading ? " is-loading" : "")
+            }
+            style={colVars}
+            aria-busy={remoteLoading}
+            onKeyDown={handleListKeyDown}
+            onDragOver={(e) => {
+              e.preventDefault();
+              hoverRef.current = true;
+              setDropHover(true);
+            }}
+            onDragLeave={() => {
+              hoverRef.current = false;
+              setDropHover(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              hoverRef.current = false;
+              setDropHover(false);
+              const localPath = e.dataTransfer.getData("application/x-termix-local");
+              if (localPath) {
+                const isDir =
+                  e.dataTransfer.getData("application/x-termix-local-dir") === "1";
+                void uploadLocalPath(localPath, isDir);
+              }
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtx({ x: e.clientX, y: e.clientY, item: null });
+            }}
+          >
           <div className="sftp-head">
             <button
               type="button"
@@ -1329,6 +1383,14 @@ export function SftpView() {
                 role="button"
                 tabIndex={0}
                 aria-current={selectedPaths.includes(it.path) ? "true" : undefined}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/x-termix-remote", it.path);
+                  e.dataTransfer.effectAllowed = "copy";
+                  if (it.isDir) {
+                    e.dataTransfer.setData("application/x-termix-remote-dir", "1");
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -1416,7 +1478,8 @@ export function SftpView() {
               {filterQuery ? "无匹配文件" : "空目录"}
             </div>
           )}
-          <div className="sftp-pane__hint">可拖拽本地文件到此处上传</div>
+            <div className="sftp-pane__hint">可拖拽本地文件到此处上传</div>
+          </div>
         </div>
       )}
 

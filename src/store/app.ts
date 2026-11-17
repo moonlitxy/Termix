@@ -11,6 +11,7 @@ import type {
 import { ipc } from "../lib/ipc";
 import { loadSettings, saveSettings } from "../lib/settings";
 import { setBoundedTimestampCache } from "../lib/boundedCache";
+import { switchRemotePath } from "../lib/remotePath";
 
 interface SftpContext {
   sessionId: string;
@@ -40,6 +41,8 @@ interface AppState {
   sftpContext: SftpContext | null;
   remoteItems: SftpItem[];
   remotePath: string;
+  /** 每条连接最后浏览的远程目录，切回标签时恢复 */
+  remotePaths: Record<string, string>;
   remoteSelected: SftpItem | null;
   /** 本地下载目标目录（无本地文件面板，下载直接落到该目录） */
   localPath: string;
@@ -135,6 +138,7 @@ export const useApp = create<AppState>((set, get) => ({
   sftpContext: null,
   remoteItems: [],
   remotePath: "/",
+  remotePaths: {},
   remoteSelected: null,
   localPath: "",
   remoteLoading: false,
@@ -235,12 +239,19 @@ export const useApp = create<AppState>((set, get) => ({
 
   setSftpContext: async (sessionId, connectionId) => {
     const previous = get().sftpContext;
-    set({ sftpContext: connectionId ? { sessionId, connectionId } : null });
-    if (connectionId && previous?.connectionId !== connectionId) {
-      // 初始固定展示根目录 "/"：确保进入 SFTP 时根目录下的文件与文件夹
-      // 立即可见，不依赖点击上级目录触发刷新；同时避免复用上一次的残留路径。
-      set({ remotePath: "/", remoteSelected: null });
-    }
+    const navigation = switchRemotePath(
+      get().remotePaths,
+      previous
+        ? { connectionId: previous.connectionId, path: get().remotePath }
+        : null,
+      connectionId
+    );
+    set({
+      sftpContext: connectionId ? { sessionId, connectionId } : null,
+      remotePath: navigation.path,
+      remotePaths: navigation.paths,
+      remoteSelected: null,
+    });
     await get().loadRemote();
   },
   loadRemote: async () => {

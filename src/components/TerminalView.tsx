@@ -9,6 +9,10 @@ import { ipc, onTerminalOutput, onConnectionStatus, HISTORY_CHANGED_EVENT } from
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { confirmDialog } from "../store/feedback";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
+import {
+  terminalBufferToText,
+  terminalLogFileName,
+} from "../lib/terminalLog";
 import type { Tab } from "../types";
 
 /** 正在建立连接的标签集合：防止同一标签并发发起多次 SSH 连接 */
@@ -487,7 +491,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const menuW = 140;
-    const menuH = 152;
+    const menuH = 180;
     setCtxMenu({
       x: Math.max(4, Math.min(e.clientX - rect.left, rect.width - menuW - 4)),
       y: Math.max(4, Math.min(e.clientY - rect.top, rect.height - menuH - 4)),
@@ -538,6 +542,22 @@ export function TerminalView({ tab }: { tab: Tab }) {
       t.focus();
     }
     closeCtxMenu();
+  };
+
+  const handleSaveLog = () => {
+    const t = termRef.current;
+    if (!t) return;
+    const text = terminalBufferToText(t.buffer.active);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = terminalLogFileName(tabRef.current.title);
+    anchor.click();
+    // 延迟释放对象 URL：避免部分 WebView 在下载开始前回收导致保存失败
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeCtxMenu();
+    t.focus();
   };
 
   // 查找：复用工具栏的终端内搜索（Ctrl+F 同一入口）
@@ -625,6 +645,14 @@ export function TerminalView({ tab }: { tab: Tab }) {
               onClick={handleFind}
             >
               查找
+            </button>
+            <button
+              type="button"
+              className="terminal-view__ctx-item"
+              title="将当前终端缓冲区保存为 .log 文件"
+              onClick={handleSaveLog}
+            >
+              保存日志
             </button>
             <button
               type="button"

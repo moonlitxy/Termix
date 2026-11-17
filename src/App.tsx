@@ -217,7 +217,17 @@ export default function App() {
       }
       try {
         const home = await ipc.localHome();
-        useApp.setState({ localPath: home });
+        const saved = loadSettings().lastLocalPath;
+        let localPath = home;
+        if (saved) {
+          try {
+            await ipc.localList(saved);
+            localPath = saved;
+          } catch {
+            // 保存的目录已失效时回退到 home
+          }
+        }
+        useApp.setState({ localPath });
       } catch {
         /* browser mode */
       }

@@ -42,12 +42,12 @@ export function StatusBar() {
             "status-bar__transfer" + (rightPanelExpanded ? " is-active" : "")
           }
           type="button"
-          title="打开传输队列"
+          title="打开资源监控与传输队列"
           aria-pressed={rightPanelExpanded}
           onClick={() => setRightPanelExpanded(!rightPanelExpanded)}
         >
-          <Icon name="arrow-right-to-line" size={11} />
-          传输
+          <Icon name="bar" size={11} />
+          资源
           {activeTransfers > 0 && (
             <span className="status-bar__transfer-count">{activeTransfers}</span>
           )}
