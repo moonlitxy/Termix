@@ -10,10 +10,45 @@ permissions:
   contents: write
 
 jobs:
+  # 发版闸门：只有指向 main 提交的 tag 才产出安装包。
+  # dev 上打 tag 允许存在，workflow 正常结束（绿色），但所有构建 job 被跳过。
+  guard:
+    name: Resolve release eligibility
+    runs-on: ubuntu-latest
+    outputs:
+      on_main: ${{ steps.check.outputs.on_main }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        name: Check tag commit belongs to main
+        shell: bash
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $GITHUB_REF_NAME is on main — build enabled."
+          else
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag $GITHUB_REF_NAME is not on main — skipping release build (dev tags are allowed)."
+          fi
+
   # macOS：构建 DMG 安装包
   build-macos:
     name: Build macOS DMG
     runs-on: macos-latest
+    needs: guard
+    if: needs.guard.outputs.on_main == 'true'
+    # secrets 上下文不能用在 if 表达式里，先映射到 env 再判断；
+    # Tauri CLI 会自动导入 APPLE_CERTIFICATE 并完成签名 + 公证 + 装订。
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +65,17 @@ jobs:
 
       - run: npm ci
 
+      # secrets 齐全时 Tauri 自动签名 + 公证；缺失时构建未签名包，不阻断发版
       - name: Build DMG
         run: npm run tauri build -- --bundles dmg
+
+      # 配置了签名身份时，验证 DMG 已装订公证票据（失败即发版失败，避免静默发出未公证包）
+      - name: Verify notarization ticket
+        if: env.APPLE_SIGNING_IDENTITY != ''
+        run: |
+          DMG="$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n1)"
+          echo "verifying $DMG"
+          xcrun stapler validate "$DMG"
 
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
@@ -44,6 +88,12 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
+    needs: guard
+    if: needs.guard.outputs.on_main == 'true'
+    # 同上：secrets 先映射到 env，step 级 if 才可用
+    env:
+      WINDOWS_CERTIFICATE_B64: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,6 +119,27 @@ jobs:
       - name: Build EXE
         run: npm run tauri build -- --bundles nsis
 
+      # Windows 代码签名（Authenticode，可选）：
+      # 有 EV/OV 证书时设置 WINDOWS_CERTIFICATE（base64 pfx）+ WINDOWS_CERTIFICATE_PASSWORD，
+      # 无证书则跳过（SmartScreen 会提示未知发布者，不影响安装）。
+      - name: Sign Windows installer (optional)
+        if: env.WINDOWS_CERTIFICATE_B64 != ''
+        shell: pwsh
+        run: |
+          $pfx = "$env:RUNNER_TEMP\termix-cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found; cannot sign' }
+          Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object {
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 `
+              /tr http://timestamp.digicert.com /td sha256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signing failed: $($_.Name)" }
+          }
+          Remove-Item $pfx -Force
+
       - name: Upload EXE to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -80,6 +151,8 @@ jobs:
   build-source:
     name: Package Source Code
     runs-on: ubuntu-latest
+    needs: guard
+    if: needs.guard.outputs.on_main == 'true'
     steps:
       - uses: actions/checkout@v4
 
