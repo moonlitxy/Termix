@@ -103,6 +103,16 @@
 在 dev 上打 tag 不会报错，只是不产出产物；想让 tag 真正发版，必须先合并到 `main`。
 tag 创建不做任何限制，任何分支都可以打 tag，是否发版只由「tag 是否在 main 上」决定。
 
+### 安装未签名版本（macOS）
+
+当前发布包未做 Apple 签名与公证，首次打开会被 Gatekeeper 拦截，任选一种方式放行：
+
+- 右键 `Termix.app` → **打开** → 再点「打开」（macOS 14 及更早）
+- 系统设置 → 隐私与安全性 → 底部「仍要打开」（macOS 15 起）
+- 终端执行：`xattr -dr com.apple.quarantine /Applications/Termix.app`
+
+自行编译（`npm run tauri build`）或通过应用内更新下载的安装包通常不带隔离属性，可直接打开。
+
 ## 快速开始
 
 ```bash
