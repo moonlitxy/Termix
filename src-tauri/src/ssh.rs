@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Serialize;
 use russh::client;
-use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
+use russh::keys::{load_secret_key, Algorithm, HashAlg, PrivateKeyWithHashAlg};
 use russh::{Channel, ChannelOpenFailure, ChannelMsg, Disconnect};
 use tauri::{AppHandle, Emitter};
 use tokio::io::copy_bidirectional;
@@ -11,6 +12,27 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::models::Session;
+
+/// 键盘交互认证（2FA/挑战应答）的前端提示项
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthPromptItem {
+    pub text: String,
+    pub echo: bool,
+}
+
+/// 推送给前端的认证提示事件（`auth-prompt`）：用户填写后调 `auth_respond` 回填
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthPromptEvent {
+    pub auth_id: String,
+    pub name: String,
+    pub instructions: String,
+    pub prompts: Vec<AuthPromptItem>,
+}
+
+/// 键盘交互认证单次等待前端输入的超时（秒）：2FA 用户需要找手机的时间
+const AUTH_PROMPT_TIMEOUT_SECS: u64 = 120;
 
 /// 远程端口转发注册表：服务端监听端口 → 本地目标 (host, port)。
 /// handler 收到 forwarded-tcpip 连接时按监听端口查表转发到本地。
@@ -56,6 +78,9 @@ pub struct SshClient {
     /// 监控轮询持续对死连接失败。
     connections: Arc<Mutex<HashMap<String, Connection>>>,
     conn_id: String,
+    /// 是否为本连接中转远端 agent 通道到本地（ssh -A 等价能力）。
+    /// 关闭时服务端打开的 agent 通道直接拒绝，不触碰本地 Agent。
+    agent_relay: bool,
 }
 
 impl SshClient {
@@ -65,6 +90,7 @@ impl SshClient {
         pending: Arc<Mutex<Option<HostKeyStatus>>>,
         connections: Arc<Mutex<HashMap<String, Connection>>>,
         conn_id: String,
+        agent_relay: bool,
     ) -> Self {
         Self {
             forwards,
@@ -72,6 +98,7 @@ impl SshClient {
             pending,
             connections,
             conn_id,
+            agent_relay,
         }
     }
 }
@@ -165,6 +192,57 @@ impl client::Handler for SshClient {
             Ok(())
         }
     }
+
+    /// 服务端打开 agent 转发通道（`ssh -A` 对端行为）：
+    /// 接受后把通道字节流与本地 SSH Agent 套接字双向中转。
+    /// 未启用 agent 转发时直接拒绝（reply 丢弃即拒绝）。
+    fn server_channel_open_agent_forward(
+        &mut self,
+        channel: Channel<client::Msg>,
+        _reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+        let enabled = self.agent_relay;
+        let conn_id = self.conn_id.clone();
+        async move {
+            if !enabled {
+                log::debug!("ssh: agent-forward channel rejected (not enabled) conn={conn_id}");
+                return Ok(());
+            }
+            #[cfg(not(unix))]
+            {
+                log::warn!("ssh: agent relay unsupported on this platform conn={conn_id}");
+                return Ok(());
+            }
+            #[cfg(unix)]
+            {
+                use tokio::net::UnixStream;
+                let sock = match std::env::var("SSH_AUTH_SOCK") {
+                    Ok(s) if !s.is_empty() => s,
+                    _ => {
+                        log::warn!("ssh: SSH_AUTH_SOCK not set, reject agent channel conn={conn_id}");
+                        return Ok(());
+                    }
+                };
+                tokio::spawn(async move {
+                    _reply.accept().await;
+                    let mut local = match UnixStream::connect(&sock).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log::warn!("ssh: connect local agent {sock} failed: {e}");
+                            return;
+                        }
+                    };
+                    let mut stream = channel.into_stream();
+                    match copy_bidirectional(&mut local, &mut stream).await {
+                        Ok(_) => log::debug!("ssh: agent relay closed conn={conn_id}"),
+                        Err(e) => log::debug!("ssh: agent relay error conn={conn_id}: {e}"),
+                    }
+                });
+                Ok(())
+            }
+        }
+    }
 }
 
 pub enum ShellCmd {
@@ -177,6 +255,10 @@ pub struct Connection {
     handle: Arc<client::Handle<SshClient>>,
     shells: Arc<Mutex<HashMap<String, mpsc::Sender<ShellCmd>>>>,
     encoding: &'static encoding_rs::Encoding,
+    /// 本连接启用的 agent 转发：新开 shell 通道时自动发送 auth-agent-req
+    agent_forward: bool,
+    /// 经跳板建立的连接：持有的跳板连接 id，随目标一起清理
+    jump_connection_id: Option<String>,
 }
 
 fn resolve_encoding(name: &str) -> &'static encoding_rs::Encoding {
@@ -212,6 +294,17 @@ fn encode_terminal_input(
 pub struct SshManager {
     connections: Arc<Mutex<HashMap<String, Connection>>>,
     forwards: Arc<ForwardRegistry>,
+    /// Tauri 应用句柄：键盘交互认证时向前端推送 `auth-prompt` 事件。
+    /// setup 阶段注入（`set_app_handle`），缺失时 2FA 连接直接报错。
+    app: std::sync::OnceLock<AppHandle>,
+    /// 等待前端回填的认证输入：auth_id → 一次性应答通道
+    pending_auth: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<String>>>>>,
+}
+
+/// 跳板目标：复用另一已保存会话先连跳板机，再经 direct-tcpip 到目标。
+pub struct JumpTarget {
+    pub session: Session,
+    pub known_fingerprint: Option<String>,
 }
 
 impl SshManager {
@@ -219,12 +312,85 @@ impl SshManager {
         Self {
             connections: Arc::new(Mutex::new(HashMap::new())),
             forwards: Arc::new(ForwardRegistry::new()),
+            app: std::sync::OnceLock::new(),
+            pending_auth: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// 注入 Tauri 应用句柄（main setup 阶段调用一次）。
+    pub fn set_app_handle(&self, handle: AppHandle) {
+        let _ = self.app.set(handle);
+    }
+
+    /// 前端回填键盘交互认证的应答（`auth_respond` 命令入口）。
+    pub async fn auth_respond(&self, auth_id: &str, responses: Vec<String>) -> Result<(), String> {
+        let tx = self
+            .pending_auth
+            .lock()
+            .await
+            .remove(auth_id)
+            .ok_or_else(|| "认证请求已过期或不存在".to_string())?;
+        tx.send(responses)
+            .map_err(|_| "认证应答投递失败".to_string())
+    }
+
+    /// 前端取消键盘交互认证（`auth_cancel` 命令入口）。
+    pub async fn auth_cancel(&self, auth_id: &str) -> Result<(), String> {
+        if self.pending_auth.lock().await.remove(auth_id).is_some() {
+            Ok(())
+        } else {
+            Err("认证请求已过期或不存在".to_string())
+        }
+    }
+
+    /// 等待前端回填一次键盘交互应答；超时/取消/缺句柄均返回错误。
+    async fn wait_auth_responses(
+        &self,
+        auth_id: &str,
+        name: &str,
+        instructions: &str,
+        prompts: &[(String, bool)],
+    ) -> Result<Vec<String>, String> {
+        let app = self
+            .app
+            .get()
+            .ok_or_else(|| "认证服务未就绪（缺少应用句柄）".to_string())?
+            .clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.pending_auth
+            .lock()
+            .await
+            .insert(auth_id.to_string(), tx);
+        app.emit(
+            "auth-prompt",
+            AuthPromptEvent {
+                auth_id: auth_id.to_string(),
+                name: name.to_string(),
+                instructions: instructions.to_string(),
+                prompts: prompts
+                    .iter()
+                    .map(|(text, echo)| AuthPromptItem {
+                        text: text.clone(),
+                        echo: *echo,
+                    })
+                    .collect(),
+            },
+        )
+        .map_err(|e| format!("推送认证提示失败：{e}"))?;
+        match tokio::time::timeout(Duration::from_secs(AUTH_PROMPT_TIMEOUT_SECS), rx).await {
+            Ok(Ok(responses)) => Ok(responses),
+            // 发送端被 auth_cancel 移除后丢弃：视为用户取消
+            Ok(Err(_)) | Err(_) => {
+                self.pending_auth.lock().await.remove(auth_id);
+                Err("已取消验证（或等待输入超时）".to_string())
+            }
         }
     }
 
     pub async fn connect(
         &self,
         s: Session,
+        jump: Option<JumpTarget>,
         known_fingerprint: Option<String>,
         // 每次连接的独立校验结果容器：由调用方创建并持有，
         // 并发连接时互不覆盖，失败后调用方据此区分「未信任/密钥变更」。
@@ -244,46 +410,41 @@ impl SshManager {
         let addr = format!("{}:{}", s.host, s.port);
         // 提前生成连接 id：SshClient 持之用于断线时从 connections 中移除自身
         let connection_id = uuid::Uuid::new_v4().to_string();
-        let mut session = client::connect(
-            config,
-            addr.as_str(),
-            SshClient::new(
-                self.forwards.clone(),
-                known_fingerprint,
-                pending.clone(),
-                self.connections.clone(),
-                connection_id.clone(),
-            ),
-        )
-        .await
-        .map_err(|e| format!("connect failed: {e}"))?;
-
-        let ok = match s.auth_type.as_str() {
-            "key" => {
-                let path = s
-                    .private_key_path
-                    .as_deref()
-                    .ok_or_else(|| "no private key path".to_string())?;
-                let key = load_secret_key(path, s.private_key_passphrase.as_deref())
-                    .map_err(|e| format!("load key failed: {e}"))?;
-                session
-                    .authenticate_publickey(
-                        &s.username,
-                        PrivateKeyWithHashAlg::new(Arc::new(key), None),
-                    )
-                    .await
-                    .map_err(|e| format!("auth failed: {e}"))?
-                    .success()
+        // 直连或经跳板建立底层 SSH 会话
+        let (mut session, jump_connection_id) = match jump {
+            None => {
+                let session = client::connect(
+                    config.clone(),
+                    addr.as_str(),
+                    SshClient::new(
+                        self.forwards.clone(),
+                        known_fingerprint,
+                        pending.clone(),
+                        self.connections.clone(),
+                        connection_id.clone(),
+                        s.agent_forward,
+                    ),
+                )
+                .await
+                .map_err(|e| format!("connect failed: {e}"))?;
+                (session, None)
             }
-            _ => {
-                let pwd = s.password.clone().unwrap_or_default();
-                session
-                    .authenticate_password(&s.username, &pwd)
-                    .await
-                    .map_err(|e| format!("auth failed: {e}"))?
-                    .success()
+            Some(jump_target) => {
+                let (session, jump_conn_id) = self
+                    .connect_via_jump(
+                        &jump_target,
+                        &s,
+                        config.clone(),
+                        pending.clone(),
+                        connection_id.clone(),
+                        known_fingerprint.clone(),
+                    )
+                    .await?;
+                (session, Some(jump_conn_id))
             }
         };
+
+        let ok = self.authenticate(&mut session, &s, &connection_id).await?;
 
         if !ok {
             return Err("authentication failed".into());
@@ -293,6 +454,8 @@ impl SshManager {
             handle: Arc::new(session),
             shells: Arc::new(Mutex::new(HashMap::new())),
             encoding: resolve_encoding(&s.encoding),
+            agent_forward: s.agent_forward,
+            jump_connection_id,
         };
         self.connections
             .lock()
@@ -301,6 +464,226 @@ impl SshManager {
         // 连接成功：清除本次连接的主机密钥校验状态
         *pending.lock().await = None;
         Ok(connection_id)
+    }
+
+    /// 四种认证：密码 / 私钥 / 键盘交互(2FA) / SSH Agent。
+    /// 返回认证是否成功；失败细节由调用方按 TOFU 流程或错误提示处理。
+    async fn authenticate(
+        &self,
+        session: &mut client::Handle<SshClient>,
+        s: &Session,
+        connection_id: &str,
+    ) -> Result<bool, String> {
+        match s.auth_type.as_str() {
+            "key" => {
+                let path = s
+                    .private_key_path
+                    .as_deref()
+                    .ok_or_else(|| "no private key path".to_string())?;
+                let key = load_secret_key(path, s.private_key_passphrase.as_deref())
+                    .map_err(|e| format!("load key failed: {e}"))?;
+                Ok(session
+                    .authenticate_publickey(
+                        &s.username,
+                        PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
+                    .await
+                    .map_err(|e| format!("auth failed: {e}"))?
+                    .success())
+            }
+            "keyboard" => self.authenticate_keyboard_interactive(session, s, connection_id).await,
+            "agent" => self.authenticate_with_agent(session, s).await,
+            _ => {
+                let pwd = s.password.clone().unwrap_or_default();
+                Ok(session
+                    .authenticate_password(&s.username, &pwd)
+                    .await
+                    .map_err(|e| format!("auth failed: {e}"))?
+                    .success())
+            }
+        }
+    }
+
+    /// 键盘交互认证（2FA/挑战应答）：服务端每轮提示经 `auth-prompt` 事件
+    /// 推给前端填写，多轮直到成功/失败；用户取消或 120s 超时即报错。
+    async fn authenticate_keyboard_interactive(
+        &self,
+        session: &mut client::Handle<SshClient>,
+        s: &Session,
+        connection_id: &str,
+    ) -> Result<bool, String> {
+        use client::KeyboardInteractiveAuthResponse as Response;
+        let mut reply = session
+            .authenticate_keyboard_interactive_start(&s.username, Option::<String>::None)
+            .await
+            .map_err(|e| format!("auth failed: {e}"))?;
+        loop {
+            match reply {
+                Response::Success => return Ok(true),
+                Response::Failure { .. } => return Ok(false),
+                Response::InfoRequest {
+                    name,
+                    instructions,
+                    prompts,
+                } => {
+                    let auth_id = format!("{connection_id}-{}", uuid::Uuid::new_v4());
+                    let items: Vec<(String, bool)> = prompts
+                        .iter()
+                        .map(|p| (p.prompt.clone(), p.echo))
+                        .collect();
+                    log::info!(
+                        "ssh: keyboard-interactive prompt ({} prompts) conn={connection_id}",
+                        items.len()
+                    );
+                    let answers = self
+                        .wait_auth_responses(&auth_id, &name, &instructions, &items)
+                        .await?;
+                    reply = session
+                        .authenticate_keyboard_interactive_respond(answers)
+                        .await
+                        .map_err(|e| format!("auth failed: {e}"))?;
+                }
+            }
+        }
+    }
+
+    /// SSH Agent 认证：枚举本地 agent 身份逐个尝试公钥认证。
+    /// 无 agent / 无身份时给出可操作的中文错误，而不是笼统的失败。
+    async fn authenticate_with_agent(
+        &self,
+        session: &mut client::Handle<SshClient>,
+        s: &Session,
+    ) -> Result<bool, String> {
+        use russh::keys::agent::client::AgentClient;
+        let mut agent = AgentClient::connect_env().await.map_err(|e| {
+            format!("连接本地 SSH Agent 失败（是否已执行 ssh-add？）：{e}")
+        })?;
+        let identities = agent.request_identities().await.map_err(|e| {
+            format!("读取 SSH Agent 身份失败：{e}")
+        })?;
+        if identities.is_empty() {
+            return Err("SSH Agent 中没有可用密钥（请先 ssh-add 添加）".to_string());
+        }
+        for id in &identities {
+            let key = match id {
+                russh::keys::agent::AgentIdentity::PublicKey { key, .. } => key.clone(),
+                // 证书身份走公钥流程无意义，直接跳过
+                russh::keys::agent::AgentIdentity::Certificate { .. } => continue,
+            };
+            // ssh-key 0.7 的 Rsa 变体携带 hash 参数，用模式匹配判 RSA
+            let hash_alg = if matches!(key.algorithm(), Algorithm::Rsa { .. }) {
+                Some(HashAlg::Sha256)
+            } else {
+                None
+            };
+            match session
+                .authenticate_publickey_with(&s.username, key, hash_alg, &mut agent)
+                .await
+            {
+                Ok(result) if result.success() => return Ok(true),
+                Ok(_) => continue,
+                Err(e) => {
+                    log::debug!("ssh: agent identity rejected: {e}");
+                    continue;
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// 经跳板机建立到目标的 SSH 会话：
+    /// 先连跳板（不支持嵌套跳板），再 open direct-tcpip 通道承载目标握手。
+    /// 跳板连接同样纳入连接表管理，随目标连接一起清理。
+    /// 目标主机的密钥校验结果写入调用方传入的 `target_pending`，
+    /// 与直连走同一套 TOFU 信任流程。
+    async fn connect_via_jump(
+        &self,
+        jump: &JumpTarget,
+        target: &Session,
+        config: Arc<client::Config>,
+        target_pending: Arc<Mutex<Option<HostKeyStatus>>>,
+        // 外层已生成的连接 id：目标会话断线自清理必须用它键控连接表
+        target_conn_id: String,
+        // 目标主机已信任指纹：经隧道握手时同样要做 TOFU 校验
+        target_known_fingerprint: Option<String>,
+    ) -> Result<(client::Handle<SshClient>, String), String> {
+        if jump.session.jump_session_id.as_deref().is_some_and(|v| !v.is_empty()) {
+            return Err("跳板机不支持嵌套（仅支持一级跳板）".to_string());
+        }
+        let jump_conn_id = uuid::Uuid::new_v4().to_string();
+        let jump_pending = Arc::new(Mutex::new(None));
+        let mut jump_session = client::connect(
+            config.clone(),
+            format!("{}:{}", jump.session.host, jump.session.port).as_str(),
+            SshClient::new(
+                self.forwards.clone(),
+                jump.known_fingerprint.clone(),
+                jump_pending.clone(),
+                self.connections.clone(),
+                jump_conn_id.clone(),
+                false,
+            ),
+        )
+        .await
+        .map_err(|e| format!("jump connect failed: {e}"))?;
+        // 跳板主机密钥校验失败：抛专用错误，前端走同一套信任流程后重试
+        if let Some(status) = jump_pending.lock().await.take() {
+            return Err(match status {
+                HostKeyStatus::Unverified { fingerprint } => {
+                    format!("JUMP_HOST_KEY_UNVERIFIED:{fingerprint}")
+                }
+                HostKeyStatus::Mismatch { fingerprint, expected } => {
+                    format!("JUMP_HOST_KEY_CHANGED:{fingerprint}:{expected}")
+                }
+            });
+        }
+        let jump_ok = self
+            .authenticate(&mut jump_session, &jump.session, &jump_conn_id)
+            .await?;
+        if !jump_ok {
+            return Err("jump authentication failed".into());
+        }
+        // 跳板连接纳入连接表：断线自清理、随目标一起断开
+        self.connections.lock().await.insert(
+            jump_conn_id.clone(),
+            Connection {
+                handle: Arc::new(jump_session),
+                shells: Arc::new(Mutex::new(HashMap::new())),
+                encoding: resolve_encoding(&jump.session.encoding),
+                agent_forward: false,
+                jump_connection_id: None,
+            },
+        );
+        let jump_handle = self
+            .get_handle(&jump_conn_id)
+            .await
+            .ok_or_else(|| "jump connection lost".to_string())?;
+        // direct-tcpip 通道直达目标，目标握手跑在这条流上
+        let channel = jump_handle
+            .channel_open_direct_tcpip(
+                target.host.clone(),
+                target.port as u32,
+                "127.0.0.1",
+                0,
+            )
+            .await
+            .map_err(|e| format!("jump tunnel failed: {e}"))?;
+        let stream = channel.into_stream();
+        let target_session = client::connect_stream(
+            config,
+            stream,
+            SshClient::new(
+                self.forwards.clone(),
+                target_known_fingerprint,
+                target_pending,
+                self.connections.clone(),
+                target_conn_id,
+                target.agent_forward,
+            ),
+        )
+        .await
+        .map_err(|e| format!("connect failed: {e}"))?;
+        Ok((target_session, jump_conn_id))
     }
 
     pub async fn disconnect(&self, connection_id: &str) -> Result<(), String> {
@@ -316,6 +699,11 @@ impl SshManager {
                 .handle
                 .disconnect(Disconnect::ByApplication, "", "English")
                 .await;
+            // 经跳板建立的连接：目标断开时一并断开跳板连接，避免残留
+            if let Some(jump_id) = conn.jump_connection_id {
+                // 递归只走一层（跳板本身 jump_connection_id 为空，不会连锁）
+                let _ = Box::pin(self.disconnect(&jump_id)).await;
+            }
         }
         Ok(())
     }
@@ -449,6 +837,14 @@ impl SshManager {
                 .request_shell(true)
                 .await
                 .map_err(|e| e.to_string())?;
+            // 启用了 agent 转发：在 shell 通道上发送 auth-agent-req，
+            // 服务端随即打开 agent 通道，由 server_channel_open_agent_forward 中转到本地。
+            // 请求失败不阻断建 shell（服务端可能不支持），仅记录日志。
+            if conn.agent_forward {
+                if let Err(e) = channel.agent_forward(true).await {
+                    log::warn!("ssh: agent-forward request failed conn={connection_id}: {e}");
+                }
+            }
             (channel, conn.shells.clone(), conn.encoding)
         };
 
@@ -607,5 +1003,31 @@ mod tests {
             decode_remote_bytes(b"ok\xff", encoding_rs::UTF_8),
             "ok\u{fffd}"
         );
+    }
+
+    /// 2FA 回填通道：应答只交付一次；取消会丢弃等待方；未知 id 报错。
+    #[tokio::test]
+    async fn auth_respond_delivers_once_and_cancel_drops_waiter() {
+        let manager = SshManager::new();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        manager.pending_auth.lock().await.insert("a1".into(), tx);
+        manager
+            .auth_respond("a1", vec!["123456".into()])
+            .await
+            .expect("respond should deliver");
+        assert_eq!(rx.await.unwrap(), vec!["123456".to_string()]);
+        // 一次性：同一 id 不能重复回填
+        assert!(manager.auth_respond("a1", vec![]).await.is_err());
+
+        // 取消：等待方通道被丢弃，且后续回填报错
+        let (tx2, rx2) = tokio::sync::oneshot::channel();
+        manager.pending_auth.lock().await.insert("a2".into(), tx2);
+        manager.auth_cancel("a2").await.expect("cancel existing");
+        assert!(rx2.await.is_err(), "waiter should be dropped on cancel");
+        assert!(manager.auth_respond("a2", vec![]).await.is_err());
+
+        // 未知 id
+        assert!(manager.auth_cancel("missing").await.is_err());
     }
 }

@@ -9,6 +9,12 @@ import { ipc, onTerminalOutput, onConnectionStatus, HISTORY_CHANGED_EVENT } from
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { confirmDialog } from "../store/feedback";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
+import { broadcastTargets } from "../lib/terminalBroadcast";
+import { backendError, useT } from "../lib/i18n";
+import {
+  terminalBufferToText,
+  terminalLogFileName,
+} from "../lib/terminalLog";
 import type { Tab } from "../types";
 
 /** 正在建立连接的标签集合：防止同一标签并发发起多次 SSH 连接 */
@@ -39,6 +45,7 @@ const TERMINAL_THEME = {
 };
 
 export function TerminalView({ tab }: { tab: Tab }) {
+  const tr = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -164,7 +171,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       // 手动断开（断开按钮 / ⌘D）：不自动重连
       if (tabRef.current.manualClosed) return;
       if (reconnectCount >= 3) {
-        terminal.write("\r\n\x1b[31m自动重连失败，请手动重连\x1b[0m\r\n");
+        terminal.write(`\r\n\x1b[31m${tr("term.reconnectFailed")}\x1b[0m\r\n`);
         return;
       }
       reconnecting = true;
@@ -192,7 +199,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
         });
         reconnectCount = 0;
         reconnecting = false;
-        terminal.write("\x1b[32m重连成功\x1b[0m\r\n");
+        terminal.write(`\x1b[32m${tr("term.reconnected")}\x1b[0m\r\n`);
       } catch (e) {
         terminal.write(`\x1b[31m重连失败: ${String(e)}\x1b[0m\r\n`);
         reconnecting = false;
@@ -247,6 +254,14 @@ export function TerminalView({ tab }: { tab: Tab }) {
       }
       if (t.connectionId && t.shellId) {
         ipc.terminalWrite(t.connectionId, t.shellId, data);
+      }
+      // 同步输入：开启后把同一份输入写到其他已连接标签（含分屏），
+      // 各目标独立发送、互不等待，某一路失败不影响其他路
+      if (useApp.getState().broadcastInput) {
+        const targets = broadcastTargets(useApp.getState().tabs, tab.id);
+        for (const target of targets) {
+          ipc.terminalWrite(target.connectionId, target.shellId, data).catch(() => {});
+        }
       }
     });
 
@@ -363,12 +378,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
         if (unverified && session) {
           const fingerprint = unverified[1];
           const ok = await confirmDialog({
-            title: "首次连接：确认主机密钥",
-            message:
-              `首次连接到 ${session.host}:${session.port}\n\n` +
-              `主机密钥指纹：\n${fingerprint}\n\n` +
-              "是否信任该密钥并继续连接？",
-            confirmText: "信任并连接",
+            title: tr("term.hostKeyTitle"),
+            message: tr("term.hostKeyMsg", {
+              host: session.host,
+              port: session.port,
+              fp: fingerprint,
+            }),
+            confirmText: tr("term.trustConnect"),
           });
           if (ok) {
             try {
@@ -378,14 +394,14 @@ export function TerminalView({ tab }: { tab: Tab }) {
             } catch (e2) {
               updateTab(tab.id, {
                 status: "error",
-                error: "保存主机密钥失败：" + String(e2),
+                error: tr("term.saveHostKeyFailed", { e: String(e2) }),
               });
             }
             return;
           }
           updateTab(tab.id, {
             status: "error",
-            error: "已取消连接（未信任主机密钥）",
+            error: tr("term.cancelledNoTrust"),
           });
           return;
         }
@@ -393,22 +409,23 @@ export function TerminalView({ tab }: { tab: Tab }) {
         // 主机密钥变更：可能中间人攻击，需二次确认才允许覆盖信任
         const changed = msg.match(/^HOST_KEY_CHANGED:(.+):(.+)$/);
         if (changed && session) {
-          updateTab(tab.id, { status: "error", error: "主机密钥变更，已阻止连接" });
+          updateTab(tab.id, { status: "error", error: tr("term.hostKeyChangedBlocked") });
           const warn = await confirmDialog({
-            title: "警告：主机密钥已变更",
-            message:
-              `警告：${session.host}:${session.port} 的主机密钥已变更！\n\n` +
-              `当前指纹：${changed[1]}\n已信任指纹：${changed[2]}\n\n` +
-              "这可能是中间人攻击，也可能是服务器已重装系统。\n" +
-              "是否仍要继续连接？",
-            confirmText: "继续检查",
+            title: tr("term.hostKeyWarnTitle"),
+            message: tr("term.hostKeyWarnMsg", {
+              host: session.host,
+              port: session.port,
+              cur: changed[1],
+              prev: changed[2],
+            }),
+            confirmText: tr("term.continueCheck"),
             danger: true,
           });
           if (warn) {
             const sure = await confirmDialog({
-              title: "再次确认",
-              message: "信任新的主机密钥并重新连接？",
-              confirmText: "信任并重连",
+              title: tr("term.confirmAgain"),
+              message: tr("term.trustReconnectMsg"),
+              confirmText: tr("term.trustReconnect"),
               danger: true,
             });
             if (sure) {
@@ -423,14 +440,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
               }
             }
           }
-          terminal.write(
-            "主机密钥校验失败：密钥与之前信任的不一致，连接已拒绝。\r\n"
-          );
+          terminal.write(tr("term.hostKeyMismatch"));
           return;
         }
 
-        updateTab(tab.id, { status: "error", error: String(e) });
-        terminal.write("Error: " + String(e) + "\r\n");
+        const errText = backendError(String(e));
+        updateTab(tab.id, { status: "error", error: errText });
+        terminal.write("Error: " + errText + "\r\n");
       } finally {
         connectingTabs.delete(tab.id);
       }
@@ -487,7 +503,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const menuW = 140;
-    const menuH = 152;
+    const menuH = 180;
     setCtxMenu({
       x: Math.max(4, Math.min(e.clientX - rect.left, rect.width - menuW - 4)),
       y: Math.max(4, Math.min(e.clientY - rect.top, rect.height - menuH - 4)),
@@ -540,6 +556,22 @@ export function TerminalView({ tab }: { tab: Tab }) {
     closeCtxMenu();
   };
 
+  const handleSaveLog = () => {
+    const t = termRef.current;
+    if (!t) return;
+    const text = terminalBufferToText(t.buffer.active);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = terminalLogFileName(tabRef.current.title);
+    anchor.click();
+    // 延迟释放对象 URL：避免部分 WebView 在下载开始前回收导致保存失败
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeCtxMenu();
+    t.focus();
+  };
+
   // 查找：复用工具栏的终端内搜索（Ctrl+F 同一入口）
   const handleFind = () => {
     closeCtxMenu();
@@ -580,7 +612,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
         <button
           type="button"
           className="terminal-view__close-pane"
-          title="关闭分屏"
+          title={tr("term.closeSplit")}
           onClick={() => void closePane()}
         >
           <Icon name="x" size={12} />
@@ -603,7 +635,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title="复制选中内容"
+              title={tr("term.copySel")}
               disabled={!hasSelectionRef.current}
               onClick={handleCopy}
             >
@@ -612,7 +644,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title="粘贴剪贴板内容到终端"
+              title={tr("term.paste")}
               onClick={handlePaste}
             >
               粘贴
@@ -621,7 +653,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title="在终端内搜索（Ctrl+F）"
+              title={tr("term.find")}
               onClick={handleFind}
             >
               查找
@@ -629,7 +661,15 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title="清空终端输出"
+              title={tr("term.saveLog")}
+              onClick={handleSaveLog}
+            >
+              保存日志
+            </button>
+            <button
+              type="button"
+              className="terminal-view__ctx-item"
+              title={tr("term.clear")}
               onClick={handleClear}
             >
               清屏
@@ -642,13 +682,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
           <div className="terminal-view__paste-title">剪贴板包含多行内容</div>
           <pre className="terminal-view__paste-preview">{pastePending}</pre>
           <div className="terminal-view__paste-actions">
-            <button type="button" className="ds-btn" title="取消：不粘贴多行内容" onClick={cancelPaste}>
+            <button type="button" className="ds-btn" title={tr("term.pasteCancel")} onClick={cancelPaste}>
               取消
             </button>
             <button
               type="button"
               className="ds-btn ds-btn--brand"
-              title="粘贴多行内容到终端"
+              title={tr("term.pasteMulti")}
               onClick={confirmPaste}
             >
               粘贴到终端
@@ -663,7 +703,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           </span>
           <div>连接失败</div>
           {tab.error && <div className="terminal-view__error-msg">{tab.error}</div>}
-          <button className="ds-btn ds-btn--brand" type="button" title="重新尝试连接" onClick={handleRetry}>
+          <button className="ds-btn ds-btn--brand" type="button" title={tr("term.retry")} onClick={handleRetry}>
             重试
           </button>
         </div>

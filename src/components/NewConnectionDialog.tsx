@@ -3,6 +3,8 @@ import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { useFocusTrap } from "../lib/focusTrap";
+import { useT } from "../lib/i18n";
+import { AUTH_METHODS, validateJumpSelection } from "../lib/sshAuth";
 import type { AuthType, SessionInput } from "../types";
 
 const EMPTY: SessionInput = {
@@ -14,12 +16,15 @@ const EMPTY: SessionInput = {
   password: "",
   privateKeyPath: "",
   privateKeyPassphrase: "",
+  jumpSessionId: "",
+  agentForward: false,
   groupId: "",
   memo: "",
   encoding: "utf-8",
 };
 
 export function NewConnectionDialog() {
+  const t = useT();
   const open = useApp((s) => s.newConnOpen);
   const editing = useApp((s) => s.editingSession);
   const groups = useApp((s) => s.groups);
@@ -67,6 +72,8 @@ export function NewConnectionDialog() {
         privateKeyPassphrase: isEnc(editing.privateKeyPassphrase)
           ? ""
           : (editing.privateKeyPassphrase ?? ""),
+        jumpSessionId: editing.jumpSessionId ?? "",
+        agentForward: editing.agentForward ?? false,
         groupId: editing.groupId ?? "",
         memo: editing.memo ?? "",
         encoding: editing.encoding,
@@ -94,7 +101,7 @@ export function NewConnectionDialog() {
         (s.groupId ?? "") === (groupId || "") &&
         s.id !== excludeId
     );
-    return dup ? `同一分组下已存在名为「${n}」的连接` : "";
+    return dup ? t("conn.dupName", { n }) : "";
   };
 
   const canSave =
@@ -129,7 +136,15 @@ export function NewConnectionDialog() {
                 ? editing.privateKeyPassphrase
                 : undefined)
             : undefined,
+        jumpSessionId: form.jumpSessionId || undefined,
+        agentForward: form.agentForward || undefined,
       };
+      const jumpErr = validateJumpSelection(input.jumpSessionId, editing?.id, sessions);
+      if (jumpErr) {
+        setSaveError(jumpErr);
+        setSaving(false);
+        return;
+      }
       if (editing) {
         await ipc.sessionUpdate(editing.id, input);
       } else {
@@ -152,27 +167,25 @@ export function NewConnectionDialog() {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={editing ? "编辑连接" : "新建连接"}
+        aria-label={editing ? t("conn.edit") : t("conn.new")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__header">
           <span className="dialog__title">
-            {editing ? "编辑连接" : "新建连接"}
+            {editing ? t("conn.edit") : t("conn.new")}
           </span>
           <button
             className="dialog__close"
             type="button"
             onClick={closeNewConnection}
-            title="关闭"
+            title={t("common.close")}
           >
             <Icon name="x" size={16} />
           </button>
         </div>
 
         <div className="dialog__field">
-          <label className="dialog__field-label">
-            名称
-            <span className="dialog__required" aria-hidden="true">
+          <label className="dialog__field-label">{t("conn.name")}<span className="dialog__required" aria-hidden="true">
               *
             </span>
           </label>
@@ -184,7 +197,7 @@ export function NewConnectionDialog() {
                 set("name", e.target.value);
                 if (saveError) setSaveError("");
               }}
-              placeholder="例如：生产服务器"
+              placeholder={t("conn.namePh")}
             />
           </div>
           {saveError && <div className="dialog__field-error">{saveError}</div>}
@@ -192,9 +205,7 @@ export function NewConnectionDialog() {
 
         <div className="dialog__field-row">
           <div className="dialog__field">
-            <label className="dialog__field-label">
-              主机 / IP
-              <span className="dialog__required" aria-hidden="true">
+            <label className="dialog__field-label">{t("conn.host")}<span className="dialog__required" aria-hidden="true">
                 *
               </span>
             </label>
@@ -203,12 +214,12 @@ export function NewConnectionDialog() {
                 type="text"
                 value={form.host}
                 onChange={(e) => set("host", e.target.value)}
-                placeholder="例如：192.168.1.10"
+                placeholder={t("conn.hostPh")}
               />
             </div>
           </div>
           <div className="dialog__field" style={{ flex: "0 0 100px" }}>
-            <label className="dialog__field-label">端口</label>
+            <label className="dialog__field-label">{t("conn.port")}</label>
             <div className="ds-input ds-input--block">
               <input
                 type="number"
@@ -222,9 +233,7 @@ export function NewConnectionDialog() {
         </div>
 
         <div className="dialog__field">
-          <label className="dialog__field-label">
-            用户名
-            <span className="dialog__required" aria-hidden="true">
+          <label className="dialog__field-label">{t("conn.username")}<span className="dialog__required" aria-hidden="true">
               *
             </span>
           </label>
@@ -236,69 +245,82 @@ export function NewConnectionDialog() {
               type="text"
               value={form.username}
               onChange={(e) => set("username", e.target.value)}
-              placeholder="例如：root"
+              placeholder={t("conn.usernamePh")}
             />
           </div>
         </div>
 
         <div className="dialog__field">
-          <label className="dialog__field-label">认证方式</label>
+          <label className="dialog__field-label">{t("conn.authMethod")}</label>
           <select
             className="ds-select ds-select--block"
             value={form.authType}
             onChange={(e) => set("authType", e.target.value as AuthType)}
           >
-            <option value="password">密码</option>
-            <option value="key">私钥</option>
+            {AUTH_METHODS.map((m) => (
+              <option
+                key={m.id}
+                value={m.id}
+                title={
+                  m.id === "keyboard"
+                    ? t("conn.keyboardHint")
+                    : m.id === "agent"
+                      ? t("conn.agentHint")
+                      : t(`conn.authHint.${m.id}`)
+                }
+              >
+                {t(`conn.auth.${m.id}`)}
+              </option>
+            ))}
           </select>
         </div>
 
         {form.authType === "password" ? (
           <div className="dialog__field">
-            <label className="dialog__field-label">密码</label>
+            <label className="dialog__field-label">{t("conn.password")}</label>
             <div className="ds-input ds-input--block">
               <input
                 type={showPassword ? "text" : "password"}
                 value={form.password}
                 onChange={(e) => set("password", e.target.value)}
-                placeholder="输入密码"
+                placeholder={t("conn.passwordPh")}
               />
               <button
                 className="ds-input__action"
                 type="button"
-                title={showPassword ? "隐藏密码" : "显示密码"}
+                title={showPassword ? t("conn.hidePassword") : t("conn.showPassword")}
                 onClick={() => setShowPassword((v) => !v)}
               >
                 <Icon name={showPassword ? "eye-off" : "eye"} size={13} />
               </button>
             </div>
           </div>
-        ) : (
+        ) : form.authType === "key" ? (
           <>
             <div className="dialog__field">
-              <label className="dialog__field-label">私钥路径</label>
+              <label className="dialog__field-label">{t("conn.keyPath")}</label>
               <div className="ds-input ds-input--block">
                 <input
                   type="text"
                   value={form.privateKeyPath}
                   onChange={(e) => set("privateKeyPath", e.target.value)}
-                  placeholder="例如：~/.ssh/id_rsa"
+                  placeholder={t("conn.keyPathPh")}
                 />
               </div>
             </div>
             <div className="dialog__field">
-              <label className="dialog__field-label">私钥密码</label>
+              <label className="dialog__field-label">{t("conn.keyPass")}</label>
               <div className="ds-input ds-input--block">
                 <input
                   type={showPassphrase ? "text" : "password"}
                   value={form.privateKeyPassphrase}
                   onChange={(e) => set("privateKeyPassphrase", e.target.value)}
-                  placeholder="（可选）"
+                  placeholder={t("conn.optional")}
                 />
                 <button
                   className="ds-input__action"
                   type="button"
-                  title={showPassphrase ? "隐藏密码" : "显示密码"}
+                  title={showPassphrase ? t("conn.hidePassword") : t("conn.showPassword")}
                   onClick={() => setShowPassphrase((v) => !v)}
                 >
                   <Icon name={showPassphrase ? "eye-off" : "eye"} size={13} />
@@ -306,16 +328,53 @@ export function NewConnectionDialog() {
               </div>
             </div>
           </>
+        ) : form.authType === "keyboard" ? (
+          <div className="dialog__field">
+            <div className="dialog__field-hint">{t("conn.keyboardHint")}</div>
+          </div>
+        ) : (
+          <div className="dialog__field">
+            <div className="dialog__field-hint">{t("conn.agentHint")}</div>
+          </div>
         )}
 
         <div className="dialog__field">
-          <label className="dialog__field-label">分组</label>
+          <label className="dialog__field-label">{t("conn.jump")}</label>
+          <select
+            className="ds-select ds-select--block"
+            value={form.jumpSessionId}
+            onChange={(e) => set("jumpSessionId", e.target.value)}
+          >
+            <option value="">{t("conn.jumpDirect")}</option>
+            {sessions
+              .filter((s) => !editing || s.id !== editing.id)
+              .filter((s) => !s.jumpSessionId)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}（{s.username}@{s.host}）
+                </option>
+              ))}
+          </select>
+        </div>
+
+        <div className="dialog__field">
+          <label className="dialog__check">
+            <input
+              type="checkbox"
+              checked={!!form.agentForward}
+              onChange={(e) => set("agentForward", e.target.checked)}
+            />{t("conn.agentForward")}</label>
+          <div className="dialog__field-hint">{t("conn.agentForwardHint")}</div>
+        </div>
+
+        <div className="dialog__field">
+          <label className="dialog__field-label">{t("conn.group")}</label>
           <select
             className="ds-select ds-select--block"
             value={form.groupId}
             onChange={(e) => set("groupId", e.target.value)}
           >
-            <option value="">无分组</option>
+            <option value="">{t("conn.noGroup")}</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
@@ -326,14 +385,14 @@ export function NewConnectionDialog() {
 
         <div className="dialog__field">
           <div className="dialog__field-label dialog__field-label--row">
-            <span>备注</span>
-            <span className="dialog__field-optional">（可选）</span>
+            <span>{t("conn.memo")}</span>
+            <span className="dialog__field-optional">{t("conn.optional")}</span>
           </div>
           <div className="ds-input ds-input--block ds-input--textarea">
             <textarea
               value={form.memo}
               onChange={(e) => set("memo", e.target.value)}
-              placeholder="填写备注说明"
+              placeholder={t("conn.memoPh")}
               rows={2}
             />
           </div>
@@ -343,19 +402,17 @@ export function NewConnectionDialog() {
           <button
             className="ds-btn ds-btn--secondary"
             type="button"
-            title="取消：关闭连接窗口"
+            title={t("conn.cancelTitle")}
             onClick={closeNewConnection}
-          >
-            取消
-          </button>
+          >{t("common.cancel")}</button>
           <button
             className="ds-btn ds-btn--brand"
             type="button"
-            title="保存连接配置"
+            title={t("conn.saveTitle")}
             onClick={handleSave}
             disabled={!canSave}
           >
-            {saving ? "保存中…" : "保存"}
+            {saving ? t("conn.saving") : t("conn.save")}
           </button>
         </div>
       </div>

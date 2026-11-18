@@ -34,4 +34,12 @@ describe("fileFilter", () => {
   it("空查询返回全部", () => {
     expect(filterItems(items, "  ")).toEqual(items);
   });
+
+  it("空白 pattern 的匹配器接受任意名称", () => {
+    expect(buildFilterMatcher("   ")("anything-at-all")).toBe(true);
+  });
+
+  it("仅分隔符的 pattern 接受任意名称", () => {
+    expect(buildFilterMatcher("|")("anything-at-all")).toBe(true);
+  });
 });

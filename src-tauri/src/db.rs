@@ -21,7 +21,8 @@ impl Db {
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, port INTEGER,
                 username TEXT, auth_type TEXT, password TEXT, private_key_path TEXT,
                 private_key_passphrase TEXT, group_id TEXT, memo TEXT, encoding TEXT,
-                created_at INTEGER, last_connected_at INTEGER
+                created_at INTEGER, last_connected_at INTEGER,
+                jump_session_id TEXT, agent_forward INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS command_history (
                 id TEXT PRIMARY KEY, session_id TEXT, command TEXT, executed_at INTEGER
@@ -43,16 +44,47 @@ impl Db {
             );",
         )
         .map_err(|e| e.to_string())?;
-        Ok(Self {
+        let db = Self {
             conn: Mutex::new(conn),
-        })
+        };
+        // 存量库兼容：为旧版本建的 sessions 表补认证三件套字段
+        db.ensure_session_auth_columns()?;
+        Ok(db)
+    }
+
+    /// 存量数据库迁移：sessions 缺列时补列（新库建表已包含，走个空循环）。
+    /// SQLite 不支持 ADD COLUMN IF NOT EXISTS，故先查 PRAGMA 再补。
+    fn ensure_session_auth_columns(&self) -> Result<(), String> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = c
+            .prepare("PRAGMA table_info(sessions)")
+            .map_err(|e| e.to_string())?;
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        drop(stmt);
+        if !cols.iter().any(|c| c == "jump_session_id") {
+            c.execute("ALTER TABLE sessions ADD COLUMN jump_session_id TEXT", [])
+                .map_err(|e| e.to_string())?;
+        }
+        if !cols.iter().any(|c| c == "agent_forward") {
+            c.execute(
+                "ALTER TABLE sessions ADD COLUMN agent_forward INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        drop(c);
+        Ok(())
     }
 
     pub fn list_sessions(&self) -> Result<Vec<Session>, String> {
         let c = self.conn.lock().unwrap();
         let mut stmt = c
             .prepare(
-                "SELECT id,name,host,port,username,auth_type,password,private_key_path,private_key_passphrase,group_id,memo,encoding,created_at,last_connected_at FROM sessions ORDER BY name",
+                "SELECT id,name,host,port,username,auth_type,password,private_key_path,private_key_passphrase,group_id,memo,encoding,jump_session_id,agent_forward,created_at,last_connected_at FROM sessions ORDER BY (last_connected_at IS NULL), last_connected_at DESC, name",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], |r| {
@@ -69,8 +101,10 @@ impl Db {
                 group_id: r.get(9)?,
                 memo: r.get(10)?,
                 encoding: r.get(11)?,
-                created_at: r.get(12)?,
-                last_connected_at: r.get(13)?,
+                jump_session_id: r.get(12)?,
+                agent_forward: r.get::<_, i64>(13).map(|v| v != 0)?,
+                created_at: r.get(14)?,
+                last_connected_at: r.get(15)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -81,13 +115,14 @@ impl Db {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
         let encoding = input.encoding.unwrap_or_else(|| "utf-8".into());
+        let agent_forward: i64 = if input.agent_forward.unwrap_or(false) { 1 } else { 0 };
         let c = self.conn.lock().unwrap();
         c.execute(
-            "INSERT INTO sessions (id,name,host,port,username,auth_type,password,private_key_path,private_key_passphrase,group_id,memo,encoding,created_at,last_connected_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+            "INSERT INTO sessions (id,name,host,port,username,auth_type,password,private_key_path,private_key_passphrase,group_id,memo,encoding,jump_session_id,agent_forward,created_at,last_connected_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
             params![
                 id, input.name, input.host, input.port, input.username, input.auth_type,
                 input.password, input.private_key_path, input.private_key_passphrase,
-                input.group_id, input.memo, encoding, now
+                input.group_id, input.memo, encoding, input.jump_session_id, agent_forward, now
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -96,13 +131,14 @@ impl Db {
 
     pub fn update_session(&self, id: &str, input: SessionInput) -> Result<(), String> {
         let encoding = input.encoding.unwrap_or_else(|| "utf-8".into());
+        let agent_forward: i64 = if input.agent_forward.unwrap_or(false) { 1 } else { 0 };
         let c = self.conn.lock().unwrap();
         c.execute(
-            "UPDATE sessions SET name=?,host=?,port=?,username=?,auth_type=?,password=?,private_key_path=?,private_key_passphrase=?,group_id=?,memo=?,encoding=? WHERE id=?",
+            "UPDATE sessions SET name=?,host=?,port=?,username=?,auth_type=?,password=?,private_key_path=?,private_key_passphrase=?,group_id=?,memo=?,encoding=?,jump_session_id=?,agent_forward=? WHERE id=?",
             params![
                 input.name, input.host, input.port, input.username, input.auth_type,
                 input.password, input.private_key_path, input.private_key_passphrase,
-                input.group_id, input.memo, encoding, id
+                input.group_id, input.memo, encoding, input.jump_session_id, agent_forward, id
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -428,6 +464,8 @@ mod tests {
             group_id: None,
             memo: None,
             encoding: None,
+            jump_session_id: None,
+            agent_forward: None,
         }
     }
 
@@ -474,6 +512,81 @@ mod tests {
         // delete
         db.delete_session(&id).unwrap();
         assert!(db.list_sessions().unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_auth_fields_roundtrip() {
+        let db = test_db();
+        let mut input = session_input("jump-prod");
+        input.auth_type = "keyboard".into();
+        input.jump_session_id = Some("jump-id".into());
+        input.agent_forward = Some(true);
+        let id = db.create_session(input).unwrap();
+        let list = db.list_sessions().unwrap();
+        assert_eq!(list[0].auth_type, "keyboard");
+        assert_eq!(list[0].jump_session_id.as_deref(), Some("jump-id"));
+        assert!(list[0].agent_forward);
+
+        let mut input = session_input("jump-prod");
+        input.agent_forward = Some(false);
+        db.update_session(&id, input).unwrap();
+        let list = db.list_sessions().unwrap();
+        assert!(list[0].jump_session_id.is_none());
+        assert!(!list[0].agent_forward);
+    }
+
+    #[test]
+    fn legacy_sessions_table_migrates_auth_columns() {
+        // 模拟旧版本建的表（无认证三件套字段）：open 应自动补列且读写正常
+        let path = std::env::temp_dir().join(format!(
+            "termix-migrate-test-{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, port INTEGER,
+                username TEXT, auth_type TEXT, password TEXT, private_key_path TEXT,
+                private_key_passphrase TEXT, group_id TEXT, memo TEXT, encoding TEXT,
+                created_at INTEGER, last_connected_at INTEGER
+            );",
+        )
+        .unwrap();
+        drop(conn);
+        let db = Db::open(path.to_str().unwrap()).unwrap();
+        let mut input = session_input("migrated");
+        input.jump_session_id = Some("j".into());
+        input.agent_forward = Some(true);
+        let id = db.create_session(input).unwrap();
+        let list = db.list_sessions().unwrap();
+        assert_eq!(list[0].id, id);
+        assert_eq!(list[0].jump_session_id.as_deref(), Some("j"));
+        assert!(list[0].agent_forward);
+        drop(db);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn list_sessions_orders_recent_connections_first() {
+        let db = test_db();
+        let older = db.create_session(session_input("zeta")).unwrap();
+        db.create_session(session_input("alpha")).unwrap();
+        let recent = db.create_session(session_input("beta")).unwrap();
+
+        db.touch_session(&older).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        db.touch_session(&recent).unwrap();
+
+        let names: Vec<String> = db
+            .list_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|session| session.name)
+            .collect();
+        assert_eq!(names, vec!["beta", "zeta", "alpha"]);
     }
 
     #[test]

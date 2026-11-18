@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useApp } from "./store/app";
+import { useT } from "./lib/i18n";
 import { useMonitor, selectMonitorConnection } from "./store/monitor";
 import { ActivityRail } from "./components/ActivityRail";
 import { TitleBar } from "./components/TitleBar";
@@ -21,6 +22,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { FeedbackHost } from "./components/FeedbackHost";
 import { CommandPalette } from "./components/CommandPalette";
+import { AuthPromptHost } from "./components/AuthPromptHost";
 import { Icon } from "./components/Icon";
 import {
   ipc,
@@ -73,22 +75,25 @@ function adjustFontSize(delta: number) {
 }
 
 function Placeholder({ id }: { id: string }) {
+  const t = useT();
   const p = PLACEHOLDERS[id] ?? { icon: "terminal", title: id };
+  const title = id === "plugins" ? t("app.plugins") : p.title;
   return (
     <div className="workspace__empty">
       <span className="workspace__empty-logo">
         <Icon name={p.icon} size={24} />
       </span>
-      <div className="workspace__empty-text">{p.title}</div>
-      <div className="workspace__empty-sub">该功能即将上线</div>
+      <div className="workspace__empty-text">{title}</div>
+      <div className="workspace__empty-sub">{t("app.comingSoon")}</div>
     </div>
   );
 }
 
 /** 懒加载视图的加载占位 */
 function ViewLoading() {
+  const t = useT();
   return (
-    <div className="view-skeleton" role="status" aria-label="内容加载中">
+    <div className="view-skeleton" role="status" aria-label={t("app.loading")}>
       <div className="view-skeleton__toolbar" />
       <div className="view-skeleton__grid">
         {[0, 1, 2, 3].map((item) => (
@@ -104,6 +109,7 @@ function ViewLoading() {
 }
 
 export default function App() {
+  const t = useT();
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const activity = useApp((s) => s.activity);
@@ -174,9 +180,23 @@ export default function App() {
     };
   }, []);
 
+  // 文件面板跟随当前激活标签：切换标签/连接状态变化时重新绑定 SFTP 上下文，
+  // 避免多会话场景继续显示上一条连接的目录与监控数据。
+  useEffect(() => {
+    const st = useApp.getState();
+    const active = st.tabs.find((tab) => tab.id === st.activeTabId && !tab.hidden);
+    if (active?.status === "connected" && active.connectionId) {
+      if (st.sftpContext?.connectionId !== active.connectionId) {
+        void st.setSftpContext(active.sessionId, active.connectionId);
+      }
+    } else if (st.sftpContext) {
+      void st.setSftpContext(st.sftpContext.sessionId, null);
+    }
+  }, [activeTabId, tabs]);
+
   // 全局唯一监控轮询：跟随连接状态（终端右侧资源监控与「监控」模块共享同一数据源，
   // 由本组件统一驱动 useMonitor.sync，两处展示的数据完全一致）
-  const monitorConnId = selectMonitorConnection(sftpContext, tabs);
+  const monitorConnId = selectMonitorConnection(sftpContext, tabs, activeTabId);
   useEffect(() => {
     useMonitor.getState().sync(monitorConnId);
   }, [monitorConnId]);
@@ -203,7 +223,17 @@ export default function App() {
       }
       try {
         const home = await ipc.localHome();
-        useApp.setState({ localPath: home });
+        const saved = loadSettings().lastLocalPath;
+        let localPath = home;
+        if (saved) {
+          try {
+            await ipc.localList(saved);
+            localPath = saved;
+          } catch {
+            // 保存的目录已失效时回退到 home
+          }
+        }
+        useApp.setState({ localPath });
       } catch {
         /* browser mode */
       }
@@ -407,21 +437,19 @@ export default function App() {
                 <span className="workspace__empty-logo">
                   <Icon name="terminal" size={28} />
                 </span>
-                <div className="workspace__empty-text">开始你的远程会话</div>
-                <div className="workspace__empty-sub">
-                  双击左侧会话，或新建一个 SSH 连接
-                </div>
+                <div className="workspace__empty-text">{t("app.emptyTitle")}</div>
+                <div className="workspace__empty-sub">{t("app.emptySub")}</div>
                 <button
                   className="ds-btn ds-btn--brand workspace__empty-btn"
                   type="button"
                   onClick={() => useApp.getState().openNewConnection()}
                 >
                   <Icon name="plus" size={14} />
-                  新建连接
+                  {t("session.newConnTitle")}
                 </button>
                 <div className="workspace__empty-shortcut">
                   <span className="ds-kbd">{isWindows ? "Ctrl+T" : "⌘T"}</span>{" "}
-                  快速新建
+                  {t("app.quickNew")}
                 </div>
               </div>
             )
@@ -431,7 +459,7 @@ export default function App() {
               className="workspace__panel-resizer"
               role="separator"
               aria-orientation="horizontal"
-              aria-label="调整文件面板高度"
+              aria-label={t("app.resizePanel")}
               tabIndex={0}
               aria-valuenow={Math.round(sftpRatio * 100)}
               aria-valuemin={15}
@@ -495,6 +523,7 @@ export default function App() {
       <NewConnectionDialog />
       <UpdateDialog />
       <FeedbackHost />
+      <AuthPromptHost />
       <GlobalTooltip />
     </div>
   );

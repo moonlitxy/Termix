@@ -1,17 +1,29 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
+import { useApp } from "../store/app";
 import {
   applyAppearance,
   loadSettings,
   saveSettings,
   type Settings,
 } from "../lib/settings";
+import {
+  CUSTOM_MIRROR_ID,
+  UPDATE_MIRRORS,
+  describeUpdateEndpoint,
+  normalizeMirrorBase,
+  normalizeProxyUrl,
+  resolveUpdateEndpoint,
+} from "../lib/updateSource";
+import { formatBytes } from "../lib/formatBytes";
+import { useT } from "../lib/i18n";
 import { useUpdate } from "../store/update";
 import { confirmDialog, toast } from "../store/feedback";
-import type { MasterStatus } from "../types";
+import type { BackupFile, MasterStatus } from "../types";
 
 export function SettingsView() {
+  const t = useT();
   const [settings, setSettings] = useState<Settings>(loadSettings);
 
   useEffect(() => {
@@ -29,14 +41,32 @@ export function SettingsView() {
     setUpdateMsg(null);
     const info = await useUpdate.getState().check();
     if (!info) {
-      setUpdateMsg(useUpdate.getState().error ?? "检查更新失败，请稍后重试");
+      setUpdateMsg(useUpdate.getState().error ?? t("st.updateCheckFailed"));
       return;
     }
     if (info.hasUpdate) {
-      setUpdateMsg(`发现新版本 v${info.latestVersion}，正在打开更新提示`);
+      setUpdateMsg(t("st.updateFound", { v: info.latestVersion }));
       useUpdate.getState().openDialog();
     } else {
-      setUpdateMsg(`已是最新版本 v${info.currentVersion}`);
+      setUpdateMsg(t("st.updateLatest", { v: info.currentVersion }));
+    }
+  };
+
+  // ---- 更新源：用当前表单值直测连通性（不经过保存也能验证） ----
+  // 表单修改即自动保存，此处直接用当前表单值测试
+  const handleTestUpdateEndpoint = async () => {
+    setUpdateMsg(null);
+    const r = resolveUpdateEndpoint(settings);
+    if ("error" in r) {
+      setUpdateMsg(t("st.configInvalid", { e: r.error }));
+      return;
+    }
+    setUpdateMsg(t("st.testing"));
+    try {
+      const info = await ipc.checkUpdate(r.mirror || null, r.proxy || null);
+      setUpdateMsg(t("st.testOk", { v: info.latestVersion }));
+    } catch (e) {
+      setUpdateMsg(t("st.testFailed", { e: String(e) }));
     }
   };
 
@@ -46,6 +76,56 @@ export function SettingsView() {
   const [confirmPass, setConfirmPass] = useState("");
   const [oldPass, setOldPass] = useState("");
   const [unlockPass, setUnlockPass] = useState("");
+
+  // ---- 数据备份：本地滚动快照 ----
+  const [backups, setBackups] = useState<BackupFile[]>([]);
+  const refreshBackups = async () => {
+    try {
+      setBackups(await ipc.backupList());
+    } catch {
+      /* ignore */
+    }
+  };
+  useEffect(() => {
+    void refreshBackups();
+  }, []);
+
+  const formatBackupTime = (ms: number) => {
+    const d = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const handleBackupNow = async () => {
+    try {
+      const msg = await ipc.backupNow();
+      toast.success(msg);
+      await refreshBackups();
+    } catch (e) {
+      toast.error(t("st.backupFailed", { e: String(e) }));
+    }
+  };
+
+  const handleBackupRestore = async (name: string) => {
+    const ok = await confirmDialog({
+      title: t("st.restoreConfirmTitle"),
+      message: t("st.restoreConfirmMsg", { n: name }),
+      confirmText: t("st.restoreConfirm"),
+    });
+    if (!ok) return;
+    try {
+      const res = await ipc.backupRestore(name);
+      const { loadSessions, loadGroups } = useApp.getState();
+      await loadSessions();
+      await loadGroups();
+      await refreshBackups();
+      toast.success(
+        t("st.restoreDone", { c: res.sessionsCreated, s: res.sessionsSkipped })
+      );
+    } catch (e) {
+      toast.error(t("st.restoreFailed", { e: String(e) }));
+    }
+  };
 
   const refreshMaster = () => {
     ipc
@@ -59,11 +139,11 @@ export function SettingsView() {
 
   const doSet = async () => {
     if (newPass.length < 4) {
-      toast.warning("主密码至少 4 位");
+      toast.warning(t("st.masterTooShort"));
       return;
     }
     if (newPass !== confirmPass) {
-      toast.warning("两次输入的主密码不一致");
+      toast.warning(t("st.masterMismatch"));
       return;
     }
     try {
@@ -72,9 +152,7 @@ export function SettingsView() {
       setConfirmPass("");
       setOldPass("");
       refreshMaster();
-      toast.success(
-        master.hasMaster ? "主密码已修改" : "主密码已设置，会话密码已加密"
-      );
+      toast.success(master.hasMaster ? t("st.masterChanged") : t("st.masterSet"));
     } catch (e) {
       toast.error(String(e));
     }
@@ -85,7 +163,7 @@ export function SettingsView() {
       await ipc.masterUnlock(unlockPass);
       setUnlockPass("");
       refreshMaster();
-      toast.success("已解锁");
+      toast.success(t("st.unlockedMsg"));
     } catch (e) {
       toast.error(String(e));
     }
@@ -95,7 +173,7 @@ export function SettingsView() {
     try {
       await ipc.masterLock();
       refreshMaster();
-      toast.success("已锁定");
+      toast.success(t("st.lockedMsg"));
     } catch (e) {
       toast.error(String(e));
     }
@@ -103,9 +181,9 @@ export function SettingsView() {
 
   const doClear = async () => {
     const confirmed = await confirmDialog({
-      title: "清除主密码",
-      message: "清除主密码后，所有会话密码将恢复为明文存储，确定继续？",
-      confirmText: "清除",
+      title: t("st.clearMaster"),
+      message: t("st.clearMasterMsg"),
+      confirmText: t("st.clear"),
       danger: true,
     });
     if (!confirmed) return;
@@ -113,7 +191,7 @@ export function SettingsView() {
       await ipc.masterClear(unlockPass);
       setUnlockPass("");
       refreshMaster();
-      toast.success("主密码已清除");
+      toast.success(t("st.cleared"));
     } catch (e) {
       toast.error(String(e));
     }
@@ -122,23 +200,22 @@ export function SettingsView() {
   return (
     <div className="st-view">
       <div className="fw-toolbar">
-        <span className="fw-toolbar__title">设置</span>
+        <span className="fw-toolbar__title">{t("st.title")}</span>
       </div>
       <div className="st-body">
         <div className="ds-card st-section">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="settings" size={14} />通用
-            </span>
+              <Icon name="settings" size={14} />{t("st.general")}</span>
           </div>
           <div className="st-row">
-            <label>主题</label>
-            <div className="st-radio-group" role="radiogroup" aria-label="主题">
+            <label>{t("st.theme")}</label>
+            <div className="st-radio-group" role="radiogroup" aria-label={t("st.theme")}>
               {(
                 [
-                  ["dark", "深色"],
-                  ["light", "浅色"],
-                  ["system", "跟随系统"],
+                  ["dark", t("st.theme.dark")],
+                  ["light", t("st.theme.light")],
+                  ["system", t("st.theme.system")],
                 ] as const
               ).map(([value, label]) => (
                 <label className="ds-radio" key={value}>
@@ -155,7 +232,7 @@ export function SettingsView() {
             </div>
           </div>
           <div className="st-row">
-            <label>界面字号</label>
+            <label>{t("st.fontSize")}</label>
             <input
               className="ds-input st-input"
               type="number"
@@ -165,36 +242,48 @@ export function SettingsView() {
               onChange={(e) => set({ fontSize: Number(e.target.value) || 13 })}
             />
           </div>
+          <div className="st-row">
+            <label>{t("st.language")}</label>
+            <select
+              className="ds-select st-input"
+              value={settings.lang}
+              onChange={(e) => set({ lang: e.target.value as Settings["lang"] })}
+            >
+              <option value="zh">{t("st.lang.zh")}</option>
+              <option value="en">{t("st.lang.en")}</option>
+            </select>
+          </div>
+          <div className="st-hint">{t("st.languageHint")}</div>
         </div>
 
         <div className="ds-card st-section">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="terminal" size={14} />终端
+              <Icon name="terminal" size={14} />{t("st.terminal")}
             </span>
           </div>
           <div className="st-row">
-            <label>光标样式</label>
+            <label>{t("st.cursor")}</label>
             <select
               className="ds-select st-input"
               value={settings.cursorStyle}
               onChange={(e) => set({ cursorStyle: e.target.value as Settings["cursorStyle"] })}
             >
-              <option value="block">块状</option>
-              <option value="underline">下划线</option>
-              <option value="bar">竖线</option>
+              <option value="block">{t("st.cursor.block")}</option>
+              <option value="underline">{t("st.cursor.underline")}</option>
+              <option value="bar">{t("st.cursor.bar")}</option>
             </select>
           </div>
           <div className="st-row">
-            <label>滚动缓冲区</label>
+            <label>{t("st.scrollback")}</label>
             <select
               className="ds-select st-input"
               value={settings.scrollback}
               onChange={(e) => set({ scrollback: Number(e.target.value) })}
             >
-              <option value={1000}>1000 行</option>
-              <option value={5000}>5000 行</option>
-              <option value={10000}>10000 行</option>
+              <option value={1000}>{t("st.lines", { n: 1000 })}</option>
+              <option value={5000}>{t("st.lines", { n: 5000 })}</option>
+              <option value={10000}>{t("st.lines", { n: 10000 })}</option>
             </select>
           </div>
         </div>
@@ -202,19 +291,19 @@ export function SettingsView() {
         <div className="ds-card st-section">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="bar" size={14} />监控
+              <Icon name="bar" size={14} />{t("st.monitor")}
             </span>
           </div>
           <div className="st-row">
-            <label>刷新间隔</label>
+            <label>{t("st.interval")}</label>
             <select
               className="ds-select st-input"
               value={settings.monitorInterval}
               onChange={(e) => set({ monitorInterval: Number(e.target.value) })}
             >
-              <option value={1000}>1 秒</option>
-              <option value={2000}>2 秒</option>
-              <option value={5000}>5 秒</option>
+              <option value={1000}>{t("st.sec", { n: 1 })}</option>
+              <option value={2000}>{t("st.sec", { n: 2 })}</option>
+              <option value={5000}>{t("st.sec", { n: 5 })}</option>
             </select>
           </div>
         </div>
@@ -226,38 +315,34 @@ export function SettingsView() {
             </span>
             {master.hasMaster && (
               <span className={"ds-tag " + (master.unlocked ? "ds-tag--success" : "ds-tag--neutral")}>
-                {master.unlocked ? "已解锁" : "已锁定"}
+                {master.unlocked ? t("st.unlocked") : t("st.locked")}
               </span>
             )}
           </div>
           <div className="st-row">
-            <label>主密码状态</label>
+            <label>{t("st.securityStatus")}</label>
             <span className="st-kbd">
-              {master.hasMaster ? "已设置（会话密码已加密）" : "未设置（密码明文存储）"}
+              {master.hasMaster ? t("st.hasMaster") : t("st.noMaster")}
             </span>
           </div>
 
           {master.hasMaster && !master.unlocked && (
             <>
               <div className="st-row">
-                <label>解锁主密码</label>
+                <label>{t("st.unlock")}</label>
                 <input
                   className="ds-input st-input"
                   type="password"
                   value={unlockPass}
                   onChange={(e) => setUnlockPass(e.target.value)}
-                  placeholder="输入主密码解锁"
+                  placeholder={t("st.masterUnlockPh")}
                 />
               </div>
               <div className="st-row">
                 <label />
                 <div className="st-actions">
-                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="解锁主密码，解密会话密码" onClick={() => void doUnlock()}>
-                    解锁
-                  </button>
-                  <button className="ds-btn ds-btn--danger-subtle ds-btn--sm" type="button" title="清除主密码（需先解锁）" onClick={() => void doClear()}>
-                    清除主密码
-                  </button>
+                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title={t("st.unlockTitle")} onClick={() => void doUnlock()}>{t("st.unlock")}</button>
+                  <button className="ds-btn ds-btn--danger-subtle ds-btn--sm" type="button" title={t("st.clearMasterTitle")} onClick={() => void doClear()}>{t("st.clearMaster")}</button>
                 </div>
               </div>
             </>
@@ -266,40 +351,36 @@ export function SettingsView() {
           {master.hasMaster && master.unlocked && (
             <>
               <div className="st-row">
-                <label>修改主密码</label>
+                <label>{t("st.changeMaster")}</label>
                 <div className="st-input-group">
                   <input
                     className="ds-input"
                     type="password"
                     value={oldPass}
                     onChange={(e) => setOldPass(e.target.value)}
-                    placeholder="当前主密码"
+                    placeholder={t("st.oldMasterPh")}
                   />
                   <input
                     className="ds-input"
                     type="password"
                     value={newPass}
                     onChange={(e) => setNewPass(e.target.value)}
-                    placeholder="新主密码"
+                    placeholder={t("st.newMasterPh")}
                   />
                   <input
                     className="ds-input"
                     type="password"
                     value={confirmPass}
                     onChange={(e) => setConfirmPass(e.target.value)}
-                    placeholder="确认新主密码"
+                    placeholder={t("st.confirmNewMasterPh")}
                   />
                 </div>
               </div>
               <div className="st-row">
                 <label />
                 <div className="st-actions">
-                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="修改主密码" onClick={() => void doSet()}>
-                    修改
-                  </button>
-                  <button className="ds-btn ds-btn--secondary ds-btn--sm" type="button" title="锁定：重新加密会话密码" onClick={() => void doLock()}>
-                    锁定
-                  </button>
+                  <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title={t("st.changeMasterTitle")} onClick={() => void doSet()}>{t("st.changeMaster")}</button>
+                  <button className="ds-btn ds-btn--secondary ds-btn--sm" type="button" title={t("st.lockTitle")} onClick={() => void doLock()}>{t("st.lock")}</button>
                 </div>
               </div>
             </>
@@ -308,51 +389,49 @@ export function SettingsView() {
           {!master.hasMaster && (
             <>
               <div className="st-row">
-                <label>设置主密码</label>
+                <label>{t("st.setMaster")}</label>
                 <div className="st-input-group">
                   <input
                     className="ds-input"
                     type="password"
                     value={newPass}
                     onChange={(e) => setNewPass(e.target.value)}
-                    placeholder="主密码（至少 4 位）"
+                    placeholder={t("st.setMasterPh")}
                   />
                   <input
                     className="ds-input"
                     type="password"
                     value={confirmPass}
                     onChange={(e) => setConfirmPass(e.target.value)}
-                    placeholder="确认主密码"
+                    placeholder={t("st.confirmMasterPh")}
                   />
                 </div>
               </div>
               <div className="st-row">
                 <label />
-                <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="设置主密码并加密存储会话密码" onClick={() => void doSet()}>
-                  设置并加密
-                </button>
+                <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title={t("st.setMasterTitle")} onClick={() => void doSet()}>{t("st.setMaster")}</button>
               </div>
             </>
           )}
-          <div className="st-hint">设置主密码后，会话密码与私钥密码将使用 AES-256-GCM 加密存储，解锁后连接自动解密。</div>
+          <div className="st-hint">{t("st.securityHint")}</div>
         </div>
 
         <div className="ds-card st-section">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="key" size={14} />快捷键
+              <Icon name="key" size={14} />{t("st.shortcuts")}
             </span>
           </div>
           <div className="st-row">
-            <label>新建会话</label>
+            <label>{t("st.scNewSession")}</label>
             <span className="st-kbd">⌘ / Ctrl + T</span>
           </div>
           <div className="st-row">
-            <label>断开连接</label>
+            <label>{t("st.scDisconnect")}</label>
             <span className="st-kbd">⌘ / Ctrl + D</span>
           </div>
           <div className="st-row">
-            <label>终端字号缩放</label>
+            <label>{t("st.scZoom")}</label>
             <span className="st-kbd">Ctrl + / -</span>
           </div>
         </div>
@@ -360,12 +439,136 @@ export function SettingsView() {
         <div className="ds-card st-section">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="download" size={14} />软件更新
+              <Icon name="copy" size={14} />{t("st.backup")}</span>
+            <div className="st-actions">
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                title={t("st.backupNowTitle")}
+                onClick={() => void handleBackupNow()}
+              >{t("st.backupNow")}</button>
+            </div>
+          </div>
+          <div className="st-row st-row--col">
+            <label>{t("st.backupListLabel")}</label>
+            {backups.length === 0 ? (
+              <div className="st-hint">{t("st.backupEmpty")}</div>
+            ) : (
+              <div className="st-backup-list">
+                {backups.map((b) => (
+                  <div className="st-backup-row" key={b.name}>
+                    <span className="st-backup-name" title={b.name}>
+                      {formatBackupTime(b.modifiedMs)} · {formatBytes(b.size)}
+                    </span>
+                    <button
+                      className="ds-btn ds-btn--secondary ds-btn--sm"
+                      type="button"
+                      title={t("st.restoreTitle", { n: b.name })}
+                      onClick={() => void handleBackupRestore(b.name)}
+                    >{t("st.restore")}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="ds-card st-section">
+          <div className="res-card__head">
+            <span className="res-card__label">
+              <Icon name="download" size={14} />{t("st.updates")}
             </span>
           </div>
           <div className="st-row">
-            <label>当前版本</label>
+            <label>{t("st.currentVersion")}</label>
             <span className="st-kbd">v{__TERMIX_VERSION__}</span>
+          </div>
+          <div className="st-row st-row--col">
+            <label>{t("st.updateMode")}</label>
+            <div className="st-seg" role="radiogroup" aria-label={t("st.updateMode")}>
+              {(
+                [
+                  ["direct", t("st.mode.direct")],
+                  ["mirror", t("st.mode.mirror")],
+                  ["proxy", t("st.mode.proxy")],
+                ] as const
+              ).map(([mode, text]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.updateMode === mode}
+                  className={
+                    "st-seg__btn" + (settings.updateMode === mode ? " is-active" : "")
+                  }
+                  title={mode === "direct" ? t("st.mode.directTitle") : mode === "mirror" ? t("st.mode.mirrorTitle") : t("st.mode.proxyTitle")}
+                  onClick={() => set({ updateMode: mode })}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+          {settings.updateMode === "mirror" && (
+            <>
+              <div className="st-row st-row--col">
+                <label>{t("st.mirrorSource")}</label>
+                <select
+                  className="ds-select"
+                  value={settings.updateMirror}
+                  onChange={(e) => set({ updateMirror: e.target.value })}
+                >
+                  {UPDATE_MIRRORS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_MIRROR_ID}>{t("st.mirrorCustom")}</option>
+                </select>
+              </div>
+              {settings.updateMirror === CUSTOM_MIRROR_ID && (
+                <div className="st-row st-row--col">
+                  <label>自定义镜像地址</label>
+                  <input
+                    className="ds-input"
+                    value={settings.customMirror}
+                    placeholder={t("st.mirrorCustomPh")}
+                    spellCheck={false}
+                    onChange={(e) => set({ customMirror: e.target.value })}
+                  />
+                  {"error" in normalizeMirrorBase(settings.customMirror || " ") && settings.customMirror.trim() && (
+                    <div className="st-hint st-hint--error">
+                      {(normalizeMirrorBase(settings.customMirror) as { error: string }).error}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="st-hint">
+                {(UPDATE_MIRRORS.find((m) => m.id === settings.updateMirror)?.tested ??
+                  t("st.mirrorCustomHint"))}
+              </div>
+            </>
+          )}
+          {settings.updateMode === "proxy" && (
+            <div className="st-row st-row--col">
+              <label>{t("st.proxyAddr")}</label>
+              <input
+                className="ds-input"
+                value={settings.updateProxy}
+                placeholder={t("st.proxyPh")}
+                spellCheck={false}
+                onChange={(e) => set({ updateProxy: e.target.value })}
+              />
+              {"error" in normalizeProxyUrl(settings.updateProxy || " ") && settings.updateProxy.trim() && (
+                <div className="st-hint st-hint--error">
+                  {(normalizeProxyUrl(settings.updateProxy) as { error: string }).error}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="st-row">
+            <label>{t("st.currentChannel")}</label>
+            <span className="st-kbd">{describeUpdateEndpoint(settings)}</span>
           </div>
           <div className="st-row">
             <label />
@@ -374,11 +577,18 @@ export function SettingsView() {
                 className="ds-btn ds-btn--brand ds-btn--sm"
                 type="button"
                 disabled={checking}
-                title="检查 Termix 是否有新版本"
+                title={t("st.checkUpdateTitle")}
                 onClick={() => void handleCheckUpdate()}
               >
-                {checking ? "检查中…" : "检查更新"}
+                {checking ? t("st.checking") : t("st.check")}
               </button>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                disabled={checking}
+                title={t("st.testTitle")}
+                onClick={() => void handleTestUpdateEndpoint()}
+              >{t("st.test")}</button>
             </div>
           </div>
           {updateMsg && <div className="st-hint">{updateMsg}</div>}

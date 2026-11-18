@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  BackupFile,
   CommandHistory,
   ForwardRule,
   ForwardRuleInput,
@@ -34,6 +35,13 @@ export const ipc = {
   sessionsExport: () => invoke<string>("sessions_export"),
   sessionsImport: (content: string) =>
     invoke<SessionImportResult>("sessions_import", { content }),
+  sshConfigReadDefault: () => invoke<string>("ssh_config_read_default"),
+  sshConfigImport: (content: string) =>
+    invoke<SessionImportResult>("ssh_config_import", { content }),
+  backupList: () => invoke<BackupFile[]>("backup_list"),
+  backupRestore: (name: string) =>
+    invoke<SessionImportResult>("backup_restore", { name }),
+  backupNow: () => invoke<string>("backup_now"),
 
   // groups
   groupList: () => invoke<Group[]>("group_list"),
@@ -157,12 +165,28 @@ export const ipc = {
   masterClear: (master: string) => invoke<void>("master_clear", { master }),
 
   // ---- 软件更新 ----
-  checkUpdate: () => invoke<UpdateInfo>("check_update"),
-  downloadUpdate: (url: string, fileName: string) =>
-    invoke<void>("download_update", { url, fileName }),
+  checkUpdate: (mirror: string | null, proxy: string | null) =>
+    invoke<UpdateInfo>("check_update", { mirror, proxy }),
+  downloadUpdate: (url: string, fileName: string, proxy: string | null) =>
+    invoke<void>("download_update", { url, fileName, proxy }),
+  authRespond: (authId: string, responses: string[]) =>
+    invoke<void>("auth_respond", { authId, responses }),
+  authCancel: (authId: string) => invoke<void>("auth_cancel", { authId }),
   openInstaller: (path: string) => invoke<void>("open_installer", { path }),
   openExternal: (url: string) => invoke<void>("open_external", { url }),
 };
+
+/** 键盘交互认证提示（2FA）：后端 `auth-prompt` 事件载荷 */
+export interface AuthPromptEvent {
+  authId: string;
+  name: string;
+  instructions: string;
+  prompts: Array<{ text: string; echo: boolean }>;
+}
+
+export function onAuthPrompt(cb: (e: AuthPromptEvent) => void): Promise<UnlistenFn> {
+  return listen<AuthPromptEvent>("auth-prompt", (ev) => cb(ev.payload));
+}
 
 export interface TerminalOutputEvent {
   shellId: string;

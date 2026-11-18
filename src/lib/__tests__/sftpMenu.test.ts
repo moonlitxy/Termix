@@ -27,10 +27,17 @@ describe("sftpContextMenu", () => {
     expect(items[0].label).toBe("下载目录");
   });
 
-  it("本地文件：上传/复制路径/刷新", () => {
+  it("本地文件：上传/重命名/删除/复制路径/刷新", () => {
     const items = sftpContextMenu("local", item(false));
-    expect(items.map((i) => i.id)).toEqual(["upload", "copyPath", "refresh"]);
+    expect(items.map((i) => i.id)).toEqual([
+      "upload",
+      "rename",
+      "delete",
+      "copyPath",
+      "refresh",
+    ]);
     expect(items[0].label).toBe("上传");
+    expect(items[2].dangerous).toBe(true);
   });
 
   it("本地目录：显示「上传目录」", () => {
@@ -43,14 +50,8 @@ describe("sftpContextMenu", () => {
     expect(items.map((i) => i.id)).toEqual(["mkdir", "refresh"]);
   });
 
-  it("本地空白区：仅刷新", () => {
+  it("本地空白区：新建文件夹/刷新", () => {
     const items = sftpContextMenu("local", null);
-    expect(items.map((i) => i.id)).toEqual(["refresh"]);
-  });
-
-  it("本地文件菜单不含删除/重命名（仅远程可管理）", () => {
-    const items = sftpContextMenu("local", item(false));
-    expect(items.some((i) => i.id === "delete")).toBe(false);
-    expect(items.some((i) => i.id === "rename")).toBe(false);
+    expect(items.map((i) => i.id)).toEqual(["mkdir", "refresh"]);
   });
 });

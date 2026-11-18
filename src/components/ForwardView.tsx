@@ -4,15 +4,16 @@ import { useApp } from "../store/app";
 import { ipc } from "../lib/ipc";
 import { confirmDialog, toast } from "../store/feedback";
 import { useFocusTrap } from "../lib/focusTrap";
+import { useT } from "../lib/i18n";
 import type { ForwardRule, ForwardRuleInput } from "../types";
 
-const TYPE_LABEL: Record<string, string> = {
-  local: "本地",
-  remote: "远程",
-  dynamic: "动态",
-};
-
 export function ForwardView() {
+  const tr = useT();
+  const TYPE_LABEL: Record<string, string> = {
+    local: tr("fwd.type.local"),
+    remote: tr("fwd.type.remote"),
+    dynamic: tr("fwd.type.dynamic"),
+  };
   const sessions = useApp((s) => s.sessions);
   const [rules, setRules] = useState<ForwardRule[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -70,14 +71,14 @@ export function ForwardView() {
 
   const save = async () => {
     if (!form.name || !form.localPort) {
-      toast.warning("请填写名称与本地端口");
+      toast.warning(tr("fwd.needNamePort"));
       return;
     }
     if (form.type !== "dynamic" && !form.remotePort) {
       toast.warning(
         form.type === "remote"
-          ? "远程转发需要填写服务端监听端口"
-          : "本地转发需要填写远程端口"
+          ? tr("fwd.needRemotePort")
+          : tr("fwd.needLocalPort")
       );
       return;
     }
@@ -89,23 +90,23 @@ export function ForwardView() {
       }
       setModalOpen(false);
       void load();
-      toast.success(editingId ? "转发规则已更新" : "转发规则已创建");
+      toast.success(editingId ? tr("fwd.updated") : tr("fwd.created"));
     } catch (e) {
       toast.error(String(e));
     }
   };
 
   const sessionName = (id?: string) =>
-    id ? sessions.find((s) => s.id === id)?.name ?? "未知会话" : "未绑定";
+    id ? sessions.find((s) => s.id === id)?.name ?? tr("fwd.unknownSession") : tr("fwd.unbound");
 
   return (
     <div className="fw-view">
       <div className="fw-toolbar">
-        <span className="fw-toolbar__title">端口转发</span>
+        <span className="fw-toolbar__title">{tr("fwd.title")}</span>
         <button
           className="ds-btn ds-btn--brand ds-btn--sm"
           type="button"
-          title="新建端口转发规则"
+          title={tr("fwd.newRuleTitle")}
           onClick={openNew}
         >
           <Icon name="plus" size={12} />新建规则
@@ -117,7 +118,7 @@ export function ForwardView() {
             <span className="fw-empty__icon">
               <Icon name="arrow-right-to-line" size={28} />
             </span>
-            <div className="fw-empty__title">暂无转发规则</div>
+            <div className="fw-empty__title">{tr("fwd.empty")}</div>
             <div className="fw-empty__sub">
               创建规则后，流量会通过已连接的 SSH 会话转发
             </div>
@@ -146,7 +147,7 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
-                title={r.enabled ? "停用该转发规则" : "启用该转发规则"}
+                title={r.enabled ? tr("fwd.disableTitle") : tr("fwd.enableTitle")}
                 onClick={() => {
                   console.log(`[forward] ${r.enabled ? "stop" : "start"} rule`, r.id, r.name);
                   void (r.enabled ? ipc.forwardStop(r.id) : ipc.forwardStart(r.id))
@@ -158,12 +159,12 @@ export function ForwardView() {
                 }}
               >
                 <Icon name={r.enabled ? "pause" : "play"} size={12} />
-                {r.enabled ? "停用" : "启用"}
+                {r.enabled ? tr("fwd.disable") : tr("fwd.enable")}
               </button>
               <button
                 className="ds-btn ds-btn--secondary ds-btn--sm"
                 type="button"
-                title="编辑该转发规则"
+                title={tr("fwd.editTitle")}
                 onClick={() => openEdit(r)}
               >
                 <Icon name="edit" size={12} />
@@ -172,19 +173,19 @@ export function ForwardView() {
               <button
                 className="ds-btn ds-btn--danger-subtle ds-btn--sm"
                 type="button"
-                title="删除该转发规则"
+                title={tr("fwd.deleteTitle")}
                 onClick={async () => {
                   const confirmed = await confirmDialog({
-                    title: "删除转发规则",
+                    title: tr("fwd.deleteRule"),
                     message: `确定删除规则「${r.name}」？`,
-                    confirmText: "删除",
+                    confirmText: tr("common.delete"),
                     danger: true,
                   });
                   if (!confirmed) return;
                   try {
                     await ipc.forwardDelete(r.id);
                     await load();
-                    toast.success("转发规则已删除");
+                    toast.success(tr("fwd.deleted"));
                   } catch (e) {
                     toast.error(String(e));
                   }
@@ -204,22 +205,22 @@ export function ForwardView() {
             ref={modalRef}
             role="dialog"
             aria-modal="true"
-            aria-label={editingId ? "编辑转发规则" : "新建转发规则"}
+            aria-label={editingId ? tr("fwd.editRule") : tr("fwd.newRule")}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
-              <span>{editingId ? "编辑转发规则" : "新建转发规则"}</span>
+              <span>{editingId ? tr("fwd.editRule") : tr("fwd.newRule")}</span>
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
-                title="关闭"
+                title={tr("common.close")}
                 onClick={() => setModalOpen(false)}
               >
                 <Icon name="x" size={14} />
               </button>
             </div>
             <div className="form-row">
-              <label>类型</label>
+              <label>{tr("fwd.type")}</label>
               <select
                 className="ds-select"
                 value={form.type}
@@ -231,16 +232,16 @@ export function ForwardView() {
               </select>
             </div>
             <div className="form-row">
-              <label>规则名称</label>
+              <label>{tr("fwd.name")}</label>
               <input
                 className="ds-input"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="如 MySQL 本地转发"
+                placeholder={tr("fwd.namePh")}
               />
             </div>
             <div className="form-row">
-              <label>本地地址</label>
+              <label>{tr("fwd.localAddr")}</label>
               <input
                 className="ds-input"
                 value={form.localHost ?? "127.0.0.1"}
@@ -248,7 +249,7 @@ export function ForwardView() {
               />
             </div>
             <div className="form-row">
-              <label>本地端口</label>
+              <label>{tr("fwd.localPort")}</label>
               <input
                 className="ds-input"
                 type="number"
@@ -264,16 +265,16 @@ export function ForwardView() {
             {form.type !== "dynamic" && (
               <>
                 <div className="form-row">
-                  <label>{form.type === "remote" ? "服务端监听地址" : "远程地址"}</label>
+                  <label>{form.type === "remote" ? tr("fwd.serverBindAddr") : tr("fwd.remoteAddr")}</label>
                   <input
                     className="ds-input"
                     value={form.remoteHost ?? ""}
                     onChange={(e) => setForm({ ...form, remoteHost: e.target.value })}
-                    placeholder={form.type === "remote" ? "留空默认 0.0.0.0" : "如 127.0.0.1"}
+                    placeholder={form.type === "remote" ? tr("fwd.bindAddrPh") : tr("fwd.remoteAddrPh")}
                   />
                 </div>
                 <div className="form-row">
-                  <label>{form.type === "remote" ? "服务端监听端口" : "远程端口"}</label>
+                  <label>{form.type === "remote" ? tr("fwd.serverBindPort") : tr("fwd.remotePort")}</label>
                   <input
                     className="ds-input"
                     type="number"
@@ -289,7 +290,7 @@ export function ForwardView() {
               </div>
             )}
             <div className="form-row">
-              <label>绑定会话</label>
+              <label>{tr("fwd.session")}</label>
               <select
                 className="ds-select"
                 value={form.sessionId ?? ""}
@@ -304,17 +305,13 @@ export function ForwardView() {
               </select>
             </div>
             <div className="modal-actions">
-              <button className="ds-btn ds-btn--secondary" type="button" title="取消：放弃本次修改" onClick={() => setModalOpen(false)}>
-                取消
-              </button>
+              <button className="ds-btn ds-btn--secondary" type="button" title={tr("fwd.cancelEdit")} onClick={() => setModalOpen(false)}>{tr("common.cancel")}</button>
               <button
                 className="ds-btn ds-btn--brand"
                 type="button"
-                title="保存转发规则"
+                title={tr("fwd.save")}
                 onClick={() => void save()}
-              >
-                保存
-              </button>
+              >{tr("fwd.save")}</button>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
+import { useT } from "../lib/i18n";
 import { useApp } from "../store/app";
 import { ipc, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import type { CommandHistory } from "../types";
@@ -27,6 +28,7 @@ function dedupHistory(list: CommandHistory[]): CommandHistory[] {
 }
 
 export function CommandInput() {
+  const t = useT();
   const open = useApp((s) => s.commandInputOpen);
   const setOpen = useApp((s) => s.setCommandInputOpen);
   const activeTabId = useApp((s) => s.activeTabId);
@@ -156,7 +158,7 @@ export function CommandInput() {
         <input
           ref={inputRef}
           type="text"
-          placeholder="输入命令..."
+          placeholder={t("cmdinput.placeholder")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKeyDown}
@@ -166,29 +168,29 @@ export function CommandInput() {
       <button
         className="ds-btn ds-btn--brand"
         type="button"
-        title="执行：将输入的命令发送到终端"
+        title={t("cmdinput.execTitle")}
         onClick={() => execute(value)}
         disabled={disabled}
       >
         <Icon name="send" size={13} />
-        执行
+        {t("cmdinput.exec")}
       </button>
       <div className="command-input__history">
         <button
           className="ds-btn ds-btn--secondary"
           type="button"
-          title="历史：查看并复用历史命令"
+          title={t("cmdinput.historyTitle")}
           onClick={toggleHistory}
           disabled={disabled}
         >
           <Icon name="clock" size={13} />
-          历史
+          {t("cmdinput.history")}
         </button>
         {histOpen && (
           <div className="command-input__popover" ref={popoverRef}>
             <div className="command-input__popover-head">
               <span className="command-input__popover-title">
-                历史命令（{history.length}）
+                {t("cmdinput.historyTitle2", { n: history.length })}
               </span>
             </div>
             <div className="ds-input command-input__popover-search">
@@ -198,7 +200,7 @@ export function CommandInput() {
               <input
                 ref={histSearchRef}
                 type="text"
-                placeholder="搜索历史命令…"
+                placeholder={t("cmdinput.searchPlaceholder")}
                 value={histQuery}
                 spellCheck={false}
                 onChange={(e) => setHistQuery(e.target.value)}
@@ -209,7 +211,7 @@ export function CommandInput() {
             </div>
             {filtered.length === 0 ? (
               <div className="command-input__popover-empty">
-                {histQuery.trim() ? "无匹配的历史命令" : "暂无历史记录"}
+                {histQuery.trim() ? t("cmdinput.noMatch") : t("cmdinput.noHistory")}
               </div>
             ) : (
               filtered.map((h) => (
@@ -217,7 +219,7 @@ export function CommandInput() {
                   key={h.id}
                   className="command-input__history-item"
                   onClick={() => reuseCommand(h.command)}
-                  title="点击填入输入框复用"
+                  title={t("cmdinput.reuseTitle")}
                 >
                   <span className="command-input__history-cmd">{h.command}</span>
                   <span className="command-input__history-time">
@@ -232,7 +234,7 @@ export function CommandInput() {
       <button
         className="ds-btn ds-btn--tertiary ds-btn--icon"
         type="button"
-        title="关闭命令输入条"
+        title={t("cmdinput.closeTitle")}
         onClick={() => setOpen(false)}
       >
         <Icon name="x" size={14} />

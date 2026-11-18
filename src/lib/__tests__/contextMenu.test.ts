@@ -29,4 +29,11 @@ describe("clampMenuPosition", () => {
       y: 8,
     });
   });
+
+  it("右下角同时溢出时双向收回", () => {
+    expect(clampMenuPosition(790, 590, 140, 152, 800, 600)).toEqual({
+      x: 652,
+      y: 440,
+    });
+  });
 });

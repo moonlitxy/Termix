@@ -43,10 +43,44 @@ struct GhAsset {
 const LATEST_URL: &str = "https://api.github.com/repos/moonlitxy/Termix/releases/latest";
 const USER_AGENT: &str = "Termix-Updater";
 
-fn http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+/// 镜像基址校验：仅允许 http(s)，统一补末尾 /（前端已规范过，这里是后端兜底）
+fn normalize_mirror_base(raw: &str) -> Result<String, String> {
+    let base = raw.trim();
+    if base.is_empty() {
+        return Err("镜像地址为空".to_string());
+    }
+    if !(base.starts_with("http://") || base.starts_with("https://")) {
+        return Err("镜像地址仅支持 http(s)".to_string());
+    }
+    if base.contains(char::is_whitespace) {
+        return Err("镜像地址含非法空白字符".to_string());
+    }
+    if base.ends_with('/') {
+        Ok(base.to_string())
+    } else {
+        Ok(format!("{base}/"))
+    }
+}
+
+/// 原 URL 套镜像前缀（如 https://gh-proxy.com/https://api.github.com/…）；
+/// 镜像为空表示直连，原样返回。
+fn apply_mirror(url: &str, mirror: Option<&str>) -> Result<String, String> {
+    match mirror.map(str::trim).filter(|m| !m.is_empty()) {
+        None => Ok(url.to_string()),
+        Some(raw) => Ok(format!("{}{url}", normalize_mirror_base(raw)?)),
+    }
+}
+
+fn http_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
         .user_agent(USER_AGENT)
-        .timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(20));
+    if let Some(p) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
+        let proxy =
+            reqwest::Proxy::all(p).map_err(|e| format!("代理地址无效（{p}）：{e}"))?;
+        builder = builder.proxy(proxy);
+    }
+    builder
         .build()
         .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))
 }
@@ -89,10 +123,14 @@ fn current_version() -> String {
 
 /// 查询 GitHub 最新 release，返回版本对比结果与安装包下载信息
 #[tauri::command]
-pub async fn check_update() -> Result<UpdateInfo, String> {
-    let client = http_client()?;
+pub async fn check_update(
+    mirror: Option<String>,
+    proxy: Option<String>,
+) -> Result<UpdateInfo, String> {
+    let client = http_client(proxy.as_deref())?;
+    let latest_url = apply_mirror(LATEST_URL, mirror.as_deref())?;
     let resp = client
-        .get(LATEST_URL)
+        .get(latest_url)
         .send()
         .await
         .map_err(|e| format!("检查更新失败（无法连接更新服务）：{e}"))?;
@@ -108,14 +146,16 @@ pub async fn check_update() -> Result<UpdateInfo, String> {
     let cur = current_version();
     let has_update = compare_versions(&latest, &cur) == Ordering::Greater;
     let asset = pick_asset(&gh.assets);
+    let asset_url = match asset {
+        Some(a) => apply_mirror(&a.browser_download_url, mirror.as_deref())?,
+        None => String::new(),
+    };
     Ok(UpdateInfo {
         current_version: cur,
         latest_version: latest,
         has_update,
         release_url: gh.html_url,
-        asset_url: asset
-            .map(|a| a.browser_download_url.clone())
-            .unwrap_or_default(),
+        asset_url,
         asset_name: asset.map(|a| a.name.clone()).unwrap_or_default(),
         release_notes: gh.body.unwrap_or_default(),
     })
@@ -123,17 +163,27 @@ pub async fn check_update() -> Result<UpdateInfo, String> {
 
 /// 后台下载安装包：立即返回，进度 / 完成 / 失败通过事件推送
 #[tauri::command]
-pub async fn download_update(app: AppHandle, url: String, file_name: String) -> Result<(), String> {
+pub async fn download_update(
+    app: AppHandle,
+    url: String,
+    file_name: String,
+    proxy: Option<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = run_download(&app, &url, &file_name).await {
+        if let Err(e) = run_download(&app, &url, &file_name, proxy.as_deref()).await {
             let _ = app.emit("update-download-error", json!({ "error": e }));
         }
     });
     Ok(())
 }
 
-async fn run_download(app: &AppHandle, url: &str, file_name: &str) -> Result<(), String> {
-    let client = http_client()?;
+async fn run_download(
+    app: &AppHandle,
+    url: &str,
+    file_name: &str,
+    proxy: Option<&str>,
+) -> Result<(), String> {
+    let client = http_client(proxy)?;
     let mut resp = client
         .get(url)
         .send()
@@ -264,5 +314,44 @@ mod tests {
         let asset = pick_asset(&assets).expect("should match an installer asset");
         let ext = if cfg!(target_os = "windows") { "exe" } else { "dmg" };
         assert!(asset.name.ends_with(ext));
+    }
+
+    #[test]
+    fn apply_mirror_prefixes_or_passes_through() {
+        // 直连：None 与空串都原样返回
+        assert_eq!(
+            apply_mirror("https://api.github.com/x", None).unwrap(),
+            "https://api.github.com/x"
+        );
+        assert_eq!(
+            apply_mirror("https://api.github.com/x", Some("  ")).unwrap(),
+            "https://api.github.com/x"
+        );
+        // 镜像：前缀拼接并补末尾斜杠
+        assert_eq!(
+            apply_mirror("https://api.github.com/x", Some("https://gh-proxy.com")).unwrap(),
+            "https://gh-proxy.com/https://api.github.com/x"
+        );
+        assert_eq!(
+            apply_mirror("https://a.b/f", Some("https://m.example.com/sub/")).unwrap(),
+            "https://m.example.com/sub/https://a.b/f"
+        );
+        // 非法镜像基址直接报错，不拼出坏 URL
+        assert!(apply_mirror("https://api.github.com/x", Some("ftp://m.example.com")).is_err());
+    }
+
+    #[test]
+    fn normalize_mirror_base_validates_scheme() {
+        assert_eq!(
+            normalize_mirror_base("https://gh-proxy.com").unwrap(),
+            "https://gh-proxy.com/"
+        );
+        assert_eq!(
+            normalize_mirror_base("https://gh-proxy.com/").unwrap(),
+            "https://gh-proxy.com/"
+        );
+        assert!(normalize_mirror_base("").is_err());
+        assert!(normalize_mirror_base("gh-proxy.com").is_err());
+        assert!(normalize_mirror_base("socks5://127.0.0.1:1080").is_err());
     }
 }

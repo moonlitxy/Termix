@@ -27,6 +27,14 @@ describe("searchPalette", () => {
     expect(res[0].id).toBe("1");
   });
 
+  it("标题完全相等时得分为 0", () => {
+    const res = searchPalette("web", "session", [
+      { id: "1", title: "Web" },
+      { id: "2", title: "Web Console" },
+    ]);
+    expect(res[0]).toMatchObject({ id: "1", score: 0 });
+  });
+
   it("限制返回数量", () => {
     const items = Array.from({ length: 20 }, (_, i) => ({ id: String(i), title: `cmd-${i}` }));
     expect(searchPalette("cmd", "history", items)).toHaveLength(12);

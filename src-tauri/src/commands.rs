@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use serde::Serialize;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
@@ -42,10 +43,12 @@ pub struct AppState {
     pub sftp: SftpService,
     pub forward: ForwardService,
     pub master: MasterService,
+    /// 应用数据目录：自动备份（backups/）落盘位置
+    pub data_dir: std::path::PathBuf,
 }
 
 impl AppState {
-    pub fn new(db: Db) -> Self {
+    pub fn new(db: Db, data_dir: std::path::PathBuf) -> Self {
         let ssh = Arc::new(SshManager::new());
         let sftp = SftpService::new(ssh.clone());
         let forward = ForwardService::new(ssh.clone());
@@ -55,6 +58,7 @@ impl AppState {
             sftp,
             forward,
             master: MasterService::new(),
+            data_dir,
         }
     }
 }
@@ -72,6 +76,8 @@ fn session_to_input(s: &Session) -> SessionInput {
         group_id: s.group_id.clone(),
         memo: s.memo.clone(),
         encoding: Some(s.encoding.clone()),
+        jump_session_id: s.jump_session_id.clone(),
+        agent_forward: Some(s.agent_forward),
     }
 }
 
@@ -350,7 +356,9 @@ pub async fn session_create(
         let key = state.master.key().ok_or_else(|| "已设置主密码，请先在设置中解锁".to_string())?;
         encrypt_session_fields(&mut input, &key);
     }
-    state.db.create_session(input)
+    let id = state.db.create_session(input)?;
+    snapshot_sessions(&state);
+    Ok(id)
 }
 
 #[tauri::command]
@@ -364,7 +372,9 @@ pub async fn session_update(
         let key = state.master.key().ok_or_else(|| "已设置主密码，请先在设置中解锁".to_string())?;
         encrypt_session_fields(&mut input, &key);
     }
-    state.db.update_session(&id, input)
+    state.db.update_session(&id, input)?;
+    snapshot_sessions(&state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -373,12 +383,16 @@ pub async fn session_move(
     group_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.db.move_session(&id, group_id.as_deref())
+    state.db.move_session(&id, group_id.as_deref())?;
+    snapshot_sessions(&state);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn session_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.delete_session(&id)
+    state.db.delete_session(&id)?;
+    snapshot_sessions(&state);
+    Ok(())
 }
 
 /// 导出全部会话与分组为 JSON 备份字符串。
@@ -386,9 +400,17 @@ pub async fn session_delete(id: String, state: State<'_, AppState>) -> Result<()
 /// 未解锁或未设置主密码时，导出数据库中当前存储的值。
 #[tauri::command]
 pub async fn sessions_export(state: State<'_, AppState>) -> Result<String, String> {
-    let groups = state.db.list_groups()?;
-    let mut sessions = state.db.list_sessions()?;
-    if let Some(key) = state.master.key() {
+    let out = build_session_export(&state.db, &state.master)?;
+    log::info!("export: {} sessions, {} groups", out.sessions.len(), out.groups.len());
+    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())
+}
+
+/// 组装备份内容（导出与自动备份共用）：分组 + 会话列表。
+/// 主密码已解锁时密码字段解密为明文，否则保留数据库当前存储值。
+fn build_session_export(db: &Db, master: &MasterService) -> Result<SessionExport, String> {
+    let groups = db.list_groups()?;
+    let mut sessions = db.list_sessions()?;
+    if let Some(key) = master.key() {
         for s in sessions.iter_mut() {
             decrypt_session_secrets(s, &key)?;
         }
@@ -397,15 +419,13 @@ pub async fn sessions_export(state: State<'_, AppState>) -> Result<String, Strin
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    let out = SessionExport {
+    Ok(SessionExport {
         app: "termix".into(),
         version: 1,
         exported_at,
         groups,
         sessions,
-    };
-    log::info!("export: {} sessions, {} groups", out.sessions.len(), out.groups.len());
-    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())
+    })
 }
 
 /// 从 JSON 备份导入会话与分组。
@@ -440,30 +460,288 @@ pub async fn sessions_import(
     let mut used_session_names: std::collections::HashSet<String> =
         existing_sessions.iter().map(|s| s.name.clone()).collect();
     for s in &parsed.sessions {
-        if !used_session_names.insert(s.name.clone()) {
-            sessions_skipped += 1;
-            continue;
-        }
         let mut input = session_to_input(s);
         input.group_id = s.group_id.as_ref().and_then(|old| group_map.get(old).cloned());
-        if state.db.get_setting("master_salt").is_some() {
-            let key = master_key.ok_or_else(|| "已设置主密码，请先在设置中解锁".to_string())?;
-            secrets_cleared += sanitize_import_secrets(&mut input, Some(&key));
-            encrypt_session_fields(&mut input, &key);
-        } else {
-            secrets_cleared += sanitize_import_secrets(&mut input, None);
+        let has_salt = state.db.get_setting("master_salt").is_some();
+        match insert_imported_session(
+            &state.db,
+            master_key.as_ref(),
+            has_salt,
+            input,
+            &mut used_session_names,
+        )? {
+            ImportInsert::Created(cleared) => {
+                sessions_created += 1;
+                secrets_cleared += cleared;
+            }
+            ImportInsert::Skipped => sessions_skipped += 1,
         }
-        state.db.create_session(input)?;
-        sessions_created += 1;
     }
     log::info!(
         "import: groups_created={groups_created}, sessions_created={sessions_created}, sessions_skipped={sessions_skipped}, secrets_cleared={secrets_cleared}"
     );
+    // 导入是批量变更：落一次自动备份
+    snapshot_sessions(&state);
     Ok(SessionImportResult {
         groups_created,
         sessions_created,
         sessions_skipped,
         secrets_cleared,
+    })
+}
+
+/// 导入单条会话的落库结果
+enum ImportInsert {
+    Created(usize),
+    Skipped,
+}
+
+/// 导入落库共用：同名跳过；密文不可用则清空；
+/// 已设置主密码时必须先解锁（明文按现有策略加密存储）。
+/// 返回落库结果（新建附带被清空的秘密字段数）。
+fn insert_imported_session(
+    db: &Db,
+    master_key: Option<&crypto::MasterKey>,
+    has_master_salt: bool,
+    mut input: SessionInput,
+    used_session_names: &mut std::collections::HashSet<String>,
+) -> Result<ImportInsert, String> {
+    if !used_session_names.insert(input.name.clone()) {
+        return Ok(ImportInsert::Skipped);
+    }
+    let cleared = if has_master_salt {
+        let key = master_key.ok_or_else(|| "已设置主密码，请先在设置中解锁".to_string())?;
+        let n = sanitize_import_secrets(&mut input, Some(key));
+        encrypt_session_fields(&mut input, key);
+        n
+    } else {
+        sanitize_import_secrets(&mut input, None)
+    };
+    db.create_session(input)?;
+    Ok(ImportInsert::Created(cleared))
+}
+
+/// ---- 会话自动备份 ----
+///
+/// 每次会话/分组变更后落一次 JSON 快照到 `<data_dir>/backups/`，
+/// 文件名 `sessions-<毫秒时间戳>-<原因>.json`，仅保留最新 BACKUP_KEEP 份。
+/// 内容与手动导出一致（主密码未解锁时密码字段保持加密存储值）。
+const BACKUP_KEEP: usize = 10;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupFile {
+    pub name: String,
+    pub size: u64,
+    /// 文件修改时间（毫秒时间戳，前端格式化展示）
+    pub modified_ms: i64,
+}
+
+fn backup_dir(state: &State<'_, AppState>) -> std::path::PathBuf {
+    state.data_dir.join("backups")
+}
+
+/// 备份保留：已按新到旧排序的文件名中，超出保留数的待删列表（纯函数，可测试）。
+fn select_backup_prune(sorted_desc: &[String], keep: usize) -> Vec<String> {
+    sorted_desc.iter().skip(keep).cloned().collect()
+}
+
+/// 会话变更后调用：失败只记日志，不阻断主流程。
+fn snapshot_sessions(state: &State<'_, AppState>) {
+    if let Err(e) = snapshot_sessions_inner(state, "auto") {
+        log::warn!("auto backup failed: {e}");
+    }
+}
+
+fn snapshot_sessions_inner(state: &State<'_, AppState>, reason: &str) -> Result<(), String> {
+    let out = build_session_export(&state.db, &state.master)?;
+    write_backup_snapshot(&backup_dir(state), &out, reason, BACKUP_KEEP).map(|_| ())
+}
+
+/// 落一份备份快照并按保留数滚动清理（纯文件操作，便于单元测试）。
+fn write_backup_snapshot(
+    dir: &std::path::Path,
+    out: &SessionExport,
+    reason: &str,
+    keep: usize,
+) -> Result<String, String> {
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let name = format!("sessions-{millis:015}-{reason}.json");
+    let json = serde_json::to_string_pretty(out).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(&name), json).map_err(|e| e.to_string())?;
+    // 滚动保留：按文件名倒序（毫秒时间戳同序）删超出的
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("sessions-") && n.ends_with(".json"))
+        .collect();
+    names.sort();
+    names.reverse();
+    for stale in select_backup_prune(&names, keep) {
+        if let Err(e) = std::fs::remove_file(dir.join(&stale)) {
+            log::warn!("prune backup {stale} failed: {e}");
+        }
+    }
+    log::info!("backup snapshot saved: {name}");
+    Ok(name)
+}
+
+/// 列出本地自动/手动备份（新到旧）。
+#[tauri::command]
+pub async fn backup_list(state: State<'_, AppState>) -> Result<Vec<BackupFile>, String> {
+    let dir = backup_dir(&state);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.to_string()),
+    };
+    let mut out: Vec<BackupFile> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name().to_string_lossy().starts_with("sessions-")
+                && e.path().extension().is_some_and(|x| x == "json")
+        })
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            Some(BackupFile {
+                name: e.file_name().to_string_lossy().into_owned(),
+                size: meta.len(),
+                modified_ms: meta
+                    .modified()
+                    .ok()?
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(out)
+}
+
+/// 从指定备份恢复（与导入同一套去重/加密规则；恢复前先落一次当前快照兜底）。
+#[tauri::command]
+pub async fn backup_restore(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<SessionImportResult, String> {
+    if name.contains('/') || name.contains('\\') || !name.starts_with("sessions-") {
+        return Err("非法备份文件名".to_string());
+    }
+    let path = backup_dir(&state).join(&name);
+    if !path.starts_with(backup_dir(&state)) {
+        return Err("非法备份路径".to_string());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取备份失败：{e}"))?;
+    // 先给当前数据落快照，恢复出错/反悔可回滚
+    if let Err(e) = snapshot_sessions_inner(&state, "before-restore") {
+        log::warn!("pre-restore snapshot failed: {e}");
+    }
+    sessions_import(content, state).await
+}
+
+/// 手动立即备份一次。
+#[tauri::command]
+pub async fn backup_now(state: State<'_, AppState>) -> Result<String, String> {
+    snapshot_sessions_inner(&state, "manual")?;
+    Ok("已备份当前会话配置".to_string())
+}
+
+/// 读取本机默认 `~/.ssh/config` 内容（不存在则报错，前端引导改用文件选择）。
+#[tauri::command]
+pub async fn ssh_config_read_default() -> Result<String, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "无法定位用户主目录".to_string())?;
+    let path = std::path::Path::new(&home).join(".ssh").join("config");
+    std::fs::read_to_string(&path)
+        .map_err(|_| "未找到 ~/.ssh/config（可改用文件选择导入）".to_string())
+}
+
+/// 导入 ssh config 文本：解析 Host 块批量建会话（同名跳过），
+/// 有 IdentityFile 的走私钥认证，否则走密码认证（密码留空，连接时填写）。
+/// 成功导入的会话统一归入「SSH 导入」分组，方便辨认整理。
+#[tauri::command]
+pub async fn ssh_config_import(
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<SessionImportResult, String> {
+    use crate::sshconfig::parse_ssh_config;
+    let hosts = parse_ssh_config(&content);
+    if hosts.is_empty() {
+        return Err("未解析到可用主机（仅支持 Host/HostName/User/Port/IdentityFile）".to_string());
+    }
+    let existing_sessions = state.db.list_sessions()?;
+    let mut used_session_names: std::collections::HashSet<String> =
+        existing_sessions.iter().map(|s| s.name.clone()).collect();
+    let master_key = state.master.key();
+    let has_salt = state.db.get_setting("master_salt").is_some();
+    let mut sessions_created = 0;
+    let mut sessions_skipped = 0;
+    let mut group_id: Option<String> = None;
+    for h in &hosts {
+        if used_session_names.contains(&h.name) {
+            sessions_skipped += 1;
+            continue;
+        }
+        let (auth_type, private_key_path) = match &h.identity_file {
+            Some(p) => ("key".to_string(), Some(p.clone())),
+            None => ("password".to_string(), None),
+        };
+        // 首个待建会话触发分组准备（同名复用，不存在则创建）
+        let gid = match group_id.clone() {
+            Some(g) => Some(g),
+            None => {
+                let existing = state.db.list_groups()?;
+                let g = match existing.iter().find(|g| g.name == "SSH 导入") {
+                    Some(g) => g.id.clone(),
+                    None => state.db.create_group(crate::models::GroupInput {
+                        name: "SSH 导入".into(),
+                        parent_id: None,
+                    })?,
+                };
+                group_id = Some(g.clone());
+                Some(g)
+            }
+        };
+        let input = crate::models::SessionInput {
+            name: h.name.clone(),
+            host: h.hostname.clone(),
+            port: h.port,
+            username: h.user.clone().unwrap_or_default(),
+            auth_type,
+            password: None,
+            private_key_path,
+            private_key_passphrase: None,
+            group_id: gid,
+            memo: Some("从 ssh config 导入".into()),
+            encoding: Some("utf-8".into()),
+            jump_session_id: None,
+            agent_forward: None,
+        };
+        match insert_imported_session(
+            &state.db,
+            master_key.as_ref(),
+            has_salt,
+            input,
+            &mut used_session_names,
+        )? {
+            ImportInsert::Created(_) => sessions_created += 1,
+            ImportInsert::Skipped => sessions_skipped += 1,
+        }
+    }
+    log::info!("ssh-config import: created={sessions_created}, skipped={sessions_skipped}");
+    snapshot_sessions(&state);
+    Ok(SessionImportResult {
+        groups_created: if sessions_created > 0 { 1 } else { 0 },
+        sessions_created,
+        sessions_skipped,
+        secrets_cleared: 0,
     })
 }
 
@@ -477,12 +755,16 @@ pub async fn group_create(
     input: GroupInput,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    state.db.create_group(input)
+    let id = state.db.create_group(input)?;
+    snapshot_sessions(&state);
+    Ok(id)
 }
 
 #[tauri::command]
 pub async fn group_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.delete_group(&id)
+    state.db.delete_group(&id)?;
+    snapshot_sessions(&state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -509,11 +791,44 @@ pub async fn session_connect(
         return Err("会话已加密，请在「设置 → 安全」中输入主密码解锁后重试".into());
     }
     let known_fingerprint = state.db.get_host_key(&session.host, session.port)?;
+    // 跳板机：解析为另一已保存会话（同样走主密码解密与主机密钥查询）
+    let jump = match session.jump_session_id.as_deref().filter(|v| !v.is_empty()) {
+        None => None,
+        Some(jump_id) => {
+            let mut jump_session = state
+                .db
+                .list_sessions()?
+                .into_iter()
+                .find(|s| s.id == jump_id)
+                .ok_or_else(|| "跳板机会话不存在（可能已被删除）".to_string())?;
+            if let Some(key) = state.master.key() {
+                decrypt_session_secrets(&mut jump_session, &key)?;
+            } else if jump_session.password.as_deref().map(crypto::is_encrypted).unwrap_or(false)
+                || jump_session
+                    .private_key_passphrase
+                    .as_deref()
+                    .map(crypto::is_encrypted)
+                    .unwrap_or(false)
+            {
+                return Err("跳板机会话已加密，请先在「设置 → 安全」中输入主密码解锁后重试".into());
+            }
+            if jump_session.id == id {
+                return Err("跳板机不能是自身".to_string());
+            }
+            let jump_fp = state
+                .db
+                .get_host_key(&jump_session.host, jump_session.port)?;
+            Some(crate::ssh::JumpTarget {
+                session: jump_session,
+                known_fingerprint: jump_fp,
+            })
+        }
+    };
     // 本次连接独立的主机密钥校验容器：并发连接互不干扰
     let pending = Arc::new(Mutex::new(None));
     match state
         .ssh
-        .connect(session.clone(), known_fingerprint, pending.clone())
+        .connect(session.clone(), jump, known_fingerprint, pending.clone())
         .await
     {
         Ok(connection_id) => {
@@ -535,6 +850,22 @@ pub async fn session_connect(
             Err(e)
         }
     }
+}
+
+/// 前端回填键盘交互认证（2FA）的应答
+#[tauri::command]
+pub async fn auth_respond(
+    auth_id: String,
+    responses: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.ssh.auth_respond(&auth_id, responses).await
+}
+
+/// 前端取消键盘交互认证（2FA）
+#[tauri::command]
+pub async fn auth_cancel(auth_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.ssh.auth_cancel(&auth_id).await
 }
 
 /// 信任并保存指定主机的主机密钥指纹（TOFU 首次确认）。
@@ -1226,6 +1557,8 @@ tmpfs           1000000    100000     900000  10% /run";
             group_id: None,
             memo: None,
             encoding: None,
+            jump_session_id: None,
+            agent_forward: None,
         }
     }
 
@@ -1468,5 +1801,60 @@ tmpfs           1000000    100000     900000  10% /run";
         );
         // 不同端口独立
         assert_eq!(db.get_host_key("192.168.1.1", 2222).unwrap(), None);
+    }
+
+    /// 备份滚动保留：只删超出保留数的新到旧尾部
+    #[test]
+    fn backup_prune_keeps_newest() {
+        let names: Vec<String> = (1..=12)
+            .rev()
+            .map(|i| format!("sessions-{i:015}-auto.json"))
+            .collect();
+        let stale = select_backup_prune(&names, 10);
+        assert_eq!(stale.len(), 2);
+        assert!(stale.contains(&"sessions-000000000000002-auto.json".to_string()));
+        assert!(stale.contains(&"sessions-000000000000001-auto.json".to_string()));
+        // 不足保留数时不删
+        assert!(select_backup_prune(&names[..5].to_vec(), 10).is_empty());
+    }
+
+    /// 快照落盘：文件名带原因、内容可反序列化回会话，超保留数自动删除最旧。
+    #[test]
+    fn backup_snapshot_writes_and_prunes() {
+        let dir = std::env::temp_dir().join(format!(
+            "termix-backup-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let out = SessionExport {
+            app: "termix".into(),
+            version: 1,
+            exported_at: 1,
+            groups: vec![],
+            sessions: vec![],
+        };
+        // 首份：文件名带原因，内容可读回
+        let name = write_backup_snapshot(&dir, &out, "manual", 3).expect("write snapshot");
+        assert!(name.starts_with("sessions-"), "unexpected name: {name}");
+        assert!(name.ends_with("-manual.json"), "unexpected name: {name}");
+        let raw = std::fs::read_to_string(dir.join(&name)).unwrap();
+        let parsed: SessionExport = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed.app, "termix");
+        assert_eq!(parsed.version, 1);
+
+        // 再写 4 份（同一毫秒可能同名，先等待确保时间戳推进）
+        for i in 0..4 {
+            std::thread::sleep(std::time::Duration::from_millis(3));
+            write_backup_snapshot(&dir, &out, &format!("auto{i}"), 3).unwrap();
+        }
+        let count = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".json"))
+            .count();
+        assert_eq!(count, 3, "should keep only newest 3 snapshots");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

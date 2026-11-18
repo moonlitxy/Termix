@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
+import { loadSettings } from "../lib/settings";
+import { resolveUpdateEndpoint } from "../lib/updateSource";
 import type { UpdateInfo, UpdateProgressEvent } from "../types";
 
 /** 用户选择「忽略此版本」时记录的版本号（localStorage，避免每次启动重复打扰） */
@@ -11,6 +13,13 @@ function getSkipped(): string | null {
   } catch {
     return null;
   }
+}
+
+/** 本次更新走的通道（直连/镜像/代理），由设置页配置决定 */
+function currentEndpoint(): { mirror: string | null; proxy: string | null } {
+  const r = resolveUpdateEndpoint(loadSettings());
+  if ("error" in r) return { mirror: null, proxy: null };
+  return { mirror: r.mirror || null, proxy: r.proxy || null };
 }
 
 interface UpdateState {
@@ -49,7 +58,8 @@ export const useUpdate = create<UpdateState>((set, get) => ({
   check: async () => {
     set({ checking: true, error: null });
     try {
-      const info = await ipc.checkUpdate();
+      const ep = currentEndpoint();
+      const info = await ipc.checkUpdate(ep.mirror, ep.proxy);
       set({ info, checking: false });
       return info;
     } catch (e) {
@@ -73,7 +83,8 @@ export const useUpdate = create<UpdateState>((set, get) => ({
     if (!info?.hasUpdate || !info.assetUrl) return;
     set({ downloading: true, progress: 0, downloadedPath: null, error: null });
     try {
-      await ipc.downloadUpdate(info.assetUrl, info.assetName);
+      const ep = currentEndpoint();
+      await ipc.downloadUpdate(info.assetUrl, info.assetName, ep.proxy);
     } catch (e) {
       set({ downloading: false, error: String(e) });
     }

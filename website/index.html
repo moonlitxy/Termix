@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Termix — 轻量跨平台 SSH 终端</title>
+<meta name="description" content="Termix 是一款基于 Tauri 2 的轻量级跨平台 SSH 客户端：多标签终端、SFTP、端口转发、系统监控，安装包 5–15MB。" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="nav">
+  <div class="wrap nav__inner">
+    <a class="brand" href="#top">
+      <span class="brand__mark">ᐳ_</span>
+      <span class="brand__name">Termix</span>
+    </a>
+    <nav class="nav__links">
+      <a href="#features" data-i18n="nav.features">功能</a>
+      <a href="#security" data-i18n="nav.security">安全</a>
+      <a href="#download" data-i18n="nav.download">下载</a>
+      <a href="#faq" data-i18n="nav.faq">常见问题</a>
+      <button id="lang-toggle" class="lang" type="button" aria-label="Switch language">EN</button>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap hero__inner">
+      <div class="hero__copy">
+        <span class="badge" data-i18n="hero.badge">Tauri 2 · Rust · React</span>
+        <h1 data-i18n="hero.title">把 SSH 运维，收进一个窗口</h1>
+        <p class="hero__sub" data-i18n="hero.sub">
+          多标签终端、SFTP、端口转发与系统监控一体化。安装包 5–15MB，内存约为 Electron 客户端的三分之一。
+        </p>
+        <div class="hero__actions">
+          <a class="btn btn--primary" href="https://github.com/moonlitxy/Termix/releases/latest" data-i18n="hero.download">
+            下载最新版
+          </a>
+          <a class="btn btn--ghost" href="https://github.com/moonlitxy/Termix" data-i18n="hero.github">查看源码</a>
+        </div>
+        <ul class="hero__meta">
+          <li data-i18n="hero.meta1">macOS · Windows</li>
+          <li data-i18n="hero.meta2">本地存储，无遥测</li>
+          <li data-i18n="hero.meta3">中英双语界面</li>
+        </ul>
+      </div>
+      <figure class="hero__shot">
+        <img src="assets/termix-main.png" alt="Termix 主界面：终端、文件面板与服务器概览" loading="eager" />
+      </figure>
+    </div>
+  </section>
+
+  <section id="features" class="section">
+    <div class="wrap">
+      <h2 data-i18n="features.title">一个工具，覆盖日常运维</h2>
+      <p class="section__sub" data-i18n="features.sub">不做大而全，只把高频路径做顺。</p>
+      <div class="grid">
+        <article class="card">
+          <h3 data-i18n="f.term.title">多标签终端</h3>
+          <p data-i18n="f.term.desc">分屏、复制标签、终端内搜索、保存日志；断线自动重连，心跳保活。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="f.sftp.title">SFTP 与本地文件</h3>
+          <p data-i18n="f.sftp.desc">先出列表再补目录大小，大目录秒开；断点续传、传输队列、双向拖拽。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="f.fwd.title">三类端口转发</h3>
+          <p data-i18n="f.fwd.desc">本地 / 远程 / 动态 SOCKS5，规则随时启停，端口占用提前提示。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="f.mon.title">系统监控</h3>
+          <p data-i18n="f.mon.desc">CPU 占比曲线、内存/磁盘统一大单位显示，进程 Top 与磁盘分区一览。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="f.auth.title">认证方式齐全</h3>
+          <p data-i18n="f.auth.desc">密码、私钥、键盘交互（2FA）、SSH Agent，以及一级跳板机与 Agent 转发。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="f.migrate.title">迁移无痛</h3>
+          <p data-i18n="f.migrate.desc">一键导入 ~/.ssh/config；会话变更自动备份，误删可一键恢复。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="security" class="section section--alt">
+    <div class="wrap two-col">
+      <div>
+        <h2 data-i18n="sec.title">安全与数据，都在你手里</h2>
+        <ul class="checklist">
+          <li data-i18n="sec.1">主密码采用 PBKDF2 派生 + AES-256-GCM 加密存储密码与私钥口令</li>
+          <li data-i18n="sec.2">主机密钥 TOFU 校验，指纹变更强制二次确认</li>
+          <li data-i18n="sec.3">会话与分组全部保存在本机 SQLite，不上传云端</li>
+          <li data-i18n="sec.4">内置 10 份滚动备份，导入导出全程本地完成</li>
+          <li data-i18n="sec.5">更新支持直连 / 镜像 / 代理三种通道，可自行验证连通性</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3 data-i18n="sec.panelTitle">安装包对比</h3>
+        <div class="bars">
+          <div class="bar">
+            <span>Termix</span>
+            <div class="bar__track"><div class="bar__fill" style="width:22%"></div></div>
+            <em data-i18n="sec.size1">5–15 MB</em>
+          </div>
+          <div class="bar">
+            <span data-i18n="sec.size2Label">Electron 同类</span>
+            <div class="bar__track"><div class="bar__fill bar__fill--dim" style="width:100%"></div></div>
+            <em data-i18n="sec.size2">80 MB+</em>
+          </div>
+        </div>
+        <p class="panel__note" data-i18n="sec.note">同一台机器实测：启动更快，常驻内存约为 Electron 客户端的三分之一。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="section">
+    <div class="wrap download">
+      <h2 data-i18n="dl.title">下载 Termix</h2>
+      <p class="section__sub" data-i18n="dl.sub">选择你的平台，安装包由 GitHub Releases 提供。</p>
+      <div class="download__cards">
+        <a class="dl-card" href="https://github.com/moonlitxy/Termix/releases/latest">
+          <span class="dl-card__os">macOS</span>
+          <span class="dl-card__fmt">.dmg · Apple Silicon / Intel</span>
+          <span class="dl-card__cta" data-i18n="dl.mac">下载 macOS 版</span>
+        </a>
+        <a class="dl-card" href="https://github.com/moonlitxy/Termix/releases/latest">
+          <span class="dl-card__os">Windows</span>
+          <span class="dl-card__fmt">.exe · <span data-i18n="dl.winFmt">NSIS 安装包</span></span>
+          <span class="dl-card__cta" data-i18n="dl.win">下载 Windows 版</span>
+        </a>
+      </div>
+      <p class="download__hint" data-i18n="dl.hint">首次打开若提示未验证开发者，请在「系统设置 → 隐私与安全性」中允许。</p>
+    </div>
+  </section>
+
+  <section id="faq" class="section section--alt">
+    <div class="wrap">
+      <h2 data-i18n="faq.title">常见问题</h2>
+      <div class="faq">
+        <details>
+          <summary data-i18n="faq.q1">会收集我的数据吗？</summary>
+          <p data-i18n="faq.a1">不会。Termix 没有遥测与账号体系，连接信息、密码和备份都只保存在本机。</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q2">支持 2FA 和跳板机吗？</summary>
+          <p data-i18n="faq.a2">支持。键盘交互认证会在连接时提示输入验证码；跳板机可选任意已保存会话（仅一级）。</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q3">能导入原有 SSH 配置吗？</summary>
+          <p data-i18n="faq.a3">可以。一键读取 ~/.ssh/config，或选择配置文件导入，自动识别 Host / HostName / User / Port / IdentityFile。</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q4">更新失败怎么办？</summary>
+          <p data-i18n="faq.a4">在「设置 → 软件更新」切换镜像或配置代理，点「测试连接」确认可用后再更新。</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer__inner">
+    <span>© <span id="year"></span> Termix</span>
+    <nav>
+      <a href="https://github.com/moonlitxy/Termix" data-i18n="footer.repo">GitHub</a>
+      <a href="https://github.com/moonlitxy/Termix/releases" data-i18n="footer.releases">版本发布</a>
+      <a href="https://github.com/moonlitxy/Termix/issues" data-i18n="footer.issues">问题反馈</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="i18n.js"></script>
+</body>
+</html>

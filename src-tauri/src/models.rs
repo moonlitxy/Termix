@@ -15,6 +15,12 @@ pub struct Session {
     pub group_id: Option<String>,
     pub memo: Option<String>,
     pub encoding: String,
+    /// 跳板机：复用另一已保存会话先连跳板，再经 direct-tcpip 到目标
+    #[serde(default)]
+    pub jump_session_id: Option<String>,
+    /// 转发本地 SSH Agent 到远端（ssh -A 等价能力）
+    #[serde(default)]
+    pub agent_forward: bool,
     pub created_at: i64,
     pub last_connected_at: Option<i64>,
 }
@@ -33,6 +39,8 @@ pub struct SessionInput {
     pub group_id: Option<String>,
     pub memo: Option<String>,
     pub encoding: Option<String>,
+    pub jump_session_id: Option<String>,
+    pub agent_forward: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +222,8 @@ mod tests {
             group_id: Some("g1".into()),
             memo: None,
             encoding: "utf-8".into(),
+            jump_session_id: None,
+            agent_forward: false,
             created_at: 123,
             last_connected_at: None,
         }
