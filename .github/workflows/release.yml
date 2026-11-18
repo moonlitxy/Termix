@@ -95,6 +95,28 @@ jobs:
       - name: Build DMG
         run: npm run tauri build -- --bundles dmg
 
+      # 硬性校验：DMG 内的 App 必须有签名（ad-hoc 或 Developer ID）。
+      # Apple Silicon 无法运行未签名 App，缺签名直接判失败，避免发出打不开的包。
+      - name: Verify app inside DMG is signed
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n1)"
+          MOUNT="$(hdiutil attach -nobrowse -readonly "$DMG" | tail -n1 | awk -F'\t' '{print $3}')"
+          trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+          BIN="$MOUNT/Termix.app/Contents/MacOS/termix"
+          file "$BIN"
+          file "$BIN" | grep -q arm64 || { echo "::error::DMG does not contain an arm64 binary"; exit 1; }
+          # 拷贝出 bundle 再校验：bundle 级校验会因缺少 CodeResources 报错（Tauri 未公证包的正常形态），
+          # 而 Mach-O 自身的 ad-hoc 签名才是能否在 Apple Silicon 上运行的关键。
+          cp "$BIN" /tmp/termix-bin-check
+          codesign -dvv /tmp/termix-bin-check 2>&1 | tee /tmp/codesign.txt
+          codesign --verify --verbose=2 /tmp/termix-bin-check
+          if ! grep -qE "adhoc|Authority=" /tmp/codesign.txt; then
+            echo "::error::Executable inside DMG has no code signature (Apple Silicon cannot run it)."
+            exit 1
+          fi
+
       # 配置了签名身份时，验证 DMG 已装订公证票据（失败即发版失败，避免静默发出未公证包）
       - name: Verify notarization ticket
         if: steps.signing.outputs.signed == 'true'
