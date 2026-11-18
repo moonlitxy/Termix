@@ -40,15 +40,6 @@ jobs:
     runs-on: macos-latest
     needs: guard
     if: needs.guard.outputs.on_main == 'true'
-    # secrets 上下文不能用在 if 表达式里，先映射到 env 再判断；
-    # Tauri CLI 会自动导入 APPLE_CERTIFICATE 并完成签名 + 公证 + 装订。
-    env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,13 +56,48 @@ jobs:
 
       - run: npm ci
 
+      # 只有 secrets 非空时才导出签名变量。
+      # 注意：不能把空的 APPLE_CERTIFICATE 放进 env——Tauri 会把它当成“要导入证书”，
+      # 进而执行 security import 并失败（未配置签名时发版失败的根因）。
+      - id: signing
+        name: Configure Apple signing (optional)
+        shell: bash
+        env:
+          CERT_B64: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PWD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGN_ID: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID_S: ${{ secrets.APPLE_ID }}
+          APPLE_PWD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          add() {
+            local name="$1" value="$2"
+            if [ -n "$value" ]; then
+              printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+            fi
+          }
+          add APPLE_CERTIFICATE "$CERT_B64"
+          add APPLE_CERTIFICATE_PASSWORD "$CERT_PWD"
+          add APPLE_SIGNING_IDENTITY "$SIGN_ID"
+          add APPLE_ID "$APPLE_ID_S"
+          add APPLE_PASSWORD "$APPLE_PWD"
+          add APPLE_TEAM_ID "$TEAM"
+          if [ -n "$SIGN_ID" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Signed build enabled ($SIGN_ID)"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No signing secrets — building unsigned installer"
+          fi
+
       # secrets 齐全时 Tauri 自动签名 + 公证；缺失时构建未签名包，不阻断发版
       - name: Build DMG
         run: npm run tauri build -- --bundles dmg
 
       # 配置了签名身份时，验证 DMG 已装订公证票据（失败即发版失败，避免静默发出未公证包）
       - name: Verify notarization ticket
-        if: env.APPLE_SIGNING_IDENTITY != ''
+        if: steps.signing.outputs.signed == 'true'
         run: |
           DMG="$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n1)"
           echo "verifying $DMG"
