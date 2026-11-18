@@ -101,7 +101,7 @@
 
 `release.yml` 的 `guard` 会校验 tag 所属提交是否在 `main`：
 在 dev 上打 tag 不会报错，只是不产出产物；想让 tag 真正发版，必须先合并到 `main`。
-建议再在仓库 Settings → Rules → Tags 里把 `v*` 限制为维护者创建，作为第二道保险。
+tag 创建不做任何限制，任何分支都可以打 tag，是否发版只由「tag 是否在 main 上」决定。
 
 ## 快速开始
 
