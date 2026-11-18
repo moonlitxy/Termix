@@ -10,10 +10,29 @@ permissions:
   contents: write
 
 jobs:
+  # 发版闸门：tag 必须指向 main 上的提交。
+  # dev（开发分支）打 tag 不会触发构建，只有 main 合并后再打 tag 才发版。
+  guard:
+    name: Ensure tag is on main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify tag commit is on main
+        shell: bash
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release tag $GITHUB_REF_NAME is not on main. Merge to main before tagging."
+            exit 1
+          fi
+
   # macOS：构建 DMG 安装包
   build-macos:
     name: Build macOS DMG
     runs-on: macos-latest
+    needs: guard
     # secrets 上下文不能用在 if 表达式里，先映射到 env 再判断；
     # Tauri CLI 会自动导入 APPLE_CERTIFICATE 并完成签名 + 公证 + 装订。
     env:
@@ -62,6 +81,7 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
+    needs: guard
     # 同上：secrets 先映射到 env，step 级 if 才可用
     env:
       WINDOWS_CERTIFICATE_B64: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -123,6 +143,7 @@ jobs:
   build-source:
     name: Package Source Code
     runs-on: ubuntu-latest
+    needs: guard
     steps:
       - uses: actions/checkout@v4
 
