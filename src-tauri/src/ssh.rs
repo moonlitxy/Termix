@@ -549,22 +549,20 @@ impl SshManager {
 
     /// SSH Agent 认证：枚举本地 agent 身份逐个尝试公钥认证。
     /// 无 agent / 无身份时给出可操作的中文错误，而不是笼统的失败。
-    async fn authenticate_with_agent(
-        &self,
+    /// 用已连接 agent 中的身份逐个尝试公钥认证（Unix / Windows 共用）。
+    async fn try_agent_identities<S>(
         session: &mut client::Handle<SshClient>,
-        s: &Session,
-    ) -> Result<bool, String> {
-        use russh::keys::agent::client::AgentClient;
-        let mut agent = AgentClient::connect_env().await.map_err(|e| {
-            format!("连接本地 SSH Agent 失败（是否已执行 ssh-add？）：{e}")
-        })?;
-        let identities = agent.request_identities().await.map_err(|e| {
-            format!("读取 SSH Agent 身份失败：{e}")
-        })?;
+        user: &str,
+        identities: &[russh::keys::agent::AgentIdentity],
+        agent: &mut S,
+    ) -> bool
+    where
+        S: russh::Signer,
+    {
         if identities.is_empty() {
-            return Err("SSH Agent 中没有可用密钥（请先 ssh-add 添加）".to_string());
+            return false;
         }
-        for id in &identities {
+        for id in identities {
             let key = match id {
                 russh::keys::agent::AgentIdentity::PublicKey { key, .. } => key.clone(),
                 // 证书身份走公钥流程无意义，直接跳过
@@ -576,19 +574,82 @@ impl SshManager {
             } else {
                 None
             };
-            match session
-                .authenticate_publickey_with(&s.username, key, hash_alg, &mut agent)
+            if let Ok(result) = session
+                .authenticate_publickey_with(user, key, hash_alg, agent)
                 .await
             {
-                Ok(result) if result.success() => return Ok(true),
-                Ok(_) => continue,
-                Err(e) => {
-                    log::debug!("ssh: agent identity rejected: {e}");
-                    continue;
+                if result.success() {
+                    return true;
                 }
             }
         }
-        Ok(false)
+        false
+    }
+
+    /// Unix：通过 SSH_AUTH_SOCK 连接本地 OpenSSH Agent。
+    #[cfg(unix)]
+    async fn authenticate_with_agent(
+        &self,
+        session: &mut client::Handle<SshClient>,
+        s: &Session,
+    ) -> Result<bool, String> {
+        use russh::keys::agent::client::AgentClient;
+        let mut agent = AgentClient::connect_env()
+            .await
+            .map_err(|e| format!("连接本地 SSH Agent 失败（是否已执行 ssh-add？）：{e}"))?;
+        let identities = agent
+            .request_identities()
+            .await
+            .map_err(|e| format!("读取 SSH Agent 身份失败：{e}"))?;
+        if identities.is_empty() {
+            return Err("SSH Agent 中没有可用密钥（请先 ssh-add 添加）".to_string());
+        }
+        Ok(Self::try_agent_identities(session, &s.username, &identities, &mut agent).await)
+    }
+
+    /// Windows：优先连接 Windows OpenSSH Agent 命名管道，失败再尝试 Pageant。
+    #[cfg(windows)]
+    async fn authenticate_with_agent(
+        &self,
+        session: &mut client::Handle<SshClient>,
+        s: &Session,
+    ) -> Result<bool, String> {
+        use russh::keys::agent::client::AgentClient;
+        if let Ok(mut agent) =
+            AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent").await
+        {
+            let identities = agent
+                .request_identities()
+                .await
+                .map_err(|e| format!("读取 SSH Agent 身份失败：{e}"))?;
+            if identities.is_empty() {
+                return Err("SSH Agent 中没有可用密钥（请先 ssh-add 添加）".to_string());
+            }
+            return Ok(
+                Self::try_agent_identities(session, &s.username, &identities, &mut agent).await,
+            );
+        }
+        let mut agent = AgentClient::connect_pageant().await.map_err(|e| {
+            format!("连接本地 SSH Agent 失败（请启动 Windows OpenSSH Authentication Agent 或 Pageant）：{e}")
+        })?;
+        let identities = agent
+            .request_identities()
+            .await
+            .map_err(|e| format!("读取 SSH Agent 身份失败：{e}"))?;
+        if identities.is_empty() {
+            return Err("SSH Agent 中没有可用密钥（请先 ssh-add 添加）".to_string());
+        }
+        Ok(Self::try_agent_identities(session, &s.username, &identities, &mut agent).await)
+    }
+
+    /// 其他平台：暂不支持 SSH Agent 认证（明确报错而不是编译失败）。
+    #[cfg(not(any(unix, windows)))]
+    async fn authenticate_with_agent(
+        &self,
+        _session: &mut client::Handle<SshClient>,
+        _s: &Session,
+    ) -> Result<bool, String> {
+        Err("当前平台不支持 SSH Agent 认证".to_string())
     }
 
     /// 经跳板机建立到目标的 SSH 会话：
