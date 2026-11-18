@@ -1,6 +1,8 @@
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
 import { useUpdate } from "../store/update";
+import { loadSettings } from "../lib/settings";
+import { describeUpdateEndpoint } from "../lib/updateSource";
 import { useEffect, useRef } from "react";
 import { useFocusTrap } from "../lib/focusTrap";
 
@@ -70,6 +72,11 @@ export function UpdateDialog() {
             <Icon name="arrow-right-to-line" size={14} />
           </span>
           <span className="upd-versions__new">最新版本 v{info.latestVersion}</span>
+        </div>
+
+        <div className="dialog__field">
+          <div className="dialog__field-label">更新源</div>
+          <div className="upd-notes">{describeUpdateEndpoint(loadSettings())}</div>
         </div>
 
         <div className="dialog__field">

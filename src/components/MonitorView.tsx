@@ -5,14 +5,8 @@ import { useMonitor, selectMonitorConnection } from "../store/monitor";
 import { ipc } from "../lib/ipc";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import { resBarColor, resTextColor } from "../lib/resColor";
+import { formatBytePair, formatBytes } from "../lib/formatBytes";
 import type { ProcInfo, SysInfo } from "../types";
-
-function formatBytes(n: number): string {
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
-  return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
-}
 
 function polyline(points: number[], width = 600, height = 160): string {
   if (points.length === 0) return "";
@@ -138,7 +132,7 @@ export function MonitorView() {
               <span className="sys-item__label">内存</span>
               <span className="sys-item__value">
                 {sysInfo.memTotal > 0
-                  ? `${formatBytes(sysInfo.memUsed)} / ${formatBytes(sysInfo.memTotal)} (${((sysInfo.memUsed / sysInfo.memTotal) * 100).toFixed(1)}%)`
+                  ? `${formatBytePair(sysInfo.memUsed, sysInfo.memTotal)} (${((sysInfo.memUsed / sysInfo.memTotal) * 100).toFixed(1)}%)`
                   : "-"}
               </span>
             </div>
@@ -173,7 +167,7 @@ export function MonitorView() {
             <div className={"res-bar__fill " + resBarColor(memPct)} style={{ width: Math.min(memPct, 100) + "%" }} />
           </div>
           <div className="res-card__detail">
-            {metrics ? `${formatBytes(metrics.memUsed)} / ${formatBytes(metrics.memTotal)}` : "-"}
+            {metrics ? `${formatBytePair(metrics.memUsed, metrics.memTotal)}（${memPct.toFixed(1)}%）` : "-"}
           </div>
         </div>
         <div className="ds-card mon-card">
@@ -190,7 +184,7 @@ export function MonitorView() {
           </div>
           <div className="res-card__detail">
             {metrics
-              ? `${formatBytes(rootDisk?.used ?? 0)} / ${formatBytes(rootDisk?.total ?? 0)}`
+              ? `${formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0)}（${disk.toFixed(0)}%）`
               : "-"}
           </div>
         </div>

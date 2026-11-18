@@ -1017,6 +1017,35 @@ a {
   color: var(--text-tertiary);
 }
 
+.titlebar__avatar-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.titlebar__avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  padding: 4px 10px 8px;
+}
+
+.titlebar__avatar-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  font-size: 16px;
+  line-height: 1;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+
+.titlebar__avatar-pick.is-active {
+  outline-color: var(--border-brand);
+}
+
 /* =========================================================================
    ActivityRail
    ========================================================================= */
@@ -1435,6 +1464,22 @@ a {
   height: 22px;
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.sidebar-stat--wide {
+  grid-template-columns: 28px minmax(0, 1fr) 108px;
+}
+
+.sidebar-stat-wrap {
+  min-width: 0;
+}
+
+.sidebar-stat__spark {
+  display: block;
+  width: 100%;
+  height: 20px;
+  margin: 1px 0 3px 34px;
+  width: calc(100% - 34px);
 }
 
 .sidebar-stat__track {
@@ -2208,6 +2253,30 @@ button.sftp-head__cell {
   font-size: var(--body-xs-font-size);
   color: var(--text-tertiary);
   text-align: center;
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sftp-empty__fun {
+  margin-top: 4px;
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+  opacity: 0.85;
+}
+
+.sftp-hint__clear {
+  flex-shrink: 0;
+  color: var(--bg-brand);
+  font-size: var(--body-xs-font-size);
+}
+
+.sftp-hint__clear:hover {
+  text-decoration: underline;
 }
 
 .res-bar__fill--error {
@@ -2422,6 +2491,26 @@ button.sftp-head__cell {
   gap: 2px;
   padding: 0 8px;
   flex-shrink: 0;
+}
+
+/* 右上连接按钮：按连接态着色，断开时醒目红 */
+.editor-tabs__conn--connected {
+  color: var(--status-success-default);
+}
+
+.editor-tabs__conn--connecting {
+  color: var(--status-warning-default);
+}
+
+.editor-tabs__conn--offline {
+  color: var(--status-error-default);
+  background: color-mix(in srgb, var(--status-error-default) 14%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--status-error-default) 45%, transparent);
+}
+
+.editor-tabs__conn--offline:hover {
+  background: color-mix(in srgb, var(--status-error-default) 22%, transparent);
 }
 
 /* =========================================================================
@@ -3311,7 +3400,8 @@ button.sftp-head__cell {
   align-items: center;
   justify-content: space-between;
   height: 28px;
-  padding: 0 18px;
+  /* 左端与侧栏内容列对齐：活动栏 54px + 分隔线 1px + 侧栏内边距 18px */
+  padding: 0 18px 0 73px;
   background: var(--surface-titlebar);
   border-top: none;
   font-size: 11px;
@@ -3991,6 +4081,42 @@ button.sftp-head__cell {
 .st-row label {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+/* 设置项纵向排列（label 在上、控件在下，如更新通道） */
+.st-row--col {
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+}
+
+/* 三段式切换（更新通道：直连 / 镜像 / 代理） */
+.st-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-neutral-l1);
+  border-radius: var(--radius-8);
+  background: var(--bg-overlay-l1);
+  align-self: flex-start;
+}
+
+.st-seg__btn {
+  padding: 4px 12px;
+  border-radius: var(--radius-4);
+  font-size: var(--body-sm-font-size);
+  color: var(--text-secondary);
+}
+
+.st-seg__btn.is-active {
+  background: var(--bg-brand-popup);
+  color: var(--text-default);
+  box-shadow: inset 0 0 0 1px var(--border-brand);
+}
+
+.st-hint--error {
+  margin-top: 0;
+  color: var(--status-error-default);
 }
 
 /* 设置项右侧的 radio 组（垂直排列） */

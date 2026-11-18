@@ -5,6 +5,7 @@ import { ipc } from "../lib/ipc";
 import { useClampedMenuPosition } from "../lib/contextMenu";
 import { promptDialog } from "../store/feedback";
 import { createSplitTab } from "../lib/tabs";
+import { connButtonClass, toConnVisual } from "../lib/connectionStatus";
 
 interface CtxMenu {
   x: number;
@@ -211,14 +212,17 @@ export function EditorTabs() {
       {activeTab && (
         <div className="editor-tabs__actions">
           <button
-            className="ds-btn ds-btn--tertiary ds-btn--icon"
+            className={
+              "ds-btn ds-btn--tertiary ds-btn--icon " +
+              connButtonClass(toConnVisual(activeTab.status))
+            }
             type="button"
             title={
               activeTab.status === "connected"
                 ? "断开当前连接"
                 : activeTab.status === "connecting"
                   ? "正在连接…"
-                  : "重新连接"
+                  : "连接已断开，点击重新连接"
             }
             disabled={activeTab.status === "connecting"}
             onClick={() => void toggleConnection()}

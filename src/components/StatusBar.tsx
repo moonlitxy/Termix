@@ -18,7 +18,7 @@ export function StatusBar() {
     ? "ds-dot--warning"
     : connected
       ? "ds-dot--success"
-      : "ds-dot--muted";
+      : "ds-dot--error";
   const activeTransfers = transfers.filter(
     (t) => t.status === "running" || t.status === "paused"
   ).length;

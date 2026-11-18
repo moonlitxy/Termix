@@ -7,6 +7,14 @@ import {
   saveSettings,
   type Settings,
 } from "../lib/settings";
+import {
+  CUSTOM_MIRROR_ID,
+  UPDATE_MIRRORS,
+  describeUpdateEndpoint,
+  normalizeMirrorBase,
+  normalizeProxyUrl,
+  resolveUpdateEndpoint,
+} from "../lib/updateSource";
 import { useUpdate } from "../store/update";
 import { confirmDialog, toast } from "../store/feedback";
 import type { MasterStatus } from "../types";
@@ -37,6 +45,24 @@ export function SettingsView() {
       useUpdate.getState().openDialog();
     } else {
       setUpdateMsg(`已是最新版本 v${info.currentVersion}`);
+    }
+  };
+
+  // ---- 更新源：用当前表单值直测连通性（不经过保存也能验证） ----
+  // 表单修改即自动保存，此处直接用当前表单值测试
+  const handleTestUpdateEndpoint = async () => {
+    setUpdateMsg(null);
+    const r = resolveUpdateEndpoint(settings);
+    if ("error" in r) {
+      setUpdateMsg(`配置有误：${r.error}`);
+      return;
+    }
+    setUpdateMsg("正在测试更新源连通性…");
+    try {
+      const info = await ipc.checkUpdate(r.mirror || null, r.proxy || null);
+      setUpdateMsg(`连通正常，远端最新版本 v${info.latestVersion}`);
+    } catch (e) {
+      setUpdateMsg(`连接失败：${String(e)}`);
     }
   };
 
@@ -367,6 +393,93 @@ export function SettingsView() {
             <label>当前版本</label>
             <span className="st-kbd">v{__TERMIX_VERSION__}</span>
           </div>
+          <div className="st-row st-row--col">
+            <label>更新通道（默认直连）</label>
+            <div className="st-seg" role="radiogroup" aria-label="更新通道">
+              {(
+                [
+                  ["direct", "直连"],
+                  ["mirror", "镜像加速"],
+                  ["proxy", "代理"],
+                ] as const
+              ).map(([mode, text]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.updateMode === mode}
+                  className={
+                    "st-seg__btn" + (settings.updateMode === mode ? " is-active" : "")
+                  }
+                  title={mode === "direct" ? "直连 GitHub 更新" : mode === "mirror" ? "经镜像站加速下载" : "经 HTTP 代理访问 GitHub"}
+                  onClick={() => set({ updateMode: mode })}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+          {settings.updateMode === "mirror" && (
+            <>
+              <div className="st-row st-row--col">
+                <label>镜像源（均已实测可用）</label>
+                <select
+                  className="ds-select"
+                  value={settings.updateMirror}
+                  onChange={(e) => set({ updateMirror: e.target.value })}
+                >
+                  {UPDATE_MIRRORS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_MIRROR_ID}>自定义…</option>
+                </select>
+              </div>
+              {settings.updateMirror === CUSTOM_MIRROR_ID && (
+                <div className="st-row st-row--col">
+                  <label>自定义镜像地址</label>
+                  <input
+                    className="ds-input"
+                    value={settings.customMirror}
+                    placeholder="https://gh-proxy.com/"
+                    spellCheck={false}
+                    onChange={(e) => set({ customMirror: e.target.value })}
+                  />
+                  {"error" in normalizeMirrorBase(settings.customMirror || " ") && settings.customMirror.trim() && (
+                    <div className="st-hint st-hint--error">
+                      {(normalizeMirrorBase(settings.customMirror) as { error: string }).error}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="st-hint">
+                {(UPDATE_MIRRORS.find((m) => m.id === settings.updateMirror)?.tested ??
+                  "自定义镜像请先用下方「测试连接」验证")}
+              </div>
+            </>
+          )}
+          {settings.updateMode === "proxy" && (
+            <div className="st-row st-row--col">
+              <label>代理地址（HTTP/HTTPS）</label>
+              <input
+                className="ds-input"
+                value={settings.updateProxy}
+                placeholder="http://127.0.0.1:7890"
+                spellCheck={false}
+                onChange={(e) => set({ updateProxy: e.target.value })}
+              />
+              {"error" in normalizeProxyUrl(settings.updateProxy || " ") && settings.updateProxy.trim() && (
+                <div className="st-hint st-hint--error">
+                  {(normalizeProxyUrl(settings.updateProxy) as { error: string }).error}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="st-row">
+            <label>当前通道</label>
+            <span className="st-kbd">{describeUpdateEndpoint(settings)}</span>
+          </div>
           <div className="st-row">
             <label />
             <div className="st-actions">
@@ -378,6 +491,15 @@ export function SettingsView() {
                 onClick={() => void handleCheckUpdate()}
               >
                 {checking ? "检查中…" : "检查更新"}
+              </button>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                disabled={checking}
+                title="用当前通道测试能否连通更新服务"
+                onClick={() => void handleTestUpdateEndpoint()}
+              >
+                测试连接
               </button>
             </div>
           </div>

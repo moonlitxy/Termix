@@ -87,8 +87,8 @@ describe("ipc command wrappers", () => {
       ["masterUnlock", ["pass"]],
       ["masterLock", []],
       ["masterClear", ["pass"]],
-      ["checkUpdate", []],
-      ["downloadUpdate", ["url", "file"]],
+      ["checkUpdate", [null, null]],
+      ["downloadUpdate", ["url", "file", null]],
       ["openInstaller", ["/tmp/file"]],
       ["openExternal", ["https://example.com"]],
     ];

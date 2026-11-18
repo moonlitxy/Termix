@@ -31,12 +31,16 @@
   --spacer-32: 32px;
   --spacer-40: 40px;
 
-  /* font */
-  --font-family-default: "SF Pro Text", -apple-system, BlinkMacSystemFont,
-    "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-family-heading: "SF Pro Display", -apple-system, BlinkMacSystemFont,
-    "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-family-mono: "SF Mono", Menlo, Monaco, "JetBrains Mono", monospace;
+  /* font：mac 与 Windows 统一以 mac 系统字体为先，保证视觉一致；
+     Windows 缺失时按顺序回退到 PingFang / 微软雅黑 / Segoe UI */
+  --font-family-default: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "SF Pro Display", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-family-heading: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-family-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas,
+    "Cascadia Code", "JetBrains Mono", monospace;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
 

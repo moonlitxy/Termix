@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { AVATARS, getAvatar, loadAvatarId, randomAvatarId, saveAvatarId } from "../lib/avatar";
+import { FUN_AVATAR_TIPS, pickFun } from "../lib/fun";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { WindowControls } from "./WindowControls";
@@ -9,8 +11,14 @@ export function TitleBar() {
   const setActivity = useApp((s) => s.setActivity);
   const openPalette = useApp((s) => s.openPalette);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [avatarId, setAvatarId] = useState(loadAvatarId);
   const [isWindows] = useState(isWindowsPlatform);
   const shortcutMod = isWindows ? "Ctrl" : "⌘";
+  const avatar = getAvatar(avatarId);
+  const pickAvatar = (id: string) => {
+    setAvatarId(id);
+    saveAvatarId(id);
+  };
 
   return (
     <div
@@ -61,9 +69,12 @@ export function TitleBar() {
             type="button"
             title="用户菜单"
             aria-label="用户菜单"
+            style={{ background: avatar.bg }}
             onClick={() => setAvatarOpen((v) => !v)}
           >
-            <Icon name="user" size={14} />
+            <span className="titlebar__avatar-emoji" aria-hidden="true">
+              {avatar.emoji}
+            </span>
           </button>
           {avatarOpen && (
             <>
@@ -73,11 +84,38 @@ export function TitleBar() {
               />
               <div className="ctx-menu titlebar__avatar-menu">
                 <div className="titlebar__avatar-info">
-                  <div className="titlebar__avatar-name">Termix 本地用户</div>
+                  <div className="titlebar__avatar-name">
+                    {avatar.emoji} {avatar.name}
+                  </div>
                   <div className="titlebar__avatar-meta">
-                    连接配置与偏好保存在本机
+                    {pickFun(FUN_AVATAR_TIPS, avatarId.length)}
                   </div>
                 </div>
+                <div className="titlebar__avatar-grid">
+                  {AVATARS.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className={
+                        "titlebar__avatar-pick" + (a.id === avatarId ? " is-active" : "")
+                      }
+                      title={`切换为${a.name}`}
+                      style={{ background: a.bg }}
+                      onClick={() => pickAvatar(a.id)}
+                    >
+                      <span aria-hidden="true">{a.emoji}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="ctx-menu__item"
+                  title="随机换一个头像"
+                  onClick={() => pickAvatar(randomAvatarId(avatarId))}
+                >
+                  <Icon name="sparkles" size={12} />
+                  随机换一个
+                </button>
                 <div className="ctx-menu__sep" />
                 <button
                   type="button"

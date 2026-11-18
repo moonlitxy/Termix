@@ -4,17 +4,10 @@ import { useApp } from "../store/app";
 import { useMonitor, selectMonitorConnection, computeUptimeSec } from "../store/monitor";
 import { ipc } from "../lib/ipc";
 import { resBarColor, resTextColor } from "../lib/resColor";
+import { formatBytePair, formatBytes } from "../lib/formatBytes";
 import { toast } from "../store/feedback";
 import { loadSettings, saveSettings } from "../lib/settings";
 import type { TransferTask } from "../types";
-
-function formatBytes(n: number): string {
-  if (!n) return "0 B";
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
-  return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
-}
 
 /** 系统运行时长 → 天小时分秒（如 1天23小时11分20秒） */
 function formatUptime(sec: number): string {
@@ -266,7 +259,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           </div>
           <div className="res-card__detail">
             {metrics
-              ? `${formatBytes(metrics.memUsed)} / ${formatBytes(metrics.memTotal)}`
+              ? `${formatBytePair(metrics.memUsed, metrics.memTotal)}（${memPct}%）`
               : "--"}
           </div>
         </div>
@@ -287,7 +280,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           </div>
           <div className="res-card__detail">
             {metrics
-              ? `${formatBytes(rootDisk?.used ?? 0)} / ${formatBytes(rootDisk?.total ?? 0)}`
+              ? `${formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0)}（${disk}%）`
               : "--"}
           </div>
         </div>

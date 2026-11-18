@@ -11,6 +11,14 @@ export interface Settings {
   rightPanelExpanded: boolean;
   sftpCollapsed: boolean;
   lastLocalPath: string;
+  /** 软件更新通道：direct 直连（默认）/ mirror 镜像加速 / proxy 代理 */
+  updateMode: "direct" | "mirror" | "proxy";
+  /** 选中的内置镜像 id，或 "custom" 走自定义镜像 */
+  updateMirror: string;
+  /** 自定义镜像基址，如 https://gh-proxy.com/ */
+  customMirror: string;
+  /** 代理地址，如 http://127.0.0.1:7890（代理模式必填） */
+  updateProxy: string;
 }
 
 export const SETTINGS_KEY = "termix.settings";
@@ -26,6 +34,10 @@ export const DEFAULT_SETTINGS: Settings = {
   rightPanelExpanded: false,
   sftpCollapsed: false,
   lastLocalPath: "",
+  updateMode: "direct",
+  updateMirror: "gh-proxy",
+  customMirror: "",
+  updateProxy: "",
 };
 
 export function loadSettings(): Settings {

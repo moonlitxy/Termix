@@ -157,9 +157,10 @@ export const ipc = {
   masterClear: (master: string) => invoke<void>("master_clear", { master }),
 
   // ---- 软件更新 ----
-  checkUpdate: () => invoke<UpdateInfo>("check_update"),
-  downloadUpdate: (url: string, fileName: string) =>
-    invoke<void>("download_update", { url, fileName }),
+  checkUpdate: (mirror: string | null, proxy: string | null) =>
+    invoke<UpdateInfo>("check_update", { mirror, proxy }),
+  downloadUpdate: (url: string, fileName: string, proxy: string | null) =>
+    invoke<void>("download_update", { url, fileName, proxy }),
   openInstaller: (path: string) => invoke<void>("open_installer", { path }),
   openExternal: (url: string) => invoke<void>("open_external", { url }),
 };

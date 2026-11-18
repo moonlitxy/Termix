@@ -9,6 +9,8 @@ import { useClampedMenuPosition } from "../lib/contextMenu";
 import { filterItems } from "../lib/fileFilter";
 import { rangeSelection, selectAllPaths, toggleSelection } from "../lib/selection";
 import { getVirtualRange } from "../lib/virtualList";
+import { selectionHint, shouldAutoFit } from "../lib/sftpLayout";
+import { FUN_SFTP_EMPTY, pickFun } from "../lib/fun";
 import { confirmDialog, promptDialog, toast } from "../store/feedback";
 import { LocalFilesPane } from "./LocalFilesPane";
 import type { SftpItem, Snippet } from "../types";
@@ -17,7 +19,8 @@ function formatSize(n: number): string {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
-  return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+  if (n < 1024 * 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+  return (n / 1024 / 1024 / 1024 / 1024).toFixed(2) + " TB";
 }
 
 function formatMtime(ts: number): string {
@@ -500,11 +503,21 @@ export function SftpView() {
     return () => document.removeEventListener("termix:search", onSearch);
   }, []);
 
-  // 列宽自适应：目录内容加载后按内容估算（用户手动调整过则不再覆盖）
+  // 列宽自适应：每个目录首次快速列表到达时估算一次；
+  // 后台补充目录大小（enrich）到达时不再重算，避免列宽抖动。
+  // 快速加载优先：首屏只等 SFTP read_dir，后台 du/属主信息随后合并。
+  const autoFitKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (customized.current || remoteItems.length === 0) return;
+    const key = `${sftpContext?.connectionId ?? "-"}|${remotePath}`;
+    if (
+      !shouldAutoFit(autoFitKeyRef.current, key, customized.current, remoteItems.length > 0)
+    )
+      return;
+    autoFitKeyRef.current = key;
     setColWidths(autoFitCols(remoteItems));
-  }, [remoteItems]);
+    // 仅在目录内容首次到达时按内容自适应，后续 enrich 同 key 不再覆盖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteItems, remotePath, sftpContext]);
 
   // ---- 终端联动操作（原工具栏合并） ----
 
@@ -1157,45 +1170,8 @@ export function SftpView() {
         </div>
       )}
 
-      {selectedPaths.length > 0 && (
-        <div className="sftp-batchbar">
-          <span className="sftp-batchbar__count">
-            已选 {selectedPaths.length} 项
-          </span>
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm"
-            type="button"
-            title={`下载 ${selectedPaths.length} 项`}
-            onClick={() => void downloadSelected()}
-          >
-            <Icon name="download" size={12} />下载
-          </button>
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm"
-            type="button"
-            title={`复制 ${selectedPaths.length} 个路径`}
-            onClick={() => void copySelectedPaths()}
-          >
-            <Icon name="copy" size={12} />复制路径
-          </button>
-          <button
-            className="ds-btn ds-btn--danger-subtle ds-btn--sm"
-            type="button"
-            title={`删除 ${selectedPaths.length} 项`}
-            onClick={() => void deleteSelected()}
-          >
-            <Icon name="trash" size={12} />删除
-          </button>
-          <button
-            className="ds-btn ds-btn--tertiary ds-btn--icon"
-            type="button"
-            title="清空选择"
-            onClick={clearSelection}
-          >
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-      )}
+      {/* 已选提示不再占用顶部行高：批量操作走右键菜单，
+          数量只显示在底部提示区，避免单击选中后列表下移导致双击点错目录 */}
 
       {searchOpen && (
         <div className="toolbar__search sftp-search">
@@ -1475,10 +1451,25 @@ export function SftpView() {
           )}
           {!remoteLoading && !remoteError && filteredItems.length === 0 && (
             <div className="sftp-empty">
-              {filterQuery ? "无匹配文件" : "空目录"}
+              <div>{filterQuery ? "无匹配文件" : "空目录"}</div>
+              <div className="sftp-empty__fun">
+                {pickFun(FUN_SFTP_EMPTY, filteredItems.length + remotePath.length)}
+              </div>
             </div>
           )}
-            <div className="sftp-pane__hint">可拖拽本地文件到此处上传</div>
+            <div className="sftp-pane__hint">
+              <span>{selectionHint(selectedPaths.length)}</span>
+              {selectedPaths.length > 0 && (
+                <button
+                  className="sftp-hint__clear"
+                  type="button"
+                  title="清空选择（Esc）"
+                  onClick={clearSelection}
+                >
+                  清空
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
