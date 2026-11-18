@@ -5,11 +5,13 @@ import { ipc } from "../lib/ipc";
 import { applyVariables, buildVarDefs, type VarDef } from "../lib/variables";
 import { confirmDialog, toast } from "../store/feedback";
 import { useFocusTrap } from "../lib/focusTrap";
+import { useT } from "../lib/i18n";
 import type { Snippet, SnippetInput } from "../types";
 
 const EMPTY: SnippetInput = { title: "", command: "", groupId: undefined };
 
 export function SnippetsView() {
+  const tr = useT();
   const groups = useApp((s) => s.groups);
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
@@ -53,7 +55,7 @@ export function SnippetsView() {
 
   const save = async () => {
     if (!form.title || !form.command) {
-      toast.warning("请填写标题与命令");
+      toast.warning(tr("snip.needTitleCmd"));
       return;
     }
     try {
@@ -64,7 +66,7 @@ export function SnippetsView() {
       }
       setModalOpen(false);
       void load();
-      toast.success(editingId ? "命令片段已更新" : "命令片段已创建");
+      toast.success(editingId ? tr("snip.updated") : tr("snip.created"));
     } catch (e) {
       toast.error(String(e));
     }
@@ -73,7 +75,7 @@ export function SnippetsView() {
   const send = async (command: string) => {
     const tab = tabs.find((t) => t.id === activeTabId);
     if (!tab?.connectionId || !tab.shellId) {
-      toast.warning("请先打开一个已连接的终端标签页");
+      toast.warning(tr("sftp.noConnectedTab"));
       return;
     }
     try {
@@ -104,10 +106,9 @@ export function SnippetsView() {
   return (
     <div className="sn-view">
       <div className="fw-toolbar">
-        <span className="fw-toolbar__title">命令片段</span>
-        <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title="新建命令片段" onClick={openNew}>
-          <Icon name="plus" size={12} />新建片段
-        </button>
+        <span className="fw-toolbar__title">{tr("snip.title")}</span>
+        <button className="ds-btn ds-btn--brand ds-btn--sm" type="button" title={tr("snip.newTitle")} onClick={openNew}>
+          <Icon name="plus" size={12} />{tr("snip.new")}</button>
       </div>
       <div className="sn-list">
         {snippets.length === 0 && (
@@ -115,10 +116,8 @@ export function SnippetsView() {
             <span className="fw-empty__icon">
               <Icon name="scroll-text" size={28} />
             </span>
-            <div className="fw-empty__title">暂无命令片段</div>
-            <div className="fw-empty__sub">
-              保存常用命令，之后可一键发送到当前终端
-            </div>
+            <div className="fw-empty__title">{tr("snip.empty")}</div>
+            <div className="fw-empty__sub">{tr("snip.emptySub")}</div>
           </div>
         )}
         {snippets.map((s) => (
@@ -129,15 +128,14 @@ export function SnippetsView() {
                 <button
                   className="ds-btn ds-btn--secondary ds-btn--sm"
                   type="button"
-                  title="插入到当前终端"
+                  title={tr("snip.runHint")}
                   onClick={() => void insert(s)}
                 >
-                  <Icon name="send" size={12} />插入
-                </button>
+                  <Icon name="send" size={12} />{tr("snip.send")}</button>
                 <button
                   className="ds-btn ds-btn--tertiary ds-btn--icon"
                   type="button"
-                  title="编辑"
+                  title={tr("snip.edit")}
                   onClick={() => openEdit(s)}
                 >
                   <Icon name="edit" size={13} />
@@ -145,19 +143,19 @@ export function SnippetsView() {
                 <button
                   className="ds-btn ds-btn--danger-subtle ds-btn--icon"
                   type="button"
-                  title="删除"
+                  title={tr("snip.delete")}
                   onClick={async () => {
                     const confirmed = await confirmDialog({
-                      title: "删除命令片段",
-                      message: `确定删除片段「${s.title}」？`,
-                      confirmText: "删除",
+                      title: tr("snip.deleteHint"),
+                      message: tr("snip.deleteMsg", { n: s.title }),
+                      confirmText: tr("common.delete"),
                       danger: true,
                     });
                     if (!confirmed) return;
                     try {
                       await ipc.snippetDelete(s.id);
                       await load();
-                      toast.success("命令片段已删除");
+                      toast.success(tr("snip.deleted"));
                     } catch (e) {
                       toast.error(String(e));
                     }
@@ -179,47 +177,47 @@ export function SnippetsView() {
             ref={modalRef}
             role="dialog"
             aria-modal="true"
-            aria-label={editingId ? "编辑片段" : "新建片段"}
+            aria-label={editingId ? tr("snip.editTitle") : tr("snip.newTitle")}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
-              <span>{editingId ? "编辑片段" : "新建片段"}</span>
+              <span>{editingId ? tr("snip.editTitle") : tr("snip.newTitle")}</span>
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
-                title="关闭"
+                title={tr("common.close")}
                 onClick={() => setModalOpen(false)}
               >
                 <Icon name="x" size={14} />
               </button>
             </div>
             <div className="form-row">
-              <label>标题</label>
+              <label>{tr("snip.titleLabel")}</label>
               <input
                 className="ds-input"
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="如 查看大文件"
+                placeholder={tr("snip.titlePh")}
               />
             </div>
             <div className="form-row">
-              <label>命令</label>
+              <label>{tr("snip.command")}</label>
               <textarea
                 className="ds-input sn-form-cmd"
                 value={form.command}
                 onChange={(e) => setForm({ ...form, command: e.target.value })}
-                placeholder="如 ls -lh /var/log | tail -n 20"
+                placeholder={tr("snip.commandPh")}
                 rows={4}
               />
             </div>
             <div className="form-row">
-              <label>分组</label>
+              <label>{tr("snip.group")}</label>
               <select
                 className="ds-select"
                 value={form.groupId ?? ""}
                 onChange={(e) => setForm({ ...form, groupId: e.target.value || undefined })}
               >
-                <option value="">无分组</option>
+                <option value="">{tr("conn.noGroup")}</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
@@ -228,12 +226,8 @@ export function SnippetsView() {
               </select>
             </div>
             <div className="modal-actions">
-              <button className="ds-btn ds-btn--secondary" type="button" title="取消：放弃本次修改" onClick={() => setModalOpen(false)}>
-                取消
-              </button>
-              <button className="ds-btn ds-btn--brand" type="button" title="保存命令片段" onClick={() => void save()}>
-                保存
-              </button>
+              <button className="ds-btn ds-btn--secondary" type="button" title={tr("fwd.cancelEdit")} onClick={() => setModalOpen(false)}>{tr("common.cancel")}</button>
+              <button className="ds-btn ds-btn--brand" type="button" title={tr("snip.save")} onClick={() => void save()}>{tr("snip.save")}</button>
             </div>
           </div>
         </div>
@@ -253,7 +247,7 @@ export function SnippetsView() {
               <button
                 className="ds-btn ds-btn--tertiary ds-btn--icon"
                 type="button"
-                title="关闭"
+                title={tr("common.close")}
                 onClick={() => setVarModal(null)}
               >
                 <Icon name="x" size={14} />
@@ -269,17 +263,13 @@ export function SnippetsView() {
                   onChange={(e) =>
                     setVarValues((prev) => ({ ...prev, [v.name]: e.target.value }))
                   }
-                  placeholder={`默认: ${v.defaultValue || "（空）"}`}
+                  placeholder={v.defaultValue ? tr("sftp.varDefault", { d: v.defaultValue }) : tr("sftp.varDefaultEmpty")}
                 />
               </div>
             ))}
             <div className="modal-actions">
-              <button className="ds-btn ds-btn--secondary" type="button" title="取消：放弃插入" onClick={() => setVarModal(null)}>
-                取消
-              </button>
-              <button className="ds-btn ds-btn--brand" type="button" title="插入：替换变量后发送到终端" onClick={() => void applyVars()}>
-                插入
-              </button>
+              <button className="ds-btn ds-btn--secondary" type="button" title={tr("snip.cancelInsert")} onClick={() => setVarModal(null)}>{tr("common.cancel")}</button>
+              <button className="ds-btn ds-btn--brand" type="button" title={tr("snip.execVars")} onClick={() => void applyVars()}>{tr("snip.send")}</button>
             </div>
           </div>
         </div>

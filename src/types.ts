@@ -1,4 +1,4 @@
-export type AuthType = "password" | "key";
+export type AuthType = "password" | "key" | "keyboard" | "agent";
 
 export interface Session {
   id: string;
@@ -13,6 +13,8 @@ export interface Session {
   groupId?: string;
   memo?: string;
   encoding: string;
+  jumpSessionId?: string;
+  agentForward: boolean;
   createdAt: number;
   lastConnectedAt?: number;
 }
@@ -29,6 +31,8 @@ export interface SessionInput {
   groupId?: string;
   memo?: string;
   encoding?: string;
+  jumpSessionId?: string;
+  agentForward?: boolean;
 }
 
 export interface SessionImportResult {
@@ -37,6 +41,12 @@ export interface SessionImportResult {
   sessionsSkipped: number;
   /** 因密文无法用当前主密钥解密而被清空的密码字段数量 */
   secretsCleared: number;
+}
+
+export interface BackupFile {
+  name: string;
+  size: number;
+  modifiedMs: number;
 }
 
 export interface Group {

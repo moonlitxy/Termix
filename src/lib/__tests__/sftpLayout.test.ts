@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { selectionHint, shouldAutoFit } from "../sftpLayout";
 
+const t = (key: string, vars?: Record<string, number>) =>
+  key === "sftp.dropHintSel" ? ` · selected ${vars?.n}` : "drop here";
+
 describe("sftpLayout 列表稳定性", () => {
   it("选中后提示只出现在底部，不推动列表", () => {
-    expect(selectionHint(0)).toBe("可拖拽本地文件到此处上传");
-    expect(selectionHint(2)).toContain("已选 2 项");
-    expect(selectionHint(2)).toContain("右键批量操作");
+    expect(selectionHint(0, t)).toBe("drop here");
+    expect(selectionHint(2, t)).toContain("selected 2");
   });
 
   it("同目录后台补充时不再重算列宽", () => {

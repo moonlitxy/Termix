@@ -2,14 +2,16 @@ import { useApp } from "../store/app";
 import { selectMonitorConnection, useMonitor } from "../store/monitor";
 import { toast } from "../store/feedback";
 import { formatBytePair, formatBytes } from "../lib/formatBytes";
+import { getLang, useT } from "../lib/i18n";
 
-function formatUptime(sec: number): string {
+function formatUptime(sec: number, en: boolean): string {
   if (!sec) return "-";
   const days = Math.floor(sec / 86400);
-  if (days > 0) return `${days} 天`;
+  if (days > 0) return en ? `${days}d` : `${days} 天`;
   const hours = Math.floor(sec / 3600);
-  if (hours > 0) return `${hours} 小时`;
-  return `${Math.max(1, Math.floor(sec / 60))} 分钟`;
+  if (hours > 0) return en ? `${hours}h` : `${hours} 小时`;
+  const mins = Math.max(1, Math.floor(sec / 60));
+  return en ? `${mins}m` : `${mins} 分钟`;
 }
 
 function barColor(pct: number): string {
@@ -95,11 +97,12 @@ function MetaRows({
   load: string;
   loadTitle?: string;
 }) {
+  const t = useT();
   return (
     <div className="sidebar-stats__meta">
-      <span className="sidebar-stats__meta-label">运行</span>
+      <span className="sidebar-stats__meta-label">{t("stats.run")}</span>
       <span className="sidebar-stats__meta-value">{uptime}</span>
-      <span className="sidebar-stats__meta-label">负载</span>
+      <span className="sidebar-stats__meta-label">{t("stats.load")}</span>
       <span
         className="sidebar-stats__meta-value sidebar-stats__meta-value--load"
         title={loadTitle}
@@ -111,6 +114,7 @@ function MetaRows({
 }
 
 export function SidebarStats() {
+  const t = useT();
   const sessions = useApp((s) => s.sessions);
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
@@ -137,15 +141,15 @@ export function SidebarStats() {
             <div className="sidebar-stats__host">IP -</div>
             <div className="sidebar-stats__status">
               <span className="ds-dot ds-dot--muted" />
-              未连接
+              {t("stats.notConnected")}
             </div>
           </div>
           <button className="sidebar-stats__copy" type="button" disabled>
-            复制
+            {t("stats.copy")}
           </button>
         </div>
         <button className="sidebar-stats__sysinfo" type="button" disabled>
-          系统信息
+          {t("stats.sysinfo")}
         </button>
         <MetaRows uptime="-" load="-" />
         <Metric
@@ -153,27 +157,27 @@ export function SidebarStats() {
           value={0}
           ready={false}
           placeholder="0%"
-          detail="连接后显示 CPU 使用率"
+          detail={t("stats.noConnCpu")}
         />
         <Metric
-          label="内存"
+          label={t("stats.memory")}
           value={0}
           ready={false}
           placeholder="0%"
-          detail="连接后显示内存用量"
+          detail={t("stats.noConnMem")}
         />
         <Metric
-          label="磁盘"
+          label={t("stats.disk")}
           value={0}
           ready={false}
           placeholder="0%"
-          detail="连接后显示磁盘用量"
+          detail={t("stats.noConnDisk")}
         />
         <div className="sidebar-stats__net">
           <span>↑ 0 B/s</span>
           <span>↓ 0 B/s</span>
           <button type="button" disabled>
-            详情
+            {t("common.details")}
           </button>
         </div>
       </div>
@@ -191,8 +195,8 @@ export function SidebarStats() {
     : "-";
   const loadTitle = metrics
     ? cpuMeta?.cores
-      ? `1/5/15 分钟平均负载（${cpuMeta.cores} 核，单核满载为 1.00）`
-      : "1/5/15 分钟平均负载（单核满载为 1.00）"
+      ? t("stats.loadTitleCores", { n: cpuMeta.cores })
+      : t("stats.loadTitle")
     : undefined;
   const rootDisk = metrics?.disks.find((item) => item.mount === "/") ?? metrics?.disks[0];
 
@@ -201,9 +205,9 @@ export function SidebarStats() {
       await navigator.clipboard.writeText(
         `${session.username}@${session.host}:${session.port}`
       );
-      toast.success("连接信息已复制");
+      toast.success(t("stats.copied"));
     } catch {
-      toast.error("复制连接信息失败");
+      toast.error(t("stats.copyFailed"));
     }
   };
 
@@ -216,20 +220,20 @@ export function SidebarStats() {
           </div>
           <div className="sidebar-stats__status">
             <span className="ds-dot ds-dot--success-glow" />
-            已连接 · {session.username}
+            {t("conn.connected")} · {session.username}
           </div>
         </div>
         <button
           className="sidebar-stats__copy"
           type="button"
-          title="复制连接信息"
+          title={t("stats.copyConn")}
           onClick={() => void copyInfo()}
         >
-          复制
+          {t("stats.copy")}
         </button>
       </div>
       <MetaRows
-        uptime={metrics ? formatUptime(metrics.uptime) : "-"}
+        uptime={metrics ? formatUptime(metrics.uptime, getLang() === "en") : "-"}
         load={load}
         loadTitle={loadTitle}
       />
@@ -239,13 +243,22 @@ export function SidebarStats() {
         ready={!!metrics}
         detail={
           metrics
-            ? `CPU ${cpu}%${cpuMeta?.cores ? ` · ${cpuMeta.cores} 核` : ""}${cpuMeta?.freq ? ` · ${cpuMeta.freq}` : ""}`
-            : "等待采样"
+            ? t("stats.cpuDetail", {
+                cpu,
+                extra:
+                  cpuMeta?.cores || cpuMeta?.freq
+                    ? t("stats.cpuCoresFreq", {
+                        cores: cpuMeta?.cores ? t("stats.cores", { n: cpuMeta.cores }) : "",
+                        freq: cpuMeta?.freq ? ` · ${cpuMeta.freq}` : "",
+                      })
+                    : "",
+              })
+            : t("stats.cpuWaiting")
         }
         spark={cpuHist}
       />
       <Metric
-        label="内存"
+        label={t("stats.memory")}
         value={metrics ? memPct : 0}
         ready={!!metrics}
         wide
@@ -254,12 +267,15 @@ export function SidebarStats() {
         }
         detail={
           metrics
-            ? `内存 ${formatBytePair(metrics.memUsed, metrics.memTotal)}（${memPct}%）· 大单位统一按总量换算，如 0.35T/1.00T`
-            : "等待采样"
+            ? t("stats.memDetail", {
+                pair: formatBytePair(metrics.memUsed, metrics.memTotal),
+                pct: memPct,
+              })
+            : t("stats.waiting")
         }
       />
       <Metric
-        label="磁盘"
+        label={t("stats.disk")}
         value={metrics ? disk : 0}
         ready={!!metrics}
         wide
@@ -270,15 +286,18 @@ export function SidebarStats() {
         }
         detail={
           metrics
-            ? `磁盘 ${formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0)}（${disk}%）`
-            : "等待采样"
+            ? t("stats.diskDetail", {
+                pair: formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0),
+                pct: disk,
+              })
+            : t("stats.waiting")
         }
       />
       <div className="sidebar-stats__net">
         <span>↑ {formatBytes(netSpeed.tx)}/s</span>
         <span>↓ {formatBytes(netSpeed.rx)}/s</span>
         <button type="button" onClick={() => setActivity("monitor")}>
-          详情
+          {t("common.details")}
         </button>
       </div>
     </div>

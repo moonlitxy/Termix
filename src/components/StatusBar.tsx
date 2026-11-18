@@ -1,8 +1,11 @@
 import { useApp } from "../store/app";
 import { isWindowsPlatform } from "../lib/windowControls";
 import { Icon } from "./Icon";
+import { broadcastTargets } from "../lib/terminalBroadcast";
+import { useT } from "../lib/i18n";
 
 export function StatusBar() {
+  const t = useT();
   const shortcutMod = isWindowsPlatform() ? "Ctrl" : "⌘";
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
@@ -10,10 +13,16 @@ export function StatusBar() {
   const transfers = useApp((s) => s.transfers);
   const rightPanelExpanded = useApp((s) => s.rightPanelExpanded);
   const setRightPanelExpanded = useApp((s) => s.setRightPanelExpanded);
+  const broadcastInput = useApp((s) => s.broadcastInput);
+  const toggleBroadcastInput = useApp((s) => s.toggleBroadcastInput);
   const activeTab = tabs.find((t) => t.id === activeTabId && !t.hidden);
   const connected = activeTab?.status === "connected";
   const connecting = activeTab?.status === "connecting";
-  const statusText = connecting ? "连接中" : connected ? "已连接" : "未连接";
+  const statusText = connecting
+    ? t("conn.connecting")
+    : connected
+      ? t("conn.connected")
+      : t("conn.disconnected");
   const statusClass = connecting
     ? "ds-dot--warning"
     : connected
@@ -22,6 +31,9 @@ export function StatusBar() {
   const activeTransfers = transfers.filter(
     (t) => t.status === "running" || t.status === "paused"
   ).length;
+  const broadcastTargetsCount = activeTabId
+    ? broadcastTargets(tabs, activeTabId).length
+    : 0;
 
   return (
     <div className="status-bar">
@@ -39,24 +51,43 @@ export function StatusBar() {
       <div className="status-bar__right">
         <button
           className={
+            "status-bar__transfer" + (broadcastInput ? " is-active" : "")
+          }
+          type="button"
+          title={
+            broadcastInput
+              ? t("statusbar.broadcastOn", { n: broadcastTargetsCount })
+              : t("statusbar.broadcastOff")
+          }
+          aria-pressed={broadcastInput}
+          onClick={() => toggleBroadcastInput()}
+        >
+          <Icon name="send" size={11} />
+          {t("statusbar.broadcast")}
+          {broadcastInput && broadcastTargetsCount > 0 && (
+            <span className="status-bar__transfer-count">{broadcastTargetsCount}</span>
+          )}
+        </button>
+        <button
+          className={
             "status-bar__transfer" + (rightPanelExpanded ? " is-active" : "")
           }
           type="button"
-          title="打开资源监控与传输队列"
+          title={t("statusbar.resourcesTitle")}
           aria-pressed={rightPanelExpanded}
           onClick={() => setRightPanelExpanded(!rightPanelExpanded)}
         >
           <Icon name="bar" size={11} />
-          资源
+          {t("statusbar.resources")}
           {activeTransfers > 0 && (
             <span className="status-bar__transfer-count">{activeTransfers}</span>
           )}
         </button>
         <span className="status-bar__shortcut">
-          终端 <span className="ds-kbd">{shortcutMod}T</span> 新建会话
+          {t("statusbar.terminal")} <span className="ds-kbd">{shortcutMod}T</span> {t("statusbar.newSession")}
         </span>
         <span className="status-bar__shortcut">
-          断开 <span className="ds-kbd">{shortcutMod}D</span>
+          {t("statusbar.disconnect")} <span className="ds-kbd">{shortcutMod}D</span>
         </span>
       </div>
     </div>

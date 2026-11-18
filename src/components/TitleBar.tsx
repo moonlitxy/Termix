@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { AVATARS, getAvatar, loadAvatarId, randomAvatarId, saveAvatarId } from "../lib/avatar";
-import { FUN_AVATAR_TIPS, pickFun } from "../lib/fun";
+import { pickFunLocalized } from "../lib/fun";
+import { getLang, useT } from "../lib/i18n";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { WindowControls } from "./WindowControls";
 import { isWindowsPlatform, windowControls } from "../lib/windowControls";
 
 export function TitleBar() {
+  const t = useT();
   const activity = useApp((s) => s.activity);
   const setActivity = useApp((s) => s.setActivity);
   const openPalette = useApp((s) => s.openPalette);
@@ -19,6 +21,7 @@ export function TitleBar() {
     setAvatarId(id);
     saveAvatarId(id);
   };
+  const avatarName = (id: string) => t(`avatar.${id}`);
 
   return (
     <div
@@ -41,11 +44,11 @@ export function TitleBar() {
         <button
           className="titlebar__search"
           type="button"
-          title={`全局搜索（${shortcutMod}+K）`}
+          title={t("titlebar.searchTitle", { mod: shortcutMod })}
           onClick={openPalette}
         >
           <Icon name="search" size={14} />
-          <span>搜索</span>
+          <span>{t("titlebar.search")}</span>
           <span className="ds-kbd">{shortcutMod}K</span>
         </button>
       </div>
@@ -56,7 +59,7 @@ export function TitleBar() {
             (activity === "settings" ? " is-active" : "")
           }
           type="button"
-          title="设置"
+          title={t("titlebar.settings")}
           onClick={() => setActivity("settings")}
         >
           <Icon name="settings" size={16} />
@@ -67,8 +70,8 @@ export function TitleBar() {
               "titlebar__avatar" + (avatarOpen ? " is-active" : "")
             }
             type="button"
-            title="用户菜单"
-            aria-label="用户菜单"
+            title={`${t("titlebar.userMenu")} (${avatarName(avatar.id)})`}
+            aria-label={t("titlebar.userMenu")}
             style={{ background: avatar.bg }}
             onClick={() => setAvatarOpen((v) => !v)}
           >
@@ -85,10 +88,10 @@ export function TitleBar() {
               <div className="ctx-menu titlebar__avatar-menu">
                 <div className="titlebar__avatar-info">
                   <div className="titlebar__avatar-name">
-                    {avatar.emoji} {avatar.name}
+                    {avatar.emoji} {avatarName(avatar.id)}
                   </div>
                   <div className="titlebar__avatar-meta">
-                    {pickFun(FUN_AVATAR_TIPS, avatarId.length)}
+                    {pickFunLocalized("avatarTips", avatarId.length, getLang())}
                   </div>
                 </div>
                 <div className="titlebar__avatar-grid">
@@ -99,7 +102,7 @@ export function TitleBar() {
                       className={
                         "titlebar__avatar-pick" + (a.id === avatarId ? " is-active" : "")
                       }
-                      title={`切换为${a.name}`}
+                      title={avatarName(a.id)}
                       style={{ background: a.bg }}
                       onClick={() => pickAvatar(a.id)}
                     >
@@ -110,41 +113,41 @@ export function TitleBar() {
                 <button
                   type="button"
                   className="ctx-menu__item"
-                  title="随机换一个头像"
+                  title={t("avatar.randomTitle")}
                   onClick={() => pickAvatar(randomAvatarId(avatarId))}
                 >
                   <Icon name="sparkles" size={12} />
-                  随机换一个
+                  {t("avatar.random")}
                 </button>
                 <div className="ctx-menu__sep" />
                 <button
                   type="button"
                   className="ctx-menu__item"
-                  title="打开系统偏好设置"
+                  title={t("titlebar.prefs")}
                   onClick={() => {
                     setAvatarOpen(false);
                     setActivity("settings");
                   }}
                 >
                   <Icon name="settings" size={12} />
-                  系统偏好设置
+                  {t("titlebar.prefs")}
                 </button>
                 <button
                   type="button"
                   className="ctx-menu__item"
-                  title="查看帮助与文档"
+                  title={t("titlebar.help")}
                   onClick={() => {
                     setAvatarOpen(false);
                     setActivity("help");
                   }}
                 >
                   <Icon name="help" size={12} />
-                  帮助与文档
+                  {t("titlebar.help")}
                 </button>
                 <button
                   type="button"
                   className="ctx-menu__item"
-                  title="查看 Termix 版本信息"
+                  title={t("titlebar.about")}
                   onClick={() => {
                     setAvatarOpen(false);
                     // 进入帮助页并定位到「关于 Termix」区块（版本号由构建配置注入，避免硬编码）
@@ -153,7 +156,7 @@ export function TitleBar() {
                   }}
                 >
                   <Icon name="info-circle" size={12} />
-                  关于 Termix
+                  {t("titlebar.about")}
                 </button>
               </div>
             </>

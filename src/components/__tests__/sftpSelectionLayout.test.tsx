@@ -18,7 +18,7 @@ describe("SftpView 选中布局回归", () => {
   });
 
   it("已选数量只显示在底部提示区", () => {
-    expect(src).toContain("selectionHint(selectedPaths.length)");
+    expect(src).toContain("selectionHint(selectedPaths.length, tr)");
     expect(src).toContain("sftp-pane__hint");
   });
 

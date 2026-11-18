@@ -5,6 +5,7 @@ import { ipc } from "../lib/ipc";
 import { useClampedMenuPosition } from "../lib/contextMenu";
 import { promptDialog } from "../store/feedback";
 import { createSplitTab } from "../lib/tabs";
+import { useT } from "../lib/i18n";
 import { connButtonClass, toConnVisual } from "../lib/connectionStatus";
 
 interface CtxMenu {
@@ -14,6 +15,7 @@ interface CtxMenu {
 }
 
 export function EditorTabs() {
+  const tr = useT();
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const setActiveTab = useApp((s) => s.setActiveTab);
@@ -79,7 +81,7 @@ export function EditorTabs() {
       id: nextTabId(),
       kind: t.kind,
       sessionId: t.sessionId,
-      title: t.title + "（副本）",
+      title: t.title + tr("tab.copySuffix"),
       status: "connecting",
     });
   };
@@ -98,9 +100,9 @@ export function EditorTabs() {
     const t = tabs.find((x) => x.id === ctx.tabId);
     if (!t) return;
     const name = await promptDialog({
-      title: "重命名标签",
+      title: tr("tab.renameTitle"),
       defaultValue: t.title,
-      confirmText: "重命名",
+      confirmText: tr("tab.renameConfirm"),
     });
     if (name && name.trim()) {
       updateTab(ctx.tabId, { title: name.trim() });
@@ -219,10 +221,10 @@ export function EditorTabs() {
             type="button"
             title={
               activeTab.status === "connected"
-                ? "断开当前连接"
+                ? tr("tab.disconnect")
                 : activeTab.status === "connecting"
-                  ? "正在连接…"
-                  : "连接已断开，点击重新连接"
+                  ? tr("tab.connecting")
+                  : tr("tab.reconnect")
             }
             disabled={activeTab.status === "connecting"}
             onClick={() => void toggleConnection()}
@@ -245,73 +247,61 @@ export function EditorTabs() {
           <button
             type="button"
             className="ctx-menu__item"
-            title="关闭当前标签并断开连接"
+            title={tr("tab.closeTabTitle")}
             onClick={() => {
               void destroyAndClose(ctx.tabId);
               setCtx(null);
             }}
           >
-            <Icon name="x" size={12} />
-            关闭标签
-          </button>
+            <Icon name="x" size={12} />{tr("tab.closeTab")}</button>
           <button
             type="button"
             className="ctx-menu__item"
-            title="关闭当前标签以外的所有标签"
+            title={tr("tab.closeOthersTitle")}
             onClick={() => {
               closeOthers();
               setCtx(null);
             }}
           >
-            <Icon name="more-h" size={12} />
-            关闭其他
-          </button>
+            <Icon name="more-h" size={12} />{tr("tab.closeOthers")}</button>
           <button
             type="button"
             className="ctx-menu__item"
-            title="关闭当前标签右侧的所有标签"
+            title={tr("tab.closeRightTitle")}
             onClick={() => {
               closeRight();
               setCtx(null);
             }}
           >
-            <Icon name="chevron-right" size={12} />
-            关闭右侧
-          </button>
+            <Icon name="chevron-right" size={12} />{tr("tab.closeRight")}</button>
           <div className="ctx-menu__sep" />
           <button
             type="button"
             className="ctx-menu__item"
-            title="复制当前标签（同一连接新开一个终端）"
+            title={tr("tab.duplicateTitle")}
             onClick={() => {
               duplicateTab();
               setCtx(null);
             }}
           >
-            <Icon name="copy" size={12} />
-            复制标签
-          </button>
+            <Icon name="copy" size={12} />{tr("tab.duplicate")}</button>
           <button
             type="button"
             className="ctx-menu__item"
-            title="分屏：在主标签右侧新开一个独立终端"
+            title={tr("tab.splitTitle")}
             onClick={splitTab}
           >
-            <Icon name="columns" size={12} />
-            分屏
-          </button>
+            <Icon name="columns" size={12} />{tr("tab.split")}</button>
           <button
             type="button"
             className="ctx-menu__item"
-            title="重命名当前标签"
+            title={tr("tab.renameTabTitle")}
             onClick={() => {
               void renameTab();
               setCtx(null);
             }}
           >
-            <Icon name="edit" size={12} />
-            重命名标签
-          </button>
+            <Icon name="edit" size={12} />{tr("tab.renameTab")}</button>
         </div>
       )}
     </div>

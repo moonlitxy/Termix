@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
+import { useT } from "../lib/i18n";
 import { useApp, dirname, joinPath } from "../store/app";
 import { ipc, onTransferProgress } from "../lib/ipc";
 import { confirmDialog, promptDialog, toast } from "../store/feedback";
@@ -25,6 +26,7 @@ function formatMtime(ts: number): string {
 }
 
 export function LocalFilesPane() {
+  const tr = useT();
   const localPath = useApp((s) => s.localPath);
   const remotePath = useApp((s) => s.remotePath);
   const sftpContext = useApp((s) => s.sftpContext);
@@ -129,9 +131,9 @@ export function LocalFilesPane() {
           target
         );
       }
-      toast.success(`已加入上传队列：${item.name}`);
+      toast.success(tr("sftp.queuedUpload", { n: item.name }));
     } catch (e) {
-      toast.error("上传失败：" + String(e));
+      toast.error(tr("local.uploadFailed", { e: String(e) }));
     }
   };
 
@@ -151,8 +153,8 @@ export function LocalFilesPane() {
     } else if (action.id === "copyPath" && item) {
       void navigator.clipboard
         .writeText(item.path)
-        .then(() => toast.success("路径已复制"))
-        .catch(() => toast.error("复制路径失败"));
+        .then(() => toast.success(tr("local.pathCopied")))
+        .catch(() => toast.error(tr("local.copyFailed")));
     } else if (action.id === "refresh") {
       setReloadKey((key) => key + 1);
     }
@@ -164,52 +166,52 @@ export function LocalFilesPane() {
   const createFolder = async () => {
     if (!localPath) return;
     const name = await promptDialog({
-      title: "新建本地文件夹",
-      placeholder: "文件夹名称",
-      confirmText: "创建",
+      title: tr("local.newFolder"),
+      placeholder: tr("local.folderName"),
+      confirmText: tr("sftp.create"),
     });
     const trimmed = name?.trim();
     if (!trimmed) return;
     try {
       await ipc.localMkdir(joinPath(localPath, trimmed));
       setReloadKey((key) => key + 1);
-      toast.success(`已创建文件夹：${trimmed}`);
+      toast.success(tr("local.created", { n: trimmed }));
     } catch (e) {
-      toast.error("创建文件夹失败：" + String(e));
+      toast.error(tr("local.createFailed", { e: String(e) }));
     }
   };
 
   const renameItem = async (item: SftpItem) => {
     const name = await promptDialog({
-      title: "重命名本地项目",
+      title: tr("local.renameTitle"),
       defaultValue: item.name,
-      confirmText: "重命名",
+      confirmText: tr("local.rename"),
     });
     const trimmed = name?.trim();
     if (!trimmed || trimmed === item.name) return;
     try {
       await ipc.localRename(item.path, joinPath(dirname(item.path), trimmed));
       setReloadKey((key) => key + 1);
-      toast.success(`已重命名为：${trimmed}`);
+      toast.success(tr("local.renamed", { n: trimmed }));
     } catch (e) {
-      toast.error("重命名失败：" + String(e));
+      toast.error(tr("local.renameFailed", { e: String(e) }));
     }
   };
 
   const deleteItem = async (item: SftpItem) => {
     const confirmed = await confirmDialog({
-      title: "删除本地项目",
-      message: `确定删除本地${item.isDir ? "目录" : "文件"}「${item.name}」？此操作不可恢复。`,
-      confirmText: "删除",
+      title: tr("local.deleteTitle"),
+      message: tr("local.deleteMsg", { d: item.isDir ? tr("sftp.typeDir") : tr("sftp.typeFile"), n: item.name }),
+      confirmText: tr("local.delete"),
       danger: true,
     });
     if (!confirmed) return;
     try {
       await ipc.localDelete(item.path, item.isDir);
       setReloadKey((key) => key + 1);
-      toast.success(`已删除：${item.name}`);
+      toast.success(tr("local.deleted", { n: item.name }));
     } catch (e) {
-      toast.error("删除失败：" + String(e));
+      toast.error(tr("local.deleteFailed", { e: String(e) }));
     }
   };
 
@@ -228,9 +230,9 @@ export function LocalFilesPane() {
       );
       if (exists) {
         const confirmed = await confirmDialog({
-          title: "覆盖本地文件",
-          message: `本地已存在「${name}」，是否覆盖？`,
-          confirmText: "覆盖",
+          title: tr("sftp.overwriteTitle"),
+          message: tr("local.overwriteMsg", { n: name }),
+          confirmText: tr("sftp.overwrite"),
           danger: true,
         });
         if (!confirmed) return;
@@ -250,9 +252,9 @@ export function LocalFilesPane() {
           target
         );
       }
-      toast.success(`已加入下载队列：${name}`);
+      toast.success(tr("local.queuedDownload", { n: name }));
     } catch (err) {
-      toast.error("下载失败：" + String(err));
+      toast.error(tr("local.downloadFailed", { e: String(err) }));
     }
   };
 
@@ -261,7 +263,7 @@ export function LocalFilesPane() {
       <div className="local-files__head">
         <span className="local-files__title">
           <Icon name="folder" size={13} />
-          本地文件
+          {tr("local.title")}
         </span>
         <button
           className={
@@ -269,7 +271,7 @@ export function LocalFilesPane() {
             (filterOpen ? " is-active" : "")
           }
           type="button"
-          title="过滤本地文件"
+          title={tr("local.filterTitle")}
           onClick={() => {
             const next = !filterOpen;
             setFilterOpen(next);
@@ -285,7 +287,7 @@ export function LocalFilesPane() {
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"
-          title="刷新本地目录"
+          title={tr("local.refreshTitle")}
           disabled={!localPath || loading}
           onClick={() => setReloadKey((key) => key + 1)}
         >
@@ -294,7 +296,7 @@ export function LocalFilesPane() {
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"
-          title="在系统文件管理器中打开"
+          title={tr("local.openInFinder")}
           disabled={!localPath}
           onClick={() => {
             const target = selected
@@ -303,7 +305,7 @@ export function LocalFilesPane() {
                 : dirname(selected.path)
               : localPath;
             void ipc.localOpenPath(target).catch((e) => {
-              toast.error("打开本地目录失败：" + String(e));
+              toast.error(tr("local.openFailed", { e: String(e) }));
             });
           }}
         >
@@ -312,7 +314,7 @@ export function LocalFilesPane() {
         <button
           className="ds-btn ds-btn--brand ds-btn--sm"
           type="button"
-          title="上传选中的本地文件或目录到当前远程目录"
+          title={tr("local.uploadSelTitle")}
           disabled={!selected || !sftpContext}
           onClick={() => void upload()}
         >
@@ -324,7 +326,7 @@ export function LocalFilesPane() {
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"
-          title="上级目录"
+          title={tr("local.up")}
           disabled={!localPath}
           onClick={() => openPath(dirname(localPath))}
         >
@@ -346,7 +348,7 @@ export function LocalFilesPane() {
           <input
             ref={filterRef}
             value={filterQuery}
-            placeholder="过滤文件名…"
+            placeholder={tr("local.filterPh")}
             spellCheck={false}
             onChange={(e) => setFilterQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -386,7 +388,7 @@ export function LocalFilesPane() {
         )}
         {!loading && !error && visibleItems.length === 0 && (
           <div className="local-files__empty">
-            {filterQuery.trim() ? "无匹配文件" : "空目录"}
+            {filterQuery.trim() ? tr("sftp.noMatch") : tr("local.empty")}
           </div>
         )}
         {!loading &&
@@ -431,7 +433,7 @@ export function LocalFilesPane() {
               </span>
               <span className="local-files__name">{item.name}</span>
               <span className="local-files__meta">
-                {item.isDir ? "目录" : formatSize(item.size)}
+                {item.isDir ? tr("sftp.typeDir") : formatSize(item.size)}
               </span>
               <span className="local-files__time">{formatMtime(item.mtime)}</span>
             </div>

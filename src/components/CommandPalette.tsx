@@ -8,16 +8,11 @@ import {
   type PaletteItem,
 } from "../lib/commandPalette";
 import { useFocusTrap } from "../lib/focusTrap";
+import { useT } from "../lib/i18n";
 import type { Snippet } from "../types";
 
-const KIND_LABEL = {
-  session: "会话",
-  snippet: "片段",
-  history: "历史",
-  activity: "入口",
-} as const;
-
 export function CommandPalette() {
+  const t = useT();
   const open = useApp((s) => s.paletteOpen);
   const closePalette = useApp((s) => s.closePalette);
   const setActivity = useApp((s) => s.setActivity);
@@ -31,6 +26,13 @@ export function CommandPalette() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   useFocusTrap(dialogRef, open);
+
+  const KIND_LABEL = {
+    session: t("palette.kind.session"),
+    snippet: t("palette.kind.snippet"),
+    history: t("palette.kind.history"),
+    activity: t("palette.kind.activity"),
+  } as const;
 
   useEffect(() => {
     if (!open) return;
@@ -76,9 +78,18 @@ export function CommandPalette() {
         subtitle: s.command,
       }))),
       ...searchPalette(query, "history", historyCommands),
-      ...searchPalette(query, "activity", PALETTE_ACTIVITIES),
+      // 功能入口标题随语言切换：运行时覆盖静态字典
+      ...searchPalette(
+        query,
+        "activity",
+        PALETTE_ACTIVITIES.map((a) => ({
+          id: a.id,
+          title: t(`palette.activity.${a.id}`),
+          subtitle: t(`palette.activity.${a.id}Sub`),
+        }))
+      ),
     ].sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
-  }, [query, snippets, histories, tabs, activeTabId]);
+  }, [query, snippets, histories, tabs, activeTabId, t]);
 
   useEffect(() => {
     setSelected((current) => Math.min(current, Math.max(0, items.length - 1)));
@@ -120,7 +131,7 @@ export function CommandPalette() {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="全局搜索"
+        aria-label={t("palette.aria")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="palette__search">
@@ -128,7 +139,7 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             value={query}
-            placeholder="搜索会话、片段、历史命令或功能入口"
+            placeholder={t("palette.searchPlaceholder")}
             autoFocus
             onChange={(e) => {
               setQuery(e.target.value);
@@ -153,7 +164,7 @@ export function CommandPalette() {
         </div>
         <div className="palette__list" role="listbox">
           {items.length === 0 && (
-            <div className="palette__empty">没有匹配结果</div>
+            <div className="palette__empty">{t("palette.empty")}</div>
           )}
           {items.map((item, index) => (
             <button

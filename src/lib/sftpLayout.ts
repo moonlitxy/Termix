@@ -17,9 +17,15 @@ export function shouldAutoFit(
   return lastKey !== key;
 }
 
-/** 底部提示区文本：上传提示 + 已选数量（右键批量操作，Esc 清空） */
-export function selectionHint(selectedCount: number): string {
-  const base = "可拖拽本地文件到此处上传";
+/**
+ * 底部提示区文本：上传提示 + 已选数量（右键批量操作，Esc 清空）。
+ * 文案走调用方传入的翻译函数，保持与界面语言一致。
+ */
+export function selectionHint(
+  selectedCount: number,
+  t: (key: string, vars?: Record<string, number>) => string
+): string {
+  const base = t("sftp.dropHint");
   if (selectedCount <= 0) return base;
-  return `${base} · 已选 ${selectedCount} 项（右键批量操作，Esc 清空）`;
+  return base + t("sftp.dropHintSel", { n: selectedCount });
 }

@@ -1,0 +1,42 @@
+name: Deploy Website
+
+# 官网静态页（website/）发布到 GitHub Pages：
+# Settings → Pages → Source 选择 "GitHub Actions" 即可。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 站点截图来自仓库 screenshots/，构建时复制进站点目录，避免重复提交大图
+      - name: Assemble site
+        run: |
+          mkdir -p website/assets
+          cp screenshots/termix-main-connected.png website/assets/termix-main.png
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+      - id: deployment
+        uses: actions/deploy-pages@v4

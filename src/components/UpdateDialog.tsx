@@ -5,9 +5,11 @@ import { loadSettings } from "../lib/settings";
 import { describeUpdateEndpoint } from "../lib/updateSource";
 import { useEffect, useRef } from "react";
 import { useFocusTrap } from "../lib/focusTrap";
+import { useT } from "../lib/i18n";
 
-/** 软件更新提示弹窗：检测到新版本后弹出，用户可选择立即更新 / 稍后提醒 / 忽略此版本 */
+/** 软件更新提示弹窗：检测到新版本后弹出，用户可选择立即更新 / {t("update.later")} / {t("update.skip")} */
 export function UpdateDialog() {
+  const t = useT();
   const open = useUpdate((s) => s.dialogOpen);
   const info = useUpdate((s) => s.info);
   const downloading = useUpdate((s) => s.downloading);
@@ -47,41 +49,41 @@ export function UpdateDialog() {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`发现新版本 v${info.latestVersion}`}
+        aria-label={t("update.newVersion", { ver: info.latestVersion })}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__header">
           <span className="dialog__title">
             <Icon name="download" size={15} />
-            发现新版本 v{info.latestVersion}
+            {t("update.newVersion", { ver: info.latestVersion })}
           </span>
           <button
             className="dialog__close"
             type="button"
             onClick={closeDialog}
             disabled={busy}
-            title="关闭"
+            title={t("common.close")}
           >
             <Icon name="x" size={16} />
           </button>
         </div>
 
         <div className="dialog__field upd-versions">
-          <span className="upd-versions__old">当前版本 v{info.currentVersion}</span>
+          <span className="upd-versions__old">{t("update.current", { ver: info.currentVersion })}</span>
           <span className="upd-versions__arrow">
             <Icon name="arrow-right-to-line" size={14} />
           </span>
-          <span className="upd-versions__new">最新版本 v{info.latestVersion}</span>
+          <span className="upd-versions__new">{t("update.newVersion", { ver: info.latestVersion })}</span>
         </div>
 
         <div className="dialog__field">
-          <div className="dialog__field-label">更新源</div>
+          <div className="dialog__field-label">{t("update.source")}</div>
           <div className="upd-notes">{describeUpdateEndpoint(loadSettings())}</div>
         </div>
 
         <div className="dialog__field">
-          <div className="dialog__field-label">更新内容</div>
-          <div className="upd-notes">{info.releaseNotes || "暂无更新说明"}</div>
+          <div className="dialog__field-label">{t("update.notes")}</div>
+          <div className="upd-notes">{info.releaseNotes || t("update.noNotes")}</div>
         </div>
 
         {error && <div className="dialog__field-error">{error}</div>}
@@ -91,13 +93,13 @@ export function UpdateDialog() {
             <div className="upd-progress">
               <div className="upd-progress__bar" style={{ width: `${progress}%` }} />
             </div>
-            <div className="upd-progress__text">正在下载安装包… {progress}%</div>
+            <div className="upd-progress__text">{t("update.downloading", { p: progress })}</div>
           </div>
         )}
 
         {downloadedPath && (
           <div className="dialog__field">
-            <div className="upd-done">下载完成，正在打开安装程序，请按提示完成安装。</div>
+            <div className="upd-done">{t("update.done")}</div>
           </div>
         )}
 
@@ -107,18 +109,18 @@ export function UpdateDialog() {
             type="button"
             disabled={busy}
             onClick={() => skip(info.latestVersion)}
-            title="本次更新不再提醒"
+            title={t("update.skipTitle")}
           >
-            忽略此版本
+            {t("update.skip")}
           </button>
           <button
             className="ds-btn ds-btn--secondary"
             type="button"
             disabled={busy}
             onClick={closeDialog}
-            title="稍后提醒，下次启动时再次检查"
+            title={t("update.laterTitle")}
           >
-            稍后提醒
+            {t("update.later")}
           </button>
           {info.assetUrl ? (
             <button
@@ -126,18 +128,18 @@ export function UpdateDialog() {
               type="button"
               disabled={busy || !!downloadedPath}
               onClick={() => void download()}
-              title="下载并打开安装包"
+              title={t("update.nowTitle")}
             >
-              {downloading ? "下载中…" : "立即更新"}
+              {downloading ? t("update.downloadingBtn") : t("update.now")}
             </button>
           ) : (
             <button
               className="ds-btn ds-btn--brand"
               type="button"
               onClick={() => void ipc.openExternal(info.releaseUrl).catch(() => {})}
-              title="使用浏览器打开 Release 下载页"
+              title={t("update.openRelease")}
             >
-              前往下载页
+              {t("update.goRelease")}
             </button>
           )}
         </div>

@@ -21,7 +21,10 @@ fn main() {
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("termix.db");
             let db = db::Db::open(db_path.to_str().ok_or("invalid db path")?)?;
-            app.manage(commands::AppState::new(db));
+            let app_state = commands::AppState::new(db, data_dir.clone());
+            // 键盘交互认证（2FA）需要向前端推送事件，提前注入应用句柄
+            app_state.ssh.set_app_handle(app.handle().clone());
+            app.manage(app_state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -32,11 +35,18 @@ fn main() {
             commands::session_delete,
             commands::sessions_export,
             commands::sessions_import,
+            commands::ssh_config_read_default,
+            commands::ssh_config_import,
+            commands::backup_list,
+            commands::backup_restore,
+            commands::backup_now,
             commands::group_list,
             commands::group_create,
             commands::group_delete,
             commands::session_connect,
             commands::session_disconnect,
+            commands::auth_respond,
+            commands::auth_cancel,
             commands::host_key_accept,
             commands::terminal_create,
             commands::terminal_write,

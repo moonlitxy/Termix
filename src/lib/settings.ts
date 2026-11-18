@@ -1,6 +1,8 @@
 // 共享应用设置（localStorage 持久化）
 // 修改后统一派发 termix-settings-change 事件，供轮询组件动态调整。
 
+import type { Lang } from "./i18n";
+
 export interface Settings {
   theme: "dark" | "light" | "system";
   fontSize: number;
@@ -19,6 +21,10 @@ export interface Settings {
   customMirror: string;
   /** 代理地址，如 http://127.0.0.1:7890（代理模式必填） */
   updateProxy: string;
+  /** 同步输入：终端输入同时写到其他已连接标签（含分屏） */
+  broadcastInput: boolean;
+  /** 界面语言：zh 中文（默认）/ en English */
+  lang: Lang;
 }
 
 export const SETTINGS_KEY = "termix.settings";
@@ -38,6 +44,8 @@ export const DEFAULT_SETTINGS: Settings = {
   updateMirror: "gh-proxy",
   customMirror: "",
   updateProxy: "",
+  broadcastInput: false,
+  lang: "zh",
 };
 
 export function loadSettings(): Settings {

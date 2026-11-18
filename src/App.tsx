@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useApp } from "./store/app";
+import { useT } from "./lib/i18n";
 import { useMonitor, selectMonitorConnection } from "./store/monitor";
 import { ActivityRail } from "./components/ActivityRail";
 import { TitleBar } from "./components/TitleBar";
@@ -21,6 +22,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { FeedbackHost } from "./components/FeedbackHost";
 import { CommandPalette } from "./components/CommandPalette";
+import { AuthPromptHost } from "./components/AuthPromptHost";
 import { Icon } from "./components/Icon";
 import {
   ipc,
@@ -73,22 +75,25 @@ function adjustFontSize(delta: number) {
 }
 
 function Placeholder({ id }: { id: string }) {
+  const t = useT();
   const p = PLACEHOLDERS[id] ?? { icon: "terminal", title: id };
+  const title = id === "plugins" ? t("app.plugins") : p.title;
   return (
     <div className="workspace__empty">
       <span className="workspace__empty-logo">
         <Icon name={p.icon} size={24} />
       </span>
-      <div className="workspace__empty-text">{p.title}</div>
-      <div className="workspace__empty-sub">该功能即将上线</div>
+      <div className="workspace__empty-text">{title}</div>
+      <div className="workspace__empty-sub">{t("app.comingSoon")}</div>
     </div>
   );
 }
 
 /** 懒加载视图的加载占位 */
 function ViewLoading() {
+  const t = useT();
   return (
-    <div className="view-skeleton" role="status" aria-label="内容加载中">
+    <div className="view-skeleton" role="status" aria-label={t("app.loading")}>
       <div className="view-skeleton__toolbar" />
       <div className="view-skeleton__grid">
         {[0, 1, 2, 3].map((item) => (
@@ -104,6 +109,7 @@ function ViewLoading() {
 }
 
 export default function App() {
+  const t = useT();
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const activity = useApp((s) => s.activity);
@@ -431,21 +437,19 @@ export default function App() {
                 <span className="workspace__empty-logo">
                   <Icon name="terminal" size={28} />
                 </span>
-                <div className="workspace__empty-text">开始你的远程会话</div>
-                <div className="workspace__empty-sub">
-                  双击左侧会话，或新建一个 SSH 连接
-                </div>
+                <div className="workspace__empty-text">{t("app.emptyTitle")}</div>
+                <div className="workspace__empty-sub">{t("app.emptySub")}</div>
                 <button
                   className="ds-btn ds-btn--brand workspace__empty-btn"
                   type="button"
                   onClick={() => useApp.getState().openNewConnection()}
                 >
                   <Icon name="plus" size={14} />
-                  新建连接
+                  {t("session.newConnTitle")}
                 </button>
                 <div className="workspace__empty-shortcut">
                   <span className="ds-kbd">{isWindows ? "Ctrl+T" : "⌘T"}</span>{" "}
-                  快速新建
+                  {t("app.quickNew")}
                 </div>
               </div>
             )
@@ -455,7 +459,7 @@ export default function App() {
               className="workspace__panel-resizer"
               role="separator"
               aria-orientation="horizontal"
-              aria-label="调整文件面板高度"
+              aria-label={t("app.resizePanel")}
               tabIndex={0}
               aria-valuenow={Math.round(sftpRatio * 100)}
               aria-valuemin={15}
@@ -519,6 +523,7 @@ export default function App() {
       <NewConnectionDialog />
       <UpdateDialog />
       <FeedbackHost />
+      <AuthPromptHost />
       <GlobalTooltip />
     </div>
   );

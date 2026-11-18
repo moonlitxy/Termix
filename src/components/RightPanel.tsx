@@ -6,20 +6,21 @@ import { ipc } from "../lib/ipc";
 import { resBarColor, resTextColor } from "../lib/resColor";
 import { formatBytePair, formatBytes } from "../lib/formatBytes";
 import { toast } from "../store/feedback";
+import { useT } from "../lib/i18n";
 import { loadSettings, saveSettings } from "../lib/settings";
 import type { TransferTask } from "../types";
 
 /** 系统运行时长 → 天小时分秒（如 1天23小时11分20秒） */
-function formatUptime(sec: number): string {
+function formatUptime(sec: number, t: (k: string, v?: Record<string, number>) => string): string {
   if (!sec) return "-";
   const d = Math.floor(sec / 86400);
   const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
-  if (d > 0) return `${d}天${h}小时${m}分${s}秒`;
-  if (h > 0) return `${h}小时${m}分${s}秒`;
-  if (m > 0) return `${m}分${s}秒`;
-  return `${s}秒`;
+  if (d > 0) return t("panel.uptimeDays", { d, h, m, s });
+  if (h > 0) return t("panel.uptimeHours", { h, m, s });
+  if (m > 0) return t("panel.uptimeMins", { m, s });
+  return t("panel.uptimeSecs", { s });
 }
 
 /** CPU 使用率迷你曲线 → SVG polyline 坐标（0-100 归一化） */
@@ -35,20 +36,20 @@ function sparkline(points: number[], width = 100, height = 32): string {
     .join(" ");
 }
 
-function taskStatusText(t: TransferTask): string {
-  switch (t.status) {
+function taskStatusText(task: TransferTask, tr: (k: string) => string): string {
+  switch (task.status) {
     case "completed":
-      return "已完成";
+      return tr("panel.task.done");
     case "failed":
-      return "失败";
+      return tr("panel.task.failed");
     case "cancelled":
-      return "已取消";
+      return tr("panel.task.cancelled");
     case "paused":
-      return "已暂停";
+      return tr("panel.task.paused");
     case "running":
-      return formatBytes(t.speed) + "/s";
+      return formatBytes(task.speed) + "/s";
     default:
-      return "排队中";
+      return tr("panel.task.queued");
   }
 }
 
@@ -59,6 +60,7 @@ function TaskFillClass(t: TransferTask): string {
 }
 
 export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean }) {
+  const tr = useT();
   const transfers = useApp((s) => s.transfers);
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
@@ -71,6 +73,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
     const layout = loadSettings();
     setExpanded(layout.rightPanelExpanded);
     useApp.setState({ sftpCollapsed: layout.sftpCollapsed });
+    useApp.setState({ broadcastInput: layout.broadcastInput ?? false });
     initialLayoutLoaded.current = true;
   }, [setExpanded]);
 
@@ -103,7 +106,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
       await action();
     } catch (e) {
       patchTransferStatus(task.id, previous);
-      toast.error(String(e), "传输操作失败");
+      toast.error(String(e), tr("panel.taskFailed"));
     } finally {
       setPendingTransfers((current) => {
         const next = { ...current };
@@ -150,7 +153,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
       (x) => x.sessionId === t.sessionId && x.connectionId
     );
     if (!conn?.connectionId) {
-      toast.warning("该会话已断开，请先重新连接后再试");
+      toast.warning(tr("panel.sessionGone"));
       return;
     }
     console.log("[transfer] retry", t.id, t.direction, { local: t.localPath, remote: t.remotePath });
@@ -186,17 +189,17 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
         "right-panel is-expanded" +
         (transfersOnly ? " right-panel--transfers-only" : "")
       }
-      aria-label={transfersOnly ? "资源与传输" : "资源监控"}
+      aria-label={transfersOnly ? tr("panel.resourcesTransfers") : tr("panel.resources")}
     >
       {expanded && (
         <>
       <div className="right-panel__header">
-        <span>{transfersOnly ? "资源与传输" : "资源监控"}</span>
+        <span>{transfersOnly ? tr("panel.resourcesTransfers") : tr("panel.resources")}</span>
         <button
           className="ds-btn ds-btn--tertiary ds-btn--icon"
           type="button"
-          title={transfersOnly ? "收起资源与传输" : "收起资源监控"}
-          aria-label={transfersOnly ? "收起资源与传输" : "收起资源监控"}
+          title={transfersOnly ? tr("panel.collapseTransfers") : tr("panel.collapseMonitor")}
+          aria-label={transfersOnly ? tr("panel.collapseTransfers") : tr("panel.collapseMonitor")}
           onClick={() => changeExpanded(false)}
         >
           <Icon name="chevron-right" size={15} />
@@ -208,9 +211,9 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
             <span className="right-panel__empty-icon">
               <Icon name="plug" size={26} />
             </span>
-            <span className="right-panel__empty-text">未连接服务器</span>
+            <span className="right-panel__empty-text">{tr("panel.noServer")}</span>
             <span className="right-panel__empty-sub">
-              打开终端连接会话后，在此查看实时资源占用与传输队列
+              {tr("panel.noServerSub")}
             </span>
           </div>
         ) : (
@@ -238,7 +241,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           )}
           <div className="res-card__detail">
             {cpuMeta
-              ? `${cpuMeta.cores ? cpuMeta.cores + " 核" : "-"}${cpuMeta.freq ? " · " + cpuMeta.freq : ""}`
+              ? `${cpuMeta.cores ? tr("stats.cores", { n: cpuMeta.cores }) : "-"}${cpuMeta.freq ? " · " + cpuMeta.freq : ""}`
               : "--"}
           </div>
         </div>
@@ -288,38 +291,38 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="clock" size={14} />运行
+              <Icon name="clock" size={14} />{tr("panel.running")}
             </span>
             <span className="res-card__value res-card__value--uptime">
-              {formatUptime(uptimeSec)}
+              {formatUptime(uptimeSec, tr)}
             </span>
           </div>
           <div className="res-card__detail">
-            {metrics ? "系统已连续运行时长" : "--"}
+            {metrics ? tr("panel.uptimeContinuous") : "--"}
           </div>
         </div>
 
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="bar" size={14} />负载
+              <Icon name="bar" size={14} />{tr("panel.load")}
             </span>
           </div>
           <div className="load-grid">
             <div className="load-cell">
-              <span className="load-cell__label">1 分钟</span>
+              <span className="load-cell__label">{tr("panel.min1")}</span>
               <span className="load-cell__value">
                 {metrics ? metrics.load1.toFixed(2) : "--"}
               </span>
             </div>
             <div className="load-cell">
-              <span className="load-cell__label">5 分钟</span>
+              <span className="load-cell__label">{tr("panel.min5")}</span>
               <span className="load-cell__value">
                 {metrics ? metrics.load5.toFixed(2) : "--"}
               </span>
             </div>
             <div className="load-cell">
-              <span className="load-cell__label">15 分钟</span>
+              <span className="load-cell__label">{tr("panel.min15")}</span>
               <span className="load-cell__value">
                 {metrics ? metrics.load15.toFixed(2) : "--"}
               </span>
@@ -336,15 +339,15 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div className="net-row">
-              <span className="net-row__label">↑ 上行</span>
+              <span className="net-row__label">{tr("mon.up")}</span>
               <span className="net-row__value">{formatBytes(netSpeed.tx)}/s</span>
             </div>
             <div className="net-row">
-              <span className="net-row__label">↓ 下行</span>
+              <span className="net-row__label">{tr("mon.down")}</span>
               <span className="net-row__value">{formatBytes(netSpeed.rx)}/s</span>
             </div>
             <div className="net-row">
-              <span className="net-row__label">连接数</span>
+              <span className="net-row__label">{tr("mon.conns")}</span>
               <span className="net-row__value">{metrics?.netConns ?? 0}</span>
             </div>
           </div>
@@ -352,10 +355,10 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
         </div>
 
         <div className="right-panel__transfers">
-          <div className="right-panel__section-title">传输队列</div>
+          <div className="right-panel__section-title">{tr("panel.queue")}</div>
           <div className="ds-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {transfers.length === 0 && (
-            <div className="transfer-row__status">暂无传输任务</div>
+            <div className="transfer-row__status">{tr("panel.noTasks")}</div>
           )}
           {transfers.map((t) => (
             <div key={t.id}>
@@ -365,16 +368,16 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
                   {t.fileName}
                 </span>
                 <span className="transfer-row__status">
-                  {taskStatusText(t)}
+                  {taskStatusText(t, tr)}
                   {t.status === "failed" && (
                     <button
                       className="ds-btn ds-btn--secondary"
                       type="button"
-                      title="重试"
+                      title={tr("panel.retry")}
                       style={{ height: 18, marginLeft: 2, padding: "0 6px" }}
                       onClick={() => retryTransfer(t)}
                     >
-                      重试
+                      {tr("panel.retry")}
                     </button>
                   )}
                   {/* 目录传输不支持断点续传，不提供暂停/恢复 */}
@@ -390,8 +393,8 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
                       disabled={!!pendingTransfers[t.id]}
                       title={
                         t.status === "running"
-                          ? "暂停：中断传输并保留已上传/下载的部分文件"
-                          : "恢复：从断点继续传输"
+                          ? tr("panel.pauseTitle")
+                          : tr("panel.resumeTitle")
                       }
                       style={{ width: 18, height: 18, marginLeft: 2 }}
                       onClick={() => {
@@ -416,7 +419,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
                       className="ds-btn ds-btn--tertiary ds-btn--icon"
                       type="button"
                       disabled={!!pendingTransfers[t.id]}
-                      title="取消"
+                      title={tr("common.cancel")}
                       style={{ width: 18, height: 18, marginLeft: 2 }}
                       onClick={() => {
                         console.log("[transfer] cancel task", t.id);
@@ -440,7 +443,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           ))}
           {transfers.length > 0 && (
             <div className="transfer-pane__hint">
-              单个文件支持暂停/恢复（断点续传），目录传输仅支持取消
+              {tr("panel.hint")}
             </div>
           )}
           </div>

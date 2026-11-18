@@ -89,6 +89,13 @@ describe("ipc command wrappers", () => {
       ["masterClear", ["pass"]],
       ["checkUpdate", [null, null]],
       ["downloadUpdate", ["url", "file", null]],
+      ["authRespond", ["auth-1", ["code"]]],
+      ["authCancel", ["auth-1"]],
+      ["sshConfigReadDefault", []],
+      ["sshConfigImport", ["Host a\n  HostName 1.2.3.4\n"]],
+      ["backupList", []],
+      ["backupRestore", ["sessions-1-auto.json"]],
+      ["backupNow", []],
       ["openInstaller", ["/tmp/file"]],
       ["openExternal", ["https://example.com"]],
     ];

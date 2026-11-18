@@ -1,26 +1,28 @@
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
+import { useT } from "../lib/i18n";
 import type { Activity } from "../types";
 
 interface RailItem {
   id: Activity;
   icon: string;
-  label: string;
+  labelKey: string;
 }
 
 const ITEMS: RailItem[] = [
-  { id: "terminal", icon: "terminal", label: "终端会话" },
-  { id: "forward", icon: "arrow-right-to-line", label: "端口转发" },
-  { id: "snippets", icon: "scroll-text", label: "命令片段" },
-  { id: "monitor", icon: "bar", label: "监控" },
+  { id: "terminal", icon: "terminal", labelKey: "rail.terminal" },
+  { id: "forward", icon: "arrow-right-to-line", labelKey: "rail.forward" },
+  { id: "snippets", icon: "scroll-text", labelKey: "rail.snippets" },
+  { id: "monitor", icon: "bar", labelKey: "rail.monitor" },
 ];
 
 const BOTTOM_ITEMS: RailItem[] = [
-  { id: "settings", icon: "settings", label: "设置" },
-  { id: "help", icon: "help", label: "帮助" },
+  { id: "settings", icon: "settings", labelKey: "rail.settings" },
+  { id: "help", icon: "help", labelKey: "rail.help" },
 ];
 
 export function ActivityRail() {
+  const t = useT();
   const activity = useApp((s) => s.activity);
   const setActivity = useApp((s) => s.setActivity);
 
@@ -33,7 +35,7 @@ export function ActivityRail() {
           className={
             "activity-rail__btn" + (activity === item.id ? " is-active" : "")
           }
-          title={item.label}
+          title={t(item.labelKey)}
           onClick={() => setActivity(item.id)}
         >
           <Icon name={item.icon} size={18} />
@@ -47,7 +49,7 @@ export function ActivityRail() {
           className={
             "activity-rail__btn" + (activity === item.id ? " is-active" : "")
           }
-          title={item.label}
+          title={t(item.labelKey)}
           onClick={() => setActivity(item.id)}
         >
           <Icon name={item.icon} size={18} />

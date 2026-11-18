@@ -6,6 +6,7 @@ import { ipc } from "../lib/ipc";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import { resBarColor, resTextColor } from "../lib/resColor";
 import { formatBytePair, formatBytes } from "../lib/formatBytes";
+import { useT } from "../lib/i18n";
 import type { ProcInfo, SysInfo } from "../types";
 
 function polyline(points: number[], width = 600, height = 160): string {
@@ -21,6 +22,7 @@ function polyline(points: number[], width = 600, height = 160): string {
 }
 
 export function MonitorView() {
+  const t = useT();
   const sftpContext = useApp((s) => s.sftpContext);
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
@@ -83,8 +85,8 @@ export function MonitorView() {
         <span className="workspace__empty-logo">
           <Icon name="bar" size={28} />
         </span>
-        <div className="workspace__empty-text">请先连接一个会话</div>
-        <div className="workspace__empty-sub">打开终端连接后即可查看实时监控</div>
+        <div className="workspace__empty-text">{t("mon.emptyTitle")}</div>
+        <div className="workspace__empty-sub">{t("mon.emptySub")}</div>
       </div>
     );
   }
@@ -102,34 +104,34 @@ export function MonitorView() {
         <div className="ds-card sys-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="cpu" size={14} />系统信息
+              <Icon name="cpu" size={14} />{t("mon.sysinfo")}
             </span>
           </div>
           <div className="sys-grid">
             <div className="sys-item">
-              <span className="sys-item__label">操作系统</span>
+              <span className="sys-item__label">{t("mon.os")}</span>
               <span className="sys-item__value" title={sysInfo.osName}>
                 {sysInfo.osName || "-"}
                 {sysInfo.osVersion ? ` (${sysInfo.osVersion})` : ""}
               </span>
             </div>
             <div className="sys-item">
-              <span className="sys-item__label">内核版本</span>
+              <span className="sys-item__label">{t("mon.kernel")}</span>
               <span className="sys-item__value">{sysInfo.kernel || "-"}</span>
             </div>
             <div className="sys-item">
-              <span className="sys-item__label">系统架构</span>
+              <span className="sys-item__label">{t("mon.arch")}</span>
               <span className="sys-item__value">{sysInfo.arch || "-"}</span>
             </div>
             <div className="sys-item">
-              <span className="sys-item__label">CPU</span>
+              <span className="sys-item__label">{t("mon.cpu")}</span>
               <span className="sys-item__value" title={sysInfo.cpuModel}>
-                {sysInfo.cpuCores ? `${sysInfo.cpuCores} 核` : "-"}
+                {sysInfo.cpuCores ? t("mon.cores", { n: sysInfo.cpuCores }) : "-"}
                 {sysInfo.cpuModel ? ` · ${sysInfo.cpuModel}` : ""}
               </span>
             </div>
             <div className="sys-item">
-              <span className="sys-item__label">内存</span>
+              <span className="sys-item__label">{t("mon.memory")}</span>
               <span className="sys-item__value">
                 {sysInfo.memTotal > 0
                   ? `${formatBytePair(sysInfo.memUsed, sysInfo.memTotal)} (${((sysInfo.memUsed / sysInfo.memTotal) * 100).toFixed(1)}%)`
@@ -157,7 +159,7 @@ export function MonitorView() {
         <div className="ds-card mon-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="bar" size={14} />Memory
+              <Icon name="bar" size={14} />{t("mon.memory")}
             </span>
             <span className="res-card__value" style={{ color: resTextColor(memPct) }}>
               {memPct.toFixed(1)}%
@@ -191,19 +193,19 @@ export function MonitorView() {
         <div className="ds-card mon-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="arrow-right-to-line" size={14} />Network
+              <Icon name="arrow-right-to-line" size={14} />{t("mon.network")}
             </span>
           </div>
           <div className="net-row">
-            <span className="net-row__label">↑ 上行</span>
+            <span className="net-row__label">{t("mon.up")}</span>
             <span className="net-row__value">{formatBytes(netSpeed.tx)}/s</span>
           </div>
           <div className="net-row">
-            <span className="net-row__label">↓ 下行</span>
+            <span className="net-row__label">{t("mon.down")}</span>
             <span className="net-row__value">{formatBytes(netSpeed.rx)}/s</span>
           </div>
           <div className="net-row">
-            <span className="net-row__label">连接数</span>
+            <span className="net-row__label">{t("mon.conns")}</span>
             <span className="net-row__value">{metrics?.netConns ?? 0}</span>
           </div>
         </div>
@@ -211,7 +213,7 @@ export function MonitorView() {
 
       <div className="ds-card mon-chart">
         <div className="res-card__head">
-          <span className="res-card__label">CPU 实时曲线（最近 5 分钟）</span>
+          <span className="res-card__label">{t("mon.chartTitle")}</span>
         </div>
         <svg viewBox="0 0 600 160" preserveAspectRatio="none" className="mon-chart__svg">
           <polyline
@@ -227,15 +229,15 @@ export function MonitorView() {
       <div className="ds-card mon-procs">
         <div className="res-card__head">
           <span className="res-card__label">
-            <Icon name="folder" size={14} />磁盘分区
+            <Icon name="folder" size={14} />{t("mon.disks")}
           </span>
         </div>
         <div className="mon-table mon-table--disks">
           <div className="mon-table__head">
-            <span>挂载点</span>
-            <span>总容量</span>
-            <span>已用</span>
-            <span>使用率</span>
+            <span>{t("mon.mount")}</span>
+            <span>{t("mon.total")}</span>
+            <span>{t("mon.used")}</span>
+            <span>{t("mon.usage")}</span>
           </div>
           {(metrics?.disks ?? []).map((d) => (
             <div className="mon-table__row" key={d.mount} title={d.mount}>
@@ -249,7 +251,7 @@ export function MonitorView() {
           ))}
           {(metrics?.disks ?? []).length === 0 && (
             <div className="mon-table__row">
-              <span>暂无数据</span>
+              <span>{t("mon.noData")}</span>
             </div>
           )}
         </div>
@@ -257,7 +259,7 @@ export function MonitorView() {
 
       <div className="ds-card mon-procs">
         <div className="res-card__head">
-          <span className="res-card__label">进程 Top</span>
+          <span className="res-card__label">{t("mon.procs")}</span>
         </div>
         <div className="mon-table">
           <div className="mon-table__head">

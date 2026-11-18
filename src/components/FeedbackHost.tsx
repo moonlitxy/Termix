@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useFeedback } from "../store/feedback";
 import { useFocusTrap } from "../lib/focusTrap";
+import { useT } from "../lib/i18n";
 
 const TOAST_ICON = {
   info: "info-circle",
@@ -11,6 +12,7 @@ const TOAST_ICON = {
 } as const;
 
 export function FeedbackHost() {
+  const t = useT();
   const toasts = useFeedback((state) => state.toasts);
   const confirmRequest = useFeedback((state) => state.confirmRequest);
   const promptRequest = useFeedback((state) => state.promptRequest);
@@ -72,8 +74,8 @@ export function FeedbackHost() {
             <button
               className="toast__close"
               type="button"
-              title="关闭"
-              aria-label="关闭提示"
+              title={t("common.close")}
+              aria-label={t("common.close")}
               onClick={() => dismissToast(item.id)}
             >
               <Icon name="x" size={12} />
@@ -98,12 +100,12 @@ export function FeedbackHost() {
           >
             <div className="feedback-dialog__head">
               <span className="feedback-dialog__title" id="feedback-confirm-title">
-                {confirmRequest.title ?? (confirmRequest.danger ? "确认操作" : "请确认")}
+                {confirmRequest.title ?? (confirmRequest.danger ? t("feedback.confirmDanger") : t("feedback.confirm"))}
               </span>
               <button
                 className="dialog__close"
                 type="button"
-                title="关闭"
+                title={t("common.close")}
                 onClick={() => settleConfirm(false)}
               >
                 <Icon name="x" size={15} />
@@ -119,7 +121,7 @@ export function FeedbackHost() {
                 autoFocus={confirmRequest.danger}
                 onClick={() => settleConfirm(false)}
               >
-                {confirmRequest.cancelText ?? "取消"}
+                {confirmRequest.cancelText ?? t("common.cancel")}
               </button>
               <button
                 className={
@@ -130,7 +132,7 @@ export function FeedbackHost() {
                 autoFocus={!confirmRequest.danger}
                 onClick={() => settleConfirm(true)}
               >
-                {confirmRequest.confirmText ?? "确定"}
+                {confirmRequest.confirmText ?? t("feedback.ok")}
               </button>
             </div>
           </div>
@@ -159,7 +161,7 @@ export function FeedbackHost() {
               <button
                 className="dialog__close"
                 type="button"
-                title="关闭"
+                title={t("common.close")}
                 onClick={() => settlePrompt(null)}
               >
                 <Icon name="x" size={15} />
@@ -183,10 +185,10 @@ export function FeedbackHost() {
                 type="button"
                 onClick={() => settlePrompt(null)}
               >
-                {promptRequest.cancelText ?? "取消"}
+                {promptRequest.cancelText ?? t("common.cancel")}
               </button>
               <button className="ds-btn ds-btn--brand" type="submit">
-                {promptRequest.confirmText ?? "确定"}
+                {promptRequest.confirmText ?? t("feedback.ok")}
               </button>
             </div>
           </form>

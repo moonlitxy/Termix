@@ -62,6 +62,8 @@ interface AppState {
   reconnectNonce: Record<string, number>;
   /** 帮助页滚动锚点：标题栏「关于 Termix」设置后，帮助视图挂载时定位到对应区块 */
   helpAnchor: string | null;
+  /** 同步输入：终端输入同时写到其他已连接标签（含分屏） */
+  broadcastInput: boolean;
 
   loadSessions: () => Promise<void>;
   loadGroups: () => Promise<void>;
@@ -92,6 +94,7 @@ interface AppState {
   toggleSftpCollapsed: () => void;
   setRightPanelExpanded: (open: boolean) => void;
   setCommandInputOpen: (open: boolean) => void;
+  toggleBroadcastInput: () => void;
   /** 请求指定标签重新连接（外部触发，如标题栏重连按钮） */
   requestReconnect: (tabId: string) => void;
 }
@@ -149,6 +152,7 @@ export const useApp = create<AppState>((set, get) => ({
   commandInputOpen: false,
   reconnectNonce: {},
   helpAnchor: null,
+  broadcastInput: false,
 
   loadSessions: async () => {
     try {
@@ -360,6 +364,12 @@ export const useApp = create<AppState>((set, get) => ({
     }),
   setRightPanelExpanded: (open) => set({ rightPanelExpanded: open }),
   setCommandInputOpen: (open) => set({ commandInputOpen: open }),
+  toggleBroadcastInput: () =>
+    set((s) => {
+      const next = !s.broadcastInput;
+      saveSettings({ ...loadSettings(), broadcastInput: next });
+      return { broadcastInput: next };
+    }),
   requestReconnect: (tabId) =>
     set((s) => ({
       reconnectNonce: { ...s.reconnectNonce, [tabId]: (s.reconnectNonce[tabId] ?? 0) + 1 },

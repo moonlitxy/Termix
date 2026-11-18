@@ -1046,6 +1046,40 @@ a {
   outline-color: var(--border-brand);
 }
 
+/* 会话行：跳板 / Agent 转发标记 */
+.session-row__jump {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border-neutral-l2);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* 新建连接对话框：字段说明与复选行 */
+.dialog__field-hint {
+  font-size: var(--body-xs-font-size);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.dialog__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--body-sm-font-size);
+  color: var(--text-default);
+  cursor: pointer;
+}
+
+.dialog__check input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--bg-brand);
+  cursor: pointer;
+}
+
 /* =========================================================================
    ActivityRail
    ========================================================================= */
@@ -4117,6 +4151,31 @@ button.sftp-head__cell {
 .st-hint--error {
   margin-top: 0;
   color: var(--status-error-default);
+}
+
+/* 数据备份列表 */
+.st-backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.st-backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.st-backup-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono);
+  font-size: var(--body-xs-font-size);
+  color: var(--text-secondary);
 }
 
 /* 设置项右侧的 radio 组（垂直排列） */
