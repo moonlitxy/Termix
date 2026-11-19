@@ -4,6 +4,7 @@ import {
   UPDATE_MIRRORS,
   applyMirror,
   describeUpdateEndpoint,
+  describeUpdateSource,
   findMirror,
   normalizeMirrorBase,
   normalizeProxyUrl,
@@ -65,5 +66,12 @@ describe("updateSource 更新源", () => {
     expect(
       describeUpdateEndpoint({ updateMode: "mirror", updateMirror: "gh-proxy", customMirror: "", updateProxy: "" })
     ).toContain("gh-proxy.com");
+  });
+
+  it("按后端实际连通通道展示（回退时不误导）", () => {
+    expect(describeUpdateSource("direct")).toBe("直连更新");
+    expect(describeUpdateSource("")).toBe("直连更新");
+    expect(describeUpdateSource("https://gh-proxy.com/")).toContain("gh-proxy.com");
+    expect(describeUpdateSource("https://mirror.example.com/")).toContain("mirror.example.com");
   });
 });

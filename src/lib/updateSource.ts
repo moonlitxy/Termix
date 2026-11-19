@@ -126,3 +126,14 @@ export function describeUpdateEndpoint(s: Pick<Settings, "updateMode" | "updateM
   if (r.proxy) return `代理：${r.proxy}`;
   return "直连更新";
 }
+
+/**
+ * 后端返回的实际连通通道 → 展示文案。
+ * 后端可能因所选通道失败而自动回退到其它镜像/直连，界面应如实展示。
+ */
+export function describeUpdateSource(source: string): string {
+  const s = (source ?? "").trim();
+  if (!s || s === "direct") return "直连更新";
+  const hit = UPDATE_MIRRORS.find((m) => m.base === s);
+  return `镜像加速：${hit ? hit.name : s}`;
+}
