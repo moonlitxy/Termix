@@ -23,6 +23,8 @@ pub struct UpdateInfo {
     pub asset_name: String,
     /// 更新说明（Markdown 正文）
     pub release_notes: String,
+    /// 本次实际连通的通道（mirror 基址 / "direct"），用于界面如实展示
+    pub source: String,
 }
 
 /// GitHub latest release 响应（仅反序列化所需字段）
@@ -121,44 +123,110 @@ fn current_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// 查询 GitHub 最新 release，返回版本对比结果与安装包下载信息
+/// 内置可用镜像（与前端 `UPDATE_MIRRORS` 保持一致，作为后端兜底顺序）。
+const FALLBACK_MIRRORS: [&str; 2] = ["https://gh-proxy.com/", "https://gh-proxy.org/"];
+
+/// 检查更新的候选通道：用户所选镜像 → 其余内置镜像 → 直连（去重）。
+/// 纯函数，便于测试顺序与去重行为。
+fn update_candidates(configured: Option<&str>) -> Vec<Option<String>> {
+    let mut out: Vec<Option<String>> = Vec::new();
+    if let Some(m) = configured.map(str::trim).filter(|m| !m.is_empty()) {
+        out.push(Some(normalize_mirror_base(m).unwrap_or_else(|_| m.to_string())));
+    }
+    for m in FALLBACK_MIRRORS {
+        if !out.iter().any(|c| c.as_deref() == Some(m)) {
+            out.push(Some(m.to_string()));
+        }
+    }
+    out.push(None);
+    out
+}
+
+/// 把 reqwest 错误展开成可读链路（DNS / TLS / 超时等原始原因）。
+fn describe_reqwest_error(e: &reqwest::Error) -> String {
+    use std::error::Error;
+    let mut msg = if e.is_timeout() {
+        "请求超时".to_string()
+    } else if e.is_connect() {
+        "无法建立连接".to_string()
+    } else {
+        e.to_string()
+    };
+    let mut src = e.source();
+    while let Some(s) = src {
+        msg.push_str(&format!(" → {s}"));
+        src = s.source();
+    }
+    msg
+}
+
+/// 查询 GitHub 最新 release，返回版本对比结果与安装包下载信息。
+/// 所选通道失败时自动尝试其余镜像与直连，取第一个成功的结果。
 #[tauri::command]
 pub async fn check_update(
     mirror: Option<String>,
     proxy: Option<String>,
 ) -> Result<UpdateInfo, String> {
     let client = http_client(proxy.as_deref())?;
-    let latest_url = apply_mirror(LATEST_URL, mirror.as_deref())?;
-    let resp = client
-        .get(latest_url)
-        .send()
-        .await
-        .map_err(|e| format!("检查更新失败（无法连接更新服务）：{e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("检查更新失败（更新服务返回 {}）", resp.status()));
-    }
-    let gh: GhRelease = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析更新信息失败：{e}"))?;
+    let candidates = update_candidates(mirror.as_deref());
+    let mut failures: Vec<String> = Vec::new();
 
-    let latest = gh.tag_name.trim_start_matches('v').to_string();
-    let cur = current_version();
-    let has_update = compare_versions(&latest, &cur) == Ordering::Greater;
-    let asset = pick_asset(&gh.assets);
-    let asset_url = match asset {
-        Some(a) => apply_mirror(&a.browser_download_url, mirror.as_deref())?,
-        None => String::new(),
-    };
-    Ok(UpdateInfo {
-        current_version: cur,
-        latest_version: latest,
-        has_update,
-        release_url: gh.html_url,
-        asset_url,
-        asset_name: asset.map(|a| a.name.clone()).unwrap_or_default(),
-        release_notes: gh.body.unwrap_or_default(),
-    })
+    for candidate in &candidates {
+        let latest_url = match apply_mirror(LATEST_URL, candidate.as_deref()) {
+            Ok(u) => u,
+            Err(e) => {
+                failures.push(format!("{}：{e}", candidate.as_deref().unwrap_or("direct")));
+                continue;
+            }
+        };
+        let label = candidate.as_deref().unwrap_or("direct");
+        let resp = match client.get(latest_url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("check_update: {label} failed: {e}");
+                failures.push(format!("{label}：{}", describe_reqwest_error(&e)));
+                continue;
+            }
+        };
+        if !resp.status().is_success() {
+            failures.push(format!("{label}：更新服务返回 {}", resp.status()));
+            continue;
+        }
+        let gh: GhRelease = match resp.json().await {
+            Ok(g) => g,
+            Err(e) => {
+                failures.push(format!("{label}：解析失败 {}", describe_reqwest_error(&e)));
+                continue;
+            }
+        };
+
+        let latest = gh.tag_name.trim_start_matches('v').to_string();
+        let cur = current_version();
+        let has_update = compare_versions(&latest, &cur) == Ordering::Greater;
+        let asset = pick_asset(&gh.assets);
+        let asset_url = match asset {
+            Some(a) => apply_mirror(&a.browser_download_url, candidate.as_deref()).unwrap_or_default(),
+            None => String::new(),
+        };
+        if !failures.is_empty() {
+            log::info!("check_update: succeeded via {label} after {} fallback(s)", failures.len());
+        }
+        return Ok(UpdateInfo {
+            current_version: cur,
+            latest_version: latest,
+            has_update,
+            release_url: gh.html_url,
+            asset_url,
+            asset_name: asset.map(|a| a.name.clone()).unwrap_or_default(),
+            release_notes: gh.body.unwrap_or_default(),
+            source: label.to_string(),
+        });
+    }
+
+    Err(format!(
+        "检查更新失败（所有通道均不可用）：\n{}",
+        failures.join("\n")
+    ))
 }
 
 /// 后台下载安装包：立即返回，进度 / 完成 / 失败通过事件推送
@@ -353,5 +421,30 @@ mod tests {
         assert!(normalize_mirror_base("").is_err());
         assert!(normalize_mirror_base("gh-proxy.com").is_err());
         assert!(normalize_mirror_base("socks5://127.0.0.1:1080").is_err());
+    }
+
+    /// 候选顺序：所选镜像优先，其余内置镜像补齐，直连兜底且不重复。
+    #[test]
+    fn update_candidates_order_and_dedup() {
+        let direct_last = |v: &Vec<Option<String>>| v.last().cloned().flatten().is_none();
+
+        let none = update_candidates(None);
+        assert_eq!(none.len(), 3);
+        assert_eq!(none[0].as_deref(), Some("https://gh-proxy.com/"));
+        assert_eq!(none[1].as_deref(), Some("https://gh-proxy.org/"));
+        assert!(direct_last(&none));
+
+        let gh = update_candidates(Some("https://gh-proxy.com"));
+        assert_eq!(gh.len(), 3, "selected mirror must not be duplicated");
+        assert_eq!(gh[0].as_deref(), Some("https://gh-proxy.com/"));
+
+        let org = update_candidates(Some("https://gh-proxy.org/"));
+        assert_eq!(org[0].as_deref(), Some("https://gh-proxy.org/"));
+        assert_eq!(org[1].as_deref(), Some("https://gh-proxy.com/"));
+
+        let custom = update_candidates(Some("https://mirror.example.com/"));
+        assert_eq!(custom[0].as_deref(), Some("https://mirror.example.com/"));
+        assert_eq!(custom.len(), 4);
+        assert!(direct_last(&custom));
     }
 }

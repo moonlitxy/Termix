@@ -1,8 +1,7 @@
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
 import { useUpdate } from "../store/update";
-import { loadSettings } from "../lib/settings";
-import { describeUpdateEndpoint } from "../lib/updateSource";
+import { describeUpdateSource } from "../lib/updateSource";
 import { useEffect, useRef } from "react";
 import { useFocusTrap } from "../lib/focusTrap";
 import { useT } from "../lib/i18n";
@@ -78,7 +77,7 @@ export function UpdateDialog() {
 
         <div className="dialog__field">
           <div className="dialog__field-label">{t("update.source")}</div>
-          <div className="upd-notes">{describeUpdateEndpoint(loadSettings())}</div>
+          <div className="upd-notes">{describeUpdateSource(info.source)}</div>
         </div>
 
         <div className="dialog__field">

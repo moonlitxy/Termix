@@ -247,6 +247,8 @@ export interface UpdateInfo {
   assetUrl: string;
   assetName: string;
   releaseNotes: string;
+  /** 本次实际连通的通道：镜像基址或 "direct" */
+  source: string;
 }
 
 export interface UpdateProgressEvent {

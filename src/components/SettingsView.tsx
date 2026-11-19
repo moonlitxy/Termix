@@ -12,6 +12,7 @@ import {
   CUSTOM_MIRROR_ID,
   UPDATE_MIRRORS,
   describeUpdateEndpoint,
+  describeUpdateSource,
   normalizeMirrorBase,
   normalizeProxyUrl,
   resolveUpdateEndpoint,
@@ -64,7 +65,9 @@ export function SettingsView() {
     setUpdateMsg(t("st.testing"));
     try {
       const info = await ipc.checkUpdate(r.mirror || null, r.proxy || null);
-      setUpdateMsg(t("st.testOk", { v: info.latestVersion }));
+      setUpdateMsg(
+        t("st.testOkVia", { src: describeUpdateSource(info.source), v: info.latestVersion })
+      );
     } catch (e) {
       setUpdateMsg(t("st.testFailed", { e: String(e) }));
     }
