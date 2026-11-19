@@ -126,19 +126,26 @@ fn current_version() -> String {
 /// 内置可用镜像（与前端 `UPDATE_MIRRORS` 保持一致，作为后端兜底顺序）。
 const FALLBACK_MIRRORS: [&str; 2] = ["https://gh-proxy.com/", "https://gh-proxy.org/"];
 
-/// 检查更新的候选通道：用户所选镜像 → 其余内置镜像 → 直连（去重）。
+/// 检查更新的候选通道：用户所选通道优先，其次其余内置镜像，最后直连兜底。
+/// - 镜像模式：所选镜像 → 其它镜像 → 直连
+/// - 直连模式：直连 → 内置镜像（直连不通时仍可拿到更新信息）
 /// 纯函数，便于测试顺序与去重行为。
 fn update_candidates(configured: Option<&str>) -> Vec<Option<String>> {
     let mut out: Vec<Option<String>> = Vec::new();
-    if let Some(m) = configured.map(str::trim).filter(|m| !m.is_empty()) {
-        out.push(Some(normalize_mirror_base(m).unwrap_or_else(|_| m.to_string())));
+    match configured.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => out.push(Some(
+            normalize_mirror_base(m).unwrap_or_else(|_| m.to_string()),
+        )),
+        None => out.push(None),
     }
     for m in FALLBACK_MIRRORS {
         if !out.iter().any(|c| c.as_deref() == Some(m)) {
             out.push(Some(m.to_string()));
         }
     }
-    out.push(None);
+    if !out.contains(&None) {
+        out.push(None);
+    }
     out
 }
 
@@ -426,17 +433,19 @@ mod tests {
     /// 候选顺序：所选镜像优先，其余内置镜像补齐，直连兜底且不重复。
     #[test]
     fn update_candidates_order_and_dedup() {
-        let direct_last = |v: &Vec<Option<String>>| v.last().cloned().flatten().is_none();
-
+        // 直连模式：直连优先，镜像作为兜底
         let none = update_candidates(None);
         assert_eq!(none.len(), 3);
-        assert_eq!(none[0].as_deref(), Some("https://gh-proxy.com/"));
-        assert_eq!(none[1].as_deref(), Some("https://gh-proxy.org/"));
-        assert!(direct_last(&none));
+        assert!(none[0].is_none(), "direct mode must try direct first");
+        assert_eq!(none[1].as_deref(), Some("https://gh-proxy.com/"));
+        assert_eq!(none[2].as_deref(), Some("https://gh-proxy.org/"));
 
+        // 镜像模式：所选镜像优先，直连最后
         let gh = update_candidates(Some("https://gh-proxy.com"));
         assert_eq!(gh.len(), 3, "selected mirror must not be duplicated");
         assert_eq!(gh[0].as_deref(), Some("https://gh-proxy.com/"));
+        assert_eq!(gh[1].as_deref(), Some("https://gh-proxy.org/"));
+        assert!(gh[2].is_none());
 
         let org = update_candidates(Some("https://gh-proxy.org/"));
         assert_eq!(org[0].as_deref(), Some("https://gh-proxy.org/"));
@@ -445,6 +454,6 @@ mod tests {
         let custom = update_candidates(Some("https://mirror.example.com/"));
         assert_eq!(custom[0].as_deref(), Some("https://mirror.example.com/"));
         assert_eq!(custom.len(), 4);
-        assert!(direct_last(&custom));
+        assert!(custom.last().unwrap().is_none());
     }
 }
