@@ -1492,50 +1492,63 @@ a {
 
 .sidebar-stat {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 38px;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
-  height: 22px;
+  gap: 8px;
+  height: 28px;
   color: var(--text-secondary);
   font-size: 11px;
 }
 
-.sidebar-stat--wide {
-  grid-template-columns: 28px minmax(0, 1fr) 108px;
-}
-
-.sidebar-stat-wrap {
-  min-width: 0;
-}
-
-.sidebar-stat__spark {
-  display: block;
-  width: 100%;
-  height: 20px;
-  margin: 1px 0 3px 34px;
-  width: calc(100% - 34px);
-}
-
-.sidebar-stat__track {
-  display: block;
-  height: 7px;
+.sidebar-stat__meter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
   overflow: hidden;
-  background: var(--bg-overlay-l3);
+  border: none;
   border-radius: var(--radius-full);
+  background: var(--bg-overlay-l3);
 }
 
 .sidebar-stat__fill {
-  display: block;
-  min-width: 0;
-  height: 100%;
+  position: absolute;
+  inset: 0 auto 0 0;
   border-radius: var(--radius-full);
   transition: width 0.25s ease, background-color 0.25s ease;
 }
 
-.sidebar-stat__value {
-  color: var(--text-default);
+.sidebar-stat__pct,
+.sidebar-stat__detail {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-family-mono);
+  font-size: 11px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.sidebar-stat__pct {
+  flex-shrink: 0;
+  color: var(--text-default);
+  font-weight: var(--font-weight-medium);
+}
+
+.sidebar-stat__detail {
+  flex: 1;
+  color: var(--text-secondary);
   text-align: right;
+}
+
+[data-theme="light"] .sidebar-stat__pct,
+[data-theme="light"] .sidebar-stat__detail {
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
 }
 
 .sidebar-stats__net {
@@ -4208,6 +4221,34 @@ button.sftp-head__cell {
 
 .st-input-group .ds-input {
   width: 160px;
+}
+
+.st-input-group--wide .ds-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.st-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.st-path-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border: 1px solid var(--border-neutral-l2);
+  border-radius: var(--radius-4);
+  background: var(--bg-overlay-l2);
+  color: var(--text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--body-xs-font-size);
 }
 
 .st-actions {

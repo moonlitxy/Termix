@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -45,10 +46,19 @@ pub struct AppState {
     pub master: MasterService,
     /// 应用数据目录：自动备份（backups/）落盘位置
     pub data_dir: std::path::PathBuf,
+    /// 默认下载目录：Windows 安装版位于安装目录下的 downloads
+    pub default_download_dir: std::path::PathBuf,
+    /// 当前数据目录是否位于安装目录（Windows 便携模式）
+    pub portable: bool,
 }
 
 impl AppState {
-    pub fn new(db: Db, data_dir: std::path::PathBuf) -> Self {
+    pub fn new(
+        db: Db,
+        data_dir: std::path::PathBuf,
+        default_download_dir: std::path::PathBuf,
+        portable: bool,
+    ) -> Self {
         let ssh = Arc::new(SshManager::new());
         let sftp = SftpService::new(ssh.clone());
         let forward = ForwardService::new(ssh.clone());
@@ -59,8 +69,56 @@ impl AppState {
             forward,
             master: MasterService::new(),
             data_dir,
+            default_download_dir,
+            portable,
         }
     }
+
+    pub fn app_paths(&self) -> AppPaths {
+        let configured = self
+            .db
+            .get_setting("download_dir")
+            .filter(|path| !path.trim().is_empty())
+            .filter(|path| PathBuf::from(path).is_absolute());
+        let download_dir = configured
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.default_download_dir.clone());
+        let _ = std::fs::create_dir_all(&download_dir);
+        self.write_download_marker(&download_dir);
+        AppPaths {
+            data_dir: self.data_dir.to_string_lossy().into_owned(),
+            default_download_dir: self.default_download_dir.to_string_lossy().into_owned(),
+            download_dir: download_dir.to_string_lossy().into_owned(),
+            portable: self.portable,
+        }
+    }
+
+    /// 卸载器无法读取 SQLite，这里把自定义下载目录写成 UTF-16LE 标记文件，
+    /// 供 NSIS 在卸载时判断是否需要清理安装目录之外的用户下载目录。
+    fn write_download_marker(&self, download_dir: &std::path::Path) {
+        let marker = self.data_dir.join("download_dir.txt");
+        if download_dir == self.default_download_dir {
+            let _ = std::fs::remove_file(marker);
+            return;
+        }
+        let text = download_dir.to_string_lossy().to_string();
+        let mut bytes = Vec::with_capacity(text.len() * 2);
+        for unit in text.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        if let Err(e) = std::fs::write(&marker, bytes) {
+            log::warn!("write download dir marker failed: {e}");
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AppPaths {
+    pub data_dir: String,
+    pub default_download_dir: String,
+    pub download_dir: String,
+    pub portable: bool,
 }
 
 fn session_to_input(s: &Session) -> SessionInput {
@@ -1142,6 +1200,11 @@ pub fn local_home() -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn local_ensure_dir(path: String) -> Result<(), String> {
+    crate::sftp::local_ensure_dir(&path)
+}
+
+#[tauri::command]
 pub fn local_mkdir(path: String) -> Result<(), String> {
     crate::sftp::local_mkdir(&path)
 }
@@ -1159,6 +1222,37 @@ pub fn local_delete(path: String, is_dir: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn local_open_path(path: String) -> Result<(), String> {
     crate::sftp::local_open_path(&path)
+}
+
+#[tauri::command]
+pub fn app_paths(state: State<'_, AppState>) -> AppPaths {
+    state.app_paths()
+}
+
+#[tauri::command]
+pub fn download_dir_set(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<AppPaths, String> {
+    let trimmed = path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(value) = trimmed {
+        let path = PathBuf::from(&value);
+        if !path.is_absolute() {
+            return Err("下载目录必须是绝对路径".into());
+        }
+        std::fs::create_dir_all(&path).map_err(|e| format!("创建下载目录失败：{e}"))?;
+        let probe = path.join(format!(".termix-write-test-{}", std::process::id()));
+        std::fs::File::create(&probe).map_err(|e| format!("下载目录不可写：{e}"))?;
+        let _ = std::fs::remove_file(&probe);
+        state
+            .db
+            .set_setting("download_dir", &path.to_string_lossy())?;
+    } else {
+        state.db.remove_setting("download_dir")?;
+    }
+    Ok(state.app_paths())
 }
 
 // ---- v0.3: 命令片段 ----
@@ -1542,6 +1636,71 @@ tmpfs           1000000    100000     900000  10% /run";
 
     fn test_db() -> crate::db::Db {
         crate::db::Db::open(":memory:").unwrap()
+    }
+
+    #[test]
+    fn app_paths_uses_configured_download_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "termix-app-paths-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let data_dir = root.join("data");
+        let default_download_dir = root.join("downloads");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let state = AppState::new(
+            test_db(),
+            data_dir.clone(),
+            default_download_dir.clone(),
+            true,
+        );
+
+        let paths = state.app_paths();
+        assert_eq!(paths.data_dir, data_dir.to_string_lossy().to_string());
+        assert_eq!(
+            paths.default_download_dir,
+            default_download_dir.to_string_lossy().to_string()
+        );
+        assert_eq!(
+            paths.download_dir,
+            default_download_dir.to_string_lossy().to_string()
+        );
+        assert!(paths.portable);
+
+        let custom = root.join("custom-downloads");
+        state
+            .db
+            .set_setting("download_dir", &custom.to_string_lossy())
+            .unwrap();
+        assert_eq!(
+            state.app_paths().download_dir,
+            custom.to_string_lossy().to_string()
+        );
+        let marker = data_dir.join("download_dir.txt");
+        let bytes = std::fs::read(&marker).unwrap();
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        assert_eq!(
+            String::from_utf16(&units).unwrap(),
+            custom.to_string_lossy().to_string()
+        );
+
+        state
+            .db
+            .set_setting("download_dir", "relative/path")
+            .unwrap();
+        assert_eq!(
+            state.app_paths().download_dir,
+            default_download_dir.to_string_lossy().to_string()
+        );
+        assert!(!marker.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn sess(name: &str, password: Option<&str>) -> crate::models::SessionInput {

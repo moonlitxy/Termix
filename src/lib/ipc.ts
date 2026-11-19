@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AppPaths,
   BackupFile,
   CommandHistory,
   ForwardRule,
@@ -24,6 +25,11 @@ import type {
 } from "../types";
 
 export const ipc = {
+  // app storage paths
+  appPaths: () => invoke<AppPaths>("app_paths"),
+  downloadDirSet: (path: string | null) =>
+    invoke<AppPaths>("download_dir_set", { path }),
+
   // sessions
   sessionList: () => invoke<Session[]>("session_list"),
   sessionCreate: (input: SessionInput) => invoke<string>("session_create", { input }),
@@ -124,6 +130,7 @@ export const ipc = {
   // local fs
   localList: (path: string) => invoke<SftpItem[]>("local_list", { path }),
   localHome: () => invoke<string>("local_home"),
+  localEnsureDir: (path: string) => invoke<void>("local_ensure_dir", { path }),
   localMkdir: (path: string) => invoke<void>("local_mkdir", { path }),
   localRename: (oldPath: string, newPath: string) =>
     invoke<void>("local_rename", { oldPath, newPath }),

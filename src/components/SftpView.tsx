@@ -623,11 +623,21 @@ export function SftpView() {
       toast.warning(tr("sftp.noSessionDownload"));
       return;
     }
-    const dest = joinPath(st.localPath, remote.name);
+    const downloadDir = st.appPaths?.downloadDir || st.localPath;
+    if (!downloadDir) {
+      toast.error(tr("sftp.noDownloadDir"));
+      return;
+    }
+    try {
+      await ipc.localEnsureDir(downloadDir);
+    } catch {
+      /* 交给下载任务报错 */
+    }
+    const dest = joinPath(downloadDir, remote.name);
     // 防呆：本地目标目录已存在同名文件时确认覆盖，避免静默覆盖本地数据
-    if (st.localPath) {
+    if (downloadDir) {
       try {
-        const list = await ipc.localList(st.localPath);
+        const list = await ipc.localList(downloadDir);
         if (list.some((f) => f.name === remote.name && !f.isDir)) {
           const confirmed = await confirmDialog({
             title: tr("sftp.overwriteTitle"),
@@ -662,11 +672,21 @@ export function SftpView() {
       toast.warning(tr("sftp.noSessionDownloadDir"));
       return;
     }
-    const dest = joinPath(st.localPath, remote.name);
+    const downloadDir = st.appPaths?.downloadDir || st.localPath;
+    if (!downloadDir) {
+      toast.error(tr("sftp.noDownloadDir"));
+      return;
+    }
+    try {
+      await ipc.localEnsureDir(downloadDir);
+    } catch {
+      /* 交给下载任务报错 */
+    }
+    const dest = joinPath(downloadDir, remote.name);
     // 防呆：本地已存在同名目录时提示（下载内容将合并进入该目录）
-    if (st.localPath) {
+    if (downloadDir) {
       try {
-        const list = await ipc.localList(st.localPath);
+        const list = await ipc.localList(downloadDir);
         if (list.some((f) => f.name === remote.name && f.isDir)) {
           const confirmed = await confirmDialog({
             title: tr("sftp.mergeTitle"),

@@ -19,6 +19,13 @@ export interface Session {
   lastConnectedAt?: number;
 }
 
+export interface AppPaths {
+  dataDir: string;
+  defaultDownloadDir: string;
+  downloadDir: string;
+  portable: boolean;
+}
+
 export interface SessionInput {
   name: string;
   host: string;

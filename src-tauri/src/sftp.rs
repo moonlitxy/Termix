@@ -1060,6 +1060,11 @@ pub fn local_mkdir(path: &str) -> Result<(), String> {
     std::fs::create_dir(&p).map_err(|e| format!("create_dir failed: {e}"))
 }
 
+pub fn local_ensure_dir(path: &str) -> Result<(), String> {
+    let p = ensure_safe_local_path(path)?;
+    std::fs::create_dir_all(&p).map_err(|e| format!("create_dir_all failed: {e}"))
+}
+
 pub fn local_rename(old_path: &str, new_path: &str) -> Result<(), String> {
     let from = ensure_safe_local_path(old_path)?;
     let to = ensure_safe_local_path(new_path)?;

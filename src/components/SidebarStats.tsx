@@ -20,70 +20,39 @@ function barColor(pct: number): string {
   return "var(--status-success-default)";
 }
 
-/** 占比曲线（CPU 历史）：0-100 归一化，占比体现在曲线高度上 */
-function sparkline(points: number[], width = 120, height = 20): string {
-  if (points.length < 2) return "";
-  return points
-    .map((v, i) => {
-      const x = (i / (points.length - 1)) * width;
-      const y = height - (Math.min(Math.max(v, 0), 100) / 100) * (height - 2) - 1;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-}
-
 function Metric({
   label,
   value,
-  valueText,
   detail,
+  title,
   ready,
   placeholder = "-",
-  wide = false,
-  spark,
 }: {
   label: string;
   value: number;
-  valueText?: string;
   detail?: string;
+  title?: string;
   ready: boolean;
   placeholder?: string;
-  wide?: boolean;
-  spark?: number[];
 }) {
   return (
-    <div className="sidebar-stat-wrap" title={detail}>
-      <div className={"sidebar-stat" + (wide ? " sidebar-stat--wide" : "")}>
-        <span>{label}</span>
-        <span className="sidebar-stat__track">
-          <span
-            className="sidebar-stat__fill"
-            style={{
-              width: ready ? `${Math.min(100, Math.max(0, value))}%` : 0,
-              background: barColor(value),
-            }}
-          />
+    <div className="sidebar-stat" title={title}>
+      <span className="sidebar-stat__label">{label}</span>
+      <span className="sidebar-stat__meter">
+        <span
+          className="sidebar-stat__fill"
+          style={{
+            width: ready ? `${Math.min(100, Math.max(0, value))}%` : 0,
+            background: barColor(value),
+          }}
+        />
+        <span className="sidebar-stat__pct">
+          {ready ? `${value}%` : placeholder}
         </span>
-        <span className="sidebar-stat__value">
-          {ready ? (valueText ?? `${value}%`) : placeholder}
-        </span>
-      </div>
-      {spark && spark.length > 1 && (
-        <svg
-          viewBox="0 0 120 20"
-          preserveAspectRatio="none"
-          className="sidebar-stat__spark"
-          aria-hidden="true"
-        >
-          <polyline
-            points={sparkline(spark)}
-            fill="none"
-            stroke="var(--bg-brand)"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )}
+        {ready && detail && (
+          <span className="sidebar-stat__detail">{detail}</span>
+        )}
+      </span>
     </div>
   );
 }
@@ -123,7 +92,6 @@ export function SidebarStats() {
 
   const metrics = useMonitor((s) => s.metrics);
   const netSpeed = useMonitor((s) => s.netSpeed);
-  const cpuHist = useMonitor((s) => s.cpuHist);
   const cpuMeta = useMonitor((s) => s.cpuMeta);
   const connectionId = selectMonitorConnection(sftpContext, tabs, activeTabId);
   const connectionTab =
@@ -157,21 +125,21 @@ export function SidebarStats() {
           value={0}
           ready={false}
           placeholder="0%"
-          detail={t("stats.noConnCpu")}
+          title={t("stats.noConnCpu")}
         />
         <Metric
           label={t("stats.memory")}
           value={0}
           ready={false}
           placeholder="0%"
-          detail={t("stats.noConnMem")}
+          title={t("stats.noConnMem")}
         />
         <Metric
           label={t("stats.disk")}
           value={0}
           ready={false}
           placeholder="0%"
-          detail={t("stats.noConnDisk")}
+          title={t("stats.noConnDisk")}
         />
         <div className="sidebar-stats__net">
           <span>↑ 0 B/s</span>
@@ -241,7 +209,8 @@ export function SidebarStats() {
         label="CPU"
         value={metrics ? cpu : 0}
         ready={!!metrics}
-        detail={
+        detail={cpuMeta?.cores ? t("stats.cores", { n: cpuMeta.cores }) : undefined}
+        title={
           metrics
             ? t("stats.cpuDetail", {
                 cpu,
@@ -255,17 +224,13 @@ export function SidebarStats() {
               })
             : t("stats.cpuWaiting")
         }
-        spark={cpuHist}
       />
       <Metric
         label={t("stats.memory")}
         value={metrics ? memPct : 0}
         ready={!!metrics}
-        wide
-        valueText={
-          metrics ? formatBytePair(metrics.memUsed, metrics.memTotal) : undefined
-        }
-        detail={
+        detail={metrics ? formatBytePair(metrics.memUsed, metrics.memTotal) : undefined}
+        title={
           metrics
             ? t("stats.memDetail", {
                 pair: formatBytePair(metrics.memUsed, metrics.memTotal),
@@ -278,13 +243,12 @@ export function SidebarStats() {
         label={t("stats.disk")}
         value={metrics ? disk : 0}
         ready={!!metrics}
-        wide
-        valueText={
+        detail={
           metrics
             ? formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0)
             : undefined
         }
-        detail={
+        title={
           metrics
             ? t("stats.diskDetail", {
                 pair: formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0),

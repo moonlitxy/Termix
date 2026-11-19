@@ -222,20 +222,27 @@ export default function App() {
         /* browser mode */
       }
       try {
-        const home = await ipc.localHome();
-        const saved = loadSettings().lastLocalPath;
-        let localPath = home;
-        if (saved) {
-          try {
-            await ipc.localList(saved);
-            localPath = saved;
-          } catch {
-            // 保存的目录已失效时回退到 home
-          }
-        }
-        useApp.setState({ localPath });
+        const paths = await ipc.appPaths();
+        useApp.getState().setAppPaths(paths);
+        useApp.setState({ localPath: paths.downloadDir });
       } catch {
-        /* browser mode */
+        // browser 模式或路径解析失败时回退到 home / 上次目录
+        try {
+          const home = await ipc.localHome();
+          const saved = loadSettings().lastLocalPath;
+          let localPath = home;
+          if (saved) {
+            try {
+              await ipc.localList(saved);
+              localPath = saved;
+            } catch {
+              // 保存的目录已失效时回退到 home
+            }
+          }
+          useApp.setState({ localPath });
+        } catch {
+          /* browser mode */
+        }
       }
     })();
     return () => {

@@ -21,7 +21,8 @@ import { formatBytes } from "../lib/formatBytes";
 import { useT } from "../lib/i18n";
 import { useUpdate } from "../store/update";
 import { confirmDialog, toast } from "../store/feedback";
-import type { BackupFile, MasterStatus } from "../types";
+import { isWindowsPlatform } from "../lib/windowControls";
+import type { AppPaths, BackupFile, MasterStatus } from "../types";
 
 export function SettingsView() {
   const t = useT();
@@ -33,6 +34,46 @@ export function SettingsView() {
   }, [settings]);
 
   const set = (patch: Partial<Settings>) => setSettings((s) => ({ ...s, ...patch }));
+
+  // ---- 文件与数据目录 ----
+  const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
+  const [downloadDraft, setDownloadDraft] = useState("");
+  const [savingDownloadDir, setSavingDownloadDir] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    ipc
+      .appPaths()
+      .then((paths) => {
+        if (cancelled) return;
+        setAppPaths(paths);
+        setDownloadDraft(paths.downloadDir);
+        useApp.getState().setAppPaths(paths);
+      })
+      .catch(() => {
+        /* browser mode */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveDownloadDir = async (value: string) => {
+    if (savingDownloadDir) return;
+    setSavingDownloadDir(true);
+    try {
+      const paths = await ipc.downloadDirSet(value.trim() || null);
+      setAppPaths(paths);
+      setDownloadDraft(paths.downloadDir);
+      useApp.getState().setAppPaths(paths);
+      useApp.setState({ localPath: paths.downloadDir });
+      toast.success(t("st.downloadDirSaved"));
+    } catch (e) {
+      toast.error(t("st.downloadDirFailed", { e: String(e) }));
+    } finally {
+      setSavingDownloadDir(false);
+    }
+  };
 
   // ---- 软件更新 ----
   const checking = useUpdate((s) => s.checking);
@@ -257,6 +298,82 @@ export function SettingsView() {
             </select>
           </div>
           <div className="st-hint">{t("st.languageHint")}</div>
+        </div>
+
+        <div className="ds-card st-section">
+          <div className="res-card__head">
+            <span className="res-card__label">
+              <Icon name="folder" size={14} />{t("st.storage")}
+            </span>
+          </div>
+          <div className="st-row st-row--col">
+            <label>{t("st.dataDir")}</label>
+            <div className="st-path-row">
+              <span className="st-path-value" title={appPaths?.dataDir}>
+                {appPaths?.dataDir ?? "-"}
+              </span>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                disabled={!appPaths}
+                onClick={() => {
+                  if (appPaths) void ipc.localOpenPath(appPaths.dataDir);
+                }}
+              >
+                {t("st.openDir")}
+              </button>
+            </div>
+            <div className="st-hint">{t("st.dataDirHint")}</div>
+            {isWindowsPlatform() && appPaths && !appPaths.portable && (
+              <div className="st-hint st-hint--error">{t("st.portableFallback")}</div>
+            )}
+          </div>
+          <div className="st-row st-row--col">
+            <label>{t("st.downloadDir")}</label>
+            <div className="st-input-group st-input-group--wide">
+              <input
+                className="ds-input"
+                value={downloadDraft}
+                spellCheck={false}
+                placeholder={appPaths?.defaultDownloadDir ?? ""}
+                onChange={(e) => setDownloadDraft(e.target.value)}
+                onBlur={() => {
+                  if (downloadDraft.trim() !== (appPaths?.downloadDir ?? "")) {
+                    void saveDownloadDir(downloadDraft);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void saveDownloadDir(downloadDraft);
+                  }
+                }}
+              />
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                disabled={!appPaths}
+                onClick={() => {
+                  if (appPaths) void ipc.localOpenPath(appPaths.downloadDir);
+                }}
+              >
+                {t("st.openDir")}
+              </button>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                disabled={savingDownloadDir}
+                onClick={() => void saveDownloadDir("")}
+              >
+                {t("st.resetDefault")}
+              </button>
+            </div>
+            <div className="st-hint">
+              {t("st.downloadDirHint", {
+                path: appPaths?.defaultDownloadDir ?? "-",
+              })}
+            </div>
+          </div>
         </div>
 
         <div className="ds-card st-section">

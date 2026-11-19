@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   Activity,
+  AppPaths,
   Group,
   Session,
   SftpItem,
@@ -46,6 +47,8 @@ interface AppState {
   remoteSelected: SftpItem | null;
   /** 本地下载目标目录（无本地文件面板，下载直接落到该目录） */
   localPath: string;
+  /** 应用数据/默认下载目录（由 Rust 按安装位置解析） */
+  appPaths: AppPaths | null;
   /** 远程目录列表加载中标记（用于展示加载状态，避免重复触发加载） */
   remoteLoading: boolean;
   /** 远程目录加载失败的错误信息（成功/加载中时为空） */
@@ -67,6 +70,7 @@ interface AppState {
 
   loadSessions: () => Promise<void>;
   loadGroups: () => Promise<void>;
+  setAppPaths: (paths: AppPaths) => void;
   setSearch: (kw: string) => void;
   openPalette: () => void;
   closePalette: () => void;
@@ -116,12 +120,17 @@ const inflightEnrich = new Set<string>();
 
 export function joinPath(a: string, b: string): string {
   if (!a) return b;
-  return a.endsWith("/") ? a + b : a + "/" + b;
+  if (a.endsWith("/") || a.endsWith("\\")) return a + b;
+  if (/^[A-Za-z]:$/.test(a)) return a + "\\" + b;
+  const sep = a.includes("\\") && !a.includes("/") ? "\\" : "/";
+  return a + sep + b;
 }
 
 export function dirname(p: string): string {
-  const i = p.lastIndexOf("/");
-  if (i <= 0) return "/";
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (i < 0) return ".";
+  if (i === 0) return "/";
+  if (i === 2 && /^[A-Za-z]:[\\/]/.test(p)) return p.slice(0, 3);
   return p.slice(0, i);
 }
 
@@ -144,6 +153,7 @@ export const useApp = create<AppState>((set, get) => ({
   remotePaths: {},
   remoteSelected: null,
   localPath: "",
+  appPaths: null,
   remoteLoading: false,
   remoteError: null,
   remoteCache: {},
@@ -162,6 +172,7 @@ export const useApp = create<AppState>((set, get) => ({
       console.warn("loadSessions:", e);
     }
   },
+  setAppPaths: (appPaths) => set({ appPaths }),
   loadGroups: async () => {
     try {
       const groups = await ipc.groupList();
