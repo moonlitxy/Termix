@@ -47,6 +47,11 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     join(process.cwd(), "src/components/SidebarStats.tsx"),
     "utf-8"
   );
+  const appSrc = readFileSync(join(process.cwd(), "src/App.tsx"), "utf-8");
+  const sftpSrc = readFileSync(
+    join(process.cwd(), "src/components/SftpView.tsx"),
+    "utf-8"
+  );
 
   it("GlobalTooltip 动态计算箭头偏移量 --tooltip-arrow-x 并保留边角边距", () => {
     expect(tooltipSrc).toContain("--tooltip-arrow-x");
@@ -104,6 +109,18 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     expect(statusbarSrc).not.toContain("status-bar__center");
   });
 
+  it("SFTP 收起后终端吃掉剩余高度，折叠条只保留工具栏", () => {
+    expect(appSrc).toContain("sftpCollapsed ? 1 : 1 - sftpRatio");
+    expect(cssSrc).toContain("flex-basis: 37px;");
+  });
+
+  it("SFTP 文件名列吸收剩余宽度，修改时间列保证完整显示", () => {
+    expect(cssSrc).toContain(
+      "grid-template-columns: minmax(var(--sftp-name), 1fr)"
+    );
+    expect(sftpSrc).toContain("mtime: 136");
+  });
+
   it("监控页复用连接建立时预取的系统信息", () => {
     expect(monitorSrc).toContain("s.sysInfo");
     expect(monitorSrc).toContain("aria-busy");
@@ -115,6 +132,7 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     expect(sidebarStatsSrc).toContain("sidebar-stat__pct");
     expect(sidebarStatsSrc).not.toContain("sidebar-stat__meter");
     expect(cssSrc).toContain(".sidebar-stat__track");
+    expect(cssSrc).toContain("grid-template-rows: 18px auto;");
   });
 
   it("头像下拉包含用户卡片、主题语言和退出入口，并合并帮助入口", () => {

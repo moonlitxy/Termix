@@ -386,7 +386,9 @@ export default function App() {
           {hasTabs ? (
             <div
               className="workspace__main workspace__main--files"
-              style={{ flexGrow: 1 - sftpRatio }}
+              // 收起时文件面板不再参与分配，终端必须吃掉全部剩余高度，
+              // 否则 flex-grow 总和小于 1 会在底部留下空白。
+              style={{ flexGrow: sftpCollapsed ? 1 : 1 - sftpRatio }}
             >
               {tabs
                 .filter((t) => !t.hidden)

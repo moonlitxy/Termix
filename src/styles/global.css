@@ -1597,21 +1597,24 @@ a {
 .sidebar-stat {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 38px;
+  grid-template-rows: 18px auto;
+  column-gap: 8px;
+  row-gap: 2px;
   align-items: center;
-  gap: 8px;
+  align-content: center;
   min-height: 30px;
   color: var(--text-secondary);
   font-size: 11px;
 }
 
-.sidebar-stat__body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+.sidebar-stat__label {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .sidebar-stat__track {
+  grid-column: 2;
+  grid-row: 1;
   display: block;
   height: 6px;
   overflow: hidden;
@@ -1627,6 +1630,8 @@ a {
 }
 
 .sidebar-stat__pct {
+  grid-column: 3;
+  grid-row: 1;
   text-align: right;
   color: var(--text-default);
   font-family: var(--font-family-mono);
@@ -1636,6 +1641,8 @@ a {
 }
 
 .sidebar-stat__detail {
+  grid-column: 2 / 4;
+  grid-row: 2;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2156,11 +2163,12 @@ a {
   text-align: center;
 }
 
-/* 六列网格：文件名 | 大小 | 类型 | 修改时间 | 权限 | 用户/组（列宽可拖动调整，末列吸收剩余空间） */
+/* 六列网格：文件名 | 大小 | 类型 | 修改时间 | 权限 | 用户/组。
+   文件名列吸收剩余宽度，数据列保持内容最小宽度，窗口变窄时由列表横向滚动兜底。 */
 .sftp-head,
 .sftp-row {
   display: grid;
-  grid-template-columns: var(--sftp-name) var(--sftp-size) var(--sftp-type) var(--sftp-mtime) var(--sftp-perms) var(--sftp-owner) minmax(0, 1fr);
+  grid-template-columns: minmax(var(--sftp-name), 1fr) var(--sftp-size) var(--sftp-type) var(--sftp-mtime) var(--sftp-perms) var(--sftp-owner);
   gap: 8px;
   align-items: center;
   /* 列表左右已无外边距，这里仅留 6px 内边距，保证列内容贴边 */
@@ -2833,8 +2841,9 @@ button.sftp-head__cell {
 .workspace__sftp--collapsed {
   flex-grow: 0;
   flex-shrink: 0;
-  flex-basis: 32px;
-  min-height: 32px;
+  /* 工具栏 36px + 顶部分隔线 1px，避免折叠后工具栏被裁切 */
+  flex-basis: 37px;
+  min-height: 37px;
 }
 
 .workspace__activity {

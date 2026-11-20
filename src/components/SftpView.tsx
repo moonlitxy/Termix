@@ -108,21 +108,22 @@ type ColKey = "name" | "size" | "type" | "mtime" | "perms" | "owner";
 
 const COL_MIN: Record<ColKey, number> = {
   name: 140,
-  size: 56,
-  type: 40,
+  size: 72,
+  type: 44,
   // 修改时间"2026-08-15 14:30"（16 个等宽字符）与权限"drwxr-xr-x"（10 字符）
-  // 必须完整显示，最小宽度按内容 + cell 内边距/边框计算，不足时横向滚动而非截断
-  mtime: 128,
-  perms: 86,
-  owner: 64,
+  // 必须完整显示，最小宽度按内容 + cell 内边距/边框计算，不足时横向滚动而非截断。
+  // mtime 需给 16 个等宽字符留足空间，136px 可完整显示并保留右侧分隔线间距。
+  mtime: 136,
+  perms: 88,
+  owner: 72,
 };
 
 const DEFAULT_WIDTHS: Record<ColKey, number> = {
   name: 220,
-  size: 64,
+  size: 72,
   type: 44,
-  mtime: 128,
-  perms: 86,
+  mtime: 140,
+  perms: 88,
   owner: 80,
 };
 

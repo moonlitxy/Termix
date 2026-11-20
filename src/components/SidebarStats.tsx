@@ -38,30 +38,28 @@ function Metric({
   return (
     <div className="sidebar-stat" title={title}>
       <span className="sidebar-stat__label">{label}</span>
-      <span className="sidebar-stat__body">
+      <span
+        className="sidebar-stat__track"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={ready ? value : 0}
+      >
         <span
-          className="sidebar-stat__track"
-          role="progressbar"
-          aria-label={label}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={ready ? value : 0}
-        >
-          <span
-            className="sidebar-stat__fill"
-            style={{
-              width: ready ? `${Math.min(100, Math.max(0, value))}%` : 0,
-              background: barColor(value),
-            }}
-          />
-        </span>
-        {ready && detail && (
-          <span className="sidebar-stat__detail">{detail}</span>
-        )}
+          className="sidebar-stat__fill"
+          style={{
+            width: ready ? `${Math.min(100, Math.max(0, value))}%` : 0,
+            background: barColor(value),
+          }}
+        />
       </span>
       <span className="sidebar-stat__pct">
         {ready ? `${value}%` : placeholder}
       </span>
+      {ready && detail && (
+        <span className="sidebar-stat__detail">{detail}</span>
+      )}
     </div>
   );
 }
