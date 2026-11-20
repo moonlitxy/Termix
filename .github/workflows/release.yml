@@ -9,6 +9,13 @@ on:
 permissions:
   contents: write
 
+env:
+  # GitHub 海外 runner 访问 crates.io 更稳定；国内本地开发仍使用
+  # src-tauri/.cargo/config.toml 中的 rsproxy 镜像。
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_TIMEOUT: "600"
+  CARGO_HTTP_LOW_SPEED_LIMIT: "1"
+
 jobs:
   # 发版闸门：只有指向 main 提交的 tag 才产出安装包。
   # dev 上打 tag 允许存在，workflow 正常结束（绿色），但所有构建 job 被跳过。
@@ -42,6 +49,9 @@ jobs:
     if: needs.guard.outputs.on_main == 'true'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Use crates.io on CI
+        run: rm -f src-tauri/.cargo/config.toml
 
       - uses: actions/setup-node@v4
         with:
@@ -144,6 +154,10 @@ jobs:
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Use crates.io on CI
+        shell: pwsh
+        run: Remove-Item -Force src-tauri/.cargo/config.toml -ErrorAction SilentlyContinue
 
       - uses: actions/setup-node@v4
         with:

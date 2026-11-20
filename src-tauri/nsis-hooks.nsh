@@ -3,6 +3,9 @@
 ; - 删除安装目录下的 data / downloads、AppData 与 WebView2 数据；
 ; - 自定义下载目录只在明确确认后删除，并跳过盘符根目录和常见用户目录。
 
+!include "StrFunc.nsh"
+${Using:StrFunc} StrStr
+
 Var TermixDeleteAllData
 
 !macro NSIS_HOOK_PREUNINSTALL
