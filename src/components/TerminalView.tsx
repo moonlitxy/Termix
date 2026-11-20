@@ -224,25 +224,41 @@ export function TerminalView({ tab }: { tab: Tab }) {
     const dataDisp = terminal.onData((data) => {
       const t = tabRef.current;
       if (data.startsWith("\x1b")) {
-        // ESC 开头为控制序列（方向键等），重置当前行跟踪，避免误拼
-        cmdLine = "";
+        // 如果是方向键左右移动，不打断行记录；仅上下切换历史或中断时重置跟踪
+        if (data === "\x1b[A" || data === "\x1b[B") {
+          cmdLine = "";
+        }
       } else {
         for (const ch of data) {
           if (ch === "\r" || ch === "\n") {
-            const cmd = cmdLine.trim();
+            let cmd = cmdLine.trim();
+            // 如果键盘跟踪为空（如按上下键调出历史、或 Tab 补全），尝试从终端当前光标行提取命令
+            if (!cmd) {
+              try {
+                const buf = terminal.buffer.active;
+                const line = buf.getLine(buf.baseY + buf.cursorY);
+                if (line) {
+                  const raw = line.translateToString(true).trim();
+                  // 匹配常见 shell 提示符如 "# ", "$ ", "> ", "% ", "]# ", "]$ " 之后的内容
+                  const m = raw.match(/(?:[#$%>]|\]#|\]\$)\s+(.+)$/);
+                  if (m && m[1].trim()) {
+                    cmd = m[1].trim();
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+            }
             if (cmd && t.sessionId) {
               ipc.historyAdd(t.sessionId, cmd).catch(() => {});
-              document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT));
+              document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
             }
             cmdLine = "";
           } else if (ch === "\u007f" || ch === "\b") {
             // 退格
             cmdLine = cmdLine.slice(0, -1);
-          } else if (ch === "\u0003") {
-            // Ctrl+C：中断当前行
-            cmdLine = "";
-          } else if (ch === "\u0015") {
-            // Ctrl+U：清空当前行
+          } else if (ch === "\u0003" || ch === "\u0015") {
+            // Ctrl+C 或 Ctrl+U：中断/清空当前行
             cmdLine = "";
           } else if (ch === "\u0017") {
             // Ctrl+W：删除最后一个词
@@ -492,6 +508,11 @@ export function TerminalView({ tab }: { tab: Tab }) {
     if (!cur.connectionId || !cur.shellId) return;
     try {
       await ipc.terminalWrite(cur.connectionId, cur.shellId, text);
+      const trimmed = text.trim();
+      if (trimmed && cur.sessionId && text.includes("\n") && !trimmed.includes("\n")) {
+        ipc.historyAdd(cur.sessionId, trimmed).catch(() => {});
+        document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
+      }
     } catch (e) {
       console.error("terminal write failed:", e);
     }

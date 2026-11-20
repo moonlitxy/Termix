@@ -67,5 +67,5 @@ export const PALETTE_ACTIVITIES: {
   { id: "snippets", title: "命令片段", subtitle: "管理和执行常用命令" },
   { id: "monitor", title: "系统监控", subtitle: "查看远程服务器资源占用" },
   { id: "settings", title: "设置", subtitle: "主题、终端、安全和更新" },
-  { id: "help", title: "帮助", subtitle: "快捷键和常见问题" },
+  { id: "help", title: "帮助", subtitle: "使用文档、快捷键和常见问题" },
 ];

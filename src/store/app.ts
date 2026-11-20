@@ -65,6 +65,8 @@ interface AppState {
   reconnectNonce: Record<string, number>;
   /** 帮助页滚动锚点：标题栏「关于 Termix」设置后，帮助视图挂载时定位到对应区块 */
   helpAnchor: string | null;
+  /** 设置页当前激活的侧边栏页签 */
+  settingsTab: "general" | "terminal" | "security" | "monitor" | "update";
   /** 同步输入：终端输入同时写到其他已连接标签（含分屏） */
   broadcastInput: boolean;
 
@@ -73,6 +75,7 @@ interface AppState {
   setAppPaths: (paths: AppPaths) => void;
   setSearch: (kw: string) => void;
   openPalette: () => void;
+  setSettingsTab: (tab: "general" | "terminal" | "security" | "monitor" | "update") => void;
   closePalette: () => void;
 
   addTab: (tab: Tab) => void;
@@ -162,6 +165,7 @@ export const useApp = create<AppState>((set, get) => ({
   commandInputOpen: false,
   reconnectNonce: {},
   helpAnchor: null,
+  settingsTab: "general",
   broadcastInput: false,
 
   loadSessions: async () => {
@@ -218,6 +222,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   setActivity: (a) => set({ activity: a }),
   setHelpAnchor: (id) => set({ helpAnchor: id }),
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
   setTransfers: (list) => set({ transfers: list }),
   upsertTransfer: (e) =>
     set((s) => {

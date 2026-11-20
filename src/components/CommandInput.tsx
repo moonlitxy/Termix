@@ -38,6 +38,7 @@ export function CommandInput() {
   const [histOpen, setHistOpen] = useState(false);
   const [histIdx, setHistIdx] = useState(-1);
   const [histQuery, setHistQuery] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const histSearchRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -58,7 +59,7 @@ export function CommandInput() {
       await ipc.terminalWrite(tab.connectionId, tab.shellId, command + "\n");
       if (tab.sessionId) {
         await ipc.historyAdd(tab.sessionId, command);
-        document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT));
+        document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
       }
     }
     setValue("");
@@ -77,8 +78,13 @@ export function CommandInput() {
         /* ignore */
       }
     };
+    void reload();
+    document.addEventListener(HISTORY_CHANGED_EVENT, reload);
     window.addEventListener(HISTORY_CHANGED_EVENT, reload);
-    return () => window.removeEventListener(HISTORY_CHANGED_EVENT, reload);
+    return () => {
+      document.removeEventListener(HISTORY_CHANGED_EVENT, reload);
+      window.removeEventListener(HISTORY_CHANGED_EVENT, reload);
+    };
   }, [tab?.sessionId]);
 
   const toggleHistory = async () => {
@@ -103,6 +109,23 @@ export function CommandInput() {
     setHistOpen(false);
     setHistQuery("");
     setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const copyCommand = async (e: React.MouseEvent, cmd: string, id: string) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId((curr) => (curr === id ? null : curr)), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const executeFromHistory = async (e: React.MouseEvent, cmd: string) => {
+    e.stopPropagation();
+    await execute(cmd);
+    setHistOpen(false);
   };
 
   // 外部点击关闭 popover
@@ -221,10 +244,33 @@ export function CommandInput() {
                   onClick={() => reuseCommand(h.command)}
                   title={t("cmdinput.reuseTitle")}
                 >
-                  <span className="command-input__history-cmd">{h.command}</span>
-                  <span className="command-input__history-time">
-                    {formatTime(h.executedAt)}
-                  </span>
+                  <div className="command-input__history-main">
+                    <span className="command-input__history-cmd">{h.command}</span>
+                    <span className="command-input__history-time">
+                      {formatTime(h.executedAt)}
+                    </span>
+                  </div>
+                  <div className="command-input__history-actions">
+                    <button
+                      type="button"
+                      className="ds-btn ds-btn--xs ds-btn--secondary command-input__history-action-btn"
+                      title={t("cmdinput.copyTitle")}
+                      onClick={(e) => void copyCommand(e, h.command, h.id)}
+                    >
+                      <Icon name={copiedId === h.id ? "check-circle" : "copy"} size={11} />
+                      {copiedId === h.id ? t("cmdinput.copied") : t("common.copy")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ds-btn ds-btn--xs ds-btn--brand command-input__history-action-btn"
+                      title={t("cmdinput.execCmdTitle")}
+                      disabled={disabled}
+                      onClick={(e) => void executeFromHistory(e, h.command)}
+                    >
+                      <Icon name="send" size={11} />
+                      {t("cmdinput.exec")}
+                    </button>
+                  </div>
                 </div>
               ))
             )}

@@ -163,19 +163,12 @@ export default function App() {
     });
   };
 
-  // Theme and typography are application-wide; keep system-theme changes live
-  // even when the settings page is not mounted.
+  // Theme and typography are application-wide; apply saved changes live.
   useEffect(() => {
     const sync = () => applyAppearance(loadSettings());
     sync();
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onSystemTheme = () => {
-      if (loadSettings().theme === "system") sync();
-    };
-    media.addEventListener("change", onSystemTheme);
     window.addEventListener(SETTINGS_CHANGE_EVENT, sync);
     return () => {
-      media.removeEventListener("change", onSystemTheme);
       window.removeEventListener(SETTINGS_CHANGE_EVENT, sync);
     };
   }, []);
@@ -389,7 +382,7 @@ export default function App() {
             (panelResizing ? " is-panel-resizing" : "")
           }
         >
-          {hasTabs && <EditorTabs />}
+          <EditorTabs />
           {hasTabs ? (
             <div
               className="workspace__main workspace__main--files"

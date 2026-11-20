@@ -53,8 +53,10 @@ const BLOCKS: HelpBlock[] = [
     icon: "key",
     title: "快捷键",
     kbd: [
+      { label: "全局搜索", keys: "⌘ / Ctrl + K" },
       { label: "新建连接", keys: "⌘ / Ctrl + T" },
       { label: "断开当前连接", keys: "⌘ / Ctrl + D" },
+      { label: "底部命令输入", keys: "Ctrl + L" },
       { label: "终端字号缩放", keys: "Ctrl + / -" },
       { label: "终端内搜索", keys: "Ctrl + F" },
       { label: "命令历史", keys: "↑ / ↓" },
@@ -203,8 +205,10 @@ const BLOCKS_EN: HelpBlock[] = [
     icon: "key",
     title: "Shortcuts",
     kbd: [
+      { label: "Global search", keys: "⌘ / Ctrl + K" },
       { label: "New connection", keys: "⌘ / Ctrl + T" },
       { label: "Disconnect", keys: "⌘ / Ctrl + D" },
+      { label: "Bottom command input", keys: "Ctrl + L" },
       { label: "Terminal font zoom", keys: "Ctrl + / -" },
       { label: "Search in terminal", keys: "Ctrl + F" },
       { label: "Command history", keys: "↑ / ↓" },

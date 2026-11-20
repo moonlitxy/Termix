@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
-import type { Metrics } from "../types";
+import type { Metrics, SysInfo } from "../types";
 
 /**
  * 全局共享的监控数据源（单一轮询循环）。
@@ -72,6 +72,8 @@ interface MonitorState {
   metrics: Metrics | null;
   netSpeed: { rx: number; tx: number };
   cpuMeta: CpuMeta | null;
+  /** 连接建立时一次性获取的系统信息，监控页直接复用，避免打开时再等待 */
+  sysInfo: SysInfo | null;
   /** CPU 使用率滚动历史（近 60 个采样），驱动迷你曲线 */
   cpuHist: number[];
   /** 最近一次成功采样的本地时刻 */
@@ -112,12 +114,15 @@ function startPolling(
   // 每秒 tick：本地时钟驱动运行时长连续递增，与监控刷新间隔无关
   tickTimer = window.setInterval(() => set({ nowTs: Date.now() }), 1000);
 
-  // 连接建立时获取一次 CPU 硬件信息（核心数/主频）
+  // 连接建立时获取一次系统信息（OS/内核/CPU/内存），监控页复用，避免打开时等待。
   ipc
     .systemInfo(connId)
     .then((info) => {
       if (get().connectionId === connId) {
-        set({ cpuMeta: { cores: info.cpuCores, freq: extractCpuFreq(info.cpuModel) } });
+        set({
+          cpuMeta: { cores: info.cpuCores, freq: extractCpuFreq(info.cpuModel) },
+          sysInfo: info,
+        });
       }
     })
     .catch(() => {
@@ -181,6 +186,7 @@ const EMPTY = {
   metrics: null as Metrics | null,
   netSpeed: { rx: 0, tx: 0 },
   cpuMeta: null as CpuMeta | null,
+  sysInfo: null as SysInfo | null,
   cpuHist: [] as number[],
   lastSampleAt: 0,
   uptimeBase: { uptime: 0, ts: 0 },

@@ -16,29 +16,28 @@ describe("avatar 默认头像", () => {
     installStorageStub();
   });
 
-  it("首批包含狗狗与鲸鱼娘", () => {
+  it("内置 5 张二次元头像", () => {
     const ids = AVATARS.map((a) => a.id);
-    expect(ids).toContain("dog");
-    expect(ids).toContain("whale");
-    expect(AVATARS.length).toBeGreaterThanOrEqual(4);
+    expect(ids).toEqual(["mint", "azure", "chestnut", "yukino", "shion"]);
+    expect(AVATARS.every((a) => a.src.length > 0)).toBe(true);
   });
 
   it("未知 id 回退到默认头像", () => {
-    expect(getAvatar("not-exists").id).toBe("dog");
-    expect(getAvatar(undefined).id).toBe("dog");
+    expect(getAvatar("not-exists").id).toBe("mint");
+    expect(getAvatar(undefined).id).toBe("mint");
   });
 
   it("读写 localStorage 持久化", () => {
-    expect(loadAvatarId()).toBe("dog");
-    saveAvatarId("whale");
-    expect(loadAvatarId()).toBe("whale");
+    expect(loadAvatarId()).toBe("mint");
+    saveAvatarId("azure");
+    expect(loadAvatarId()).toBe("azure");
     saveAvatarId("not-exists");
-    expect(loadAvatarId()).toBe("whale");
+    expect(loadAvatarId()).toBe("azure");
   });
 
   it("随机头像避开当前", () => {
     for (let i = 0; i < 20; i += 1) {
-      expect(randomAvatarId("dog")).not.toBe("dog");
+      expect(randomAvatarId("mint")).not.toBe("mint");
     }
   });
 });

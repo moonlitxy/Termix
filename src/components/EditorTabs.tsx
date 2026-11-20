@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { useApp, nextTabId } from "../store/app";
 import { ipc } from "../lib/ipc";
@@ -7,6 +8,7 @@ import { promptDialog } from "../store/feedback";
 import { createSplitTab } from "../lib/tabs";
 import { useT } from "../lib/i18n";
 import { connButtonClass, toConnVisual } from "../lib/connectionStatus";
+import type { Session } from "../types";
 
 interface CtxMenu {
   x: number;
@@ -23,10 +25,51 @@ export function EditorTabs() {
   const addTab = useApp((s) => s.addTab);
   const updateTab = useApp((s) => s.updateTab);
   const requestReconnect = useApp((s) => s.requestReconnect);
+  const sessions = useApp((s) => s.sessions);
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addMenuPos, setAddMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const addBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuReturnRef = useRef<HTMLElement | null>(null);
   const menuPosition = useClampedMenuPosition(ctx, menuRef);
+
+  const recentSessions = useMemo(() => {
+    return sessions
+      .filter((s) => s.lastConnectedAt)
+      .slice()
+      .sort(
+        (a, b) =>
+          (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0)
+      )
+      .slice(0, 5);
+  }, [sessions]);
+
+  const openSessionTab = (s: Session) => {
+    useApp.setState({ activity: "terminal" });
+    addTab({
+      id: nextTabId(),
+      kind: "terminal",
+      sessionId: s.id,
+      title: s.name,
+      status: "connecting",
+    });
+  };
+
+  const toggleAddMenu = () => {
+    if (addMenuOpen) {
+      setAddMenuOpen(false);
+      return;
+    }
+    const rect = addBtnRef.current?.getBoundingClientRect();
+    if (rect) {
+      setAddMenuPos({
+        x: Math.max(8, Math.min(rect.left, window.innerWidth - 328)),
+        y: rect.bottom + 4,
+      });
+    }
+    setAddMenuOpen(true);
+  };
 
   const openTabMenu = (tabId: string, position: { x: number; y: number }) => {
     menuReturnRef.current = document.activeElement as HTMLElement | null;
@@ -210,6 +253,77 @@ export function EditorTabs() {
           </span>
         </div>
       ))}
+      <div className="editor-tabs__add-wrap">
+        <button
+          ref={addBtnRef}
+          className={
+            "editor-tabs__add-btn" + (addMenuOpen ? " is-active" : "")
+          }
+          type="button"
+          title={tr("tab.newTab")}
+          onClick={toggleAddMenu}
+        >
+          <Icon name="plus" size={13} />
+        </button>
+        {addMenuOpen && addMenuPos &&
+          createPortal(
+            <>
+              <div
+                className="editor-tabs__add-backdrop"
+                onClick={() => setAddMenuOpen(false)}
+              />
+              <div
+                className="ctx-menu editor-tabs__add-menu is-portal"
+                style={{ left: addMenuPos.x, top: addMenuPos.y }}
+              >
+              <div className="editor-tabs__menu-head">
+                <Icon name="clock" size={12} />
+                <span>{tr("tab.recentConnections")}</span>
+              </div>
+              {recentSessions.length === 0 ? (
+                <div className="editor-tabs__menu-empty">
+                  {tr("tab.noRecentConnections")}
+                </div>
+              ) : (
+                recentSessions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className="ctx-menu__item editor-tabs__menu-session"
+                    title={`${s.name} (${s.username}@${s.host}:${s.port})`}
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      openSessionTab(s);
+                    }}
+                  >
+                    <Icon name="terminal" size={13} />
+                    <div className="editor-tabs__session-text">
+                      <span className="editor-tabs__session-name">{s.name}</span>
+                      <span className="editor-tabs__session-host">
+                        {s.username}@{s.host}:{s.port}
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
+              <div className="ctx-menu__sep" />
+              <button
+                type="button"
+                className="ctx-menu__item"
+                title={tr("session.newConnTitle")}
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  useApp.getState().openNewConnection();
+                }}
+              >
+                <Icon name="plus" size={12} />
+                {tr("session.newConnTitle")}
+              </button>
+              </div>
+            </>,
+            document.body
+          )}
+      </div>
       <div className="editor-tabs__spacer" />
       {activeTab && (
         <div className="editor-tabs__actions">

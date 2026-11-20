@@ -7,6 +7,11 @@ Var TermixDeleteAllData
 
 !macro NSIS_HOOK_PREUNINSTALL
   StrCpy $TermixDeleteAllData 0
+  ; 安装器升级时以 _?= 调用旧卸载器，属于覆盖安装，不能清理业务数据
+  ${StrStr} $0 "$CMDLINE" "_?="
+  ${If} $0 != ""
+    Goto termix_skip_all_data
+  ${EndIf}
   ; 升级/覆盖安装由安装器以 /UPDATE 调用卸载器，必须保留数据
   ${If} $UpdateMode = 1
     Goto termix_skip_all_data

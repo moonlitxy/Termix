@@ -14,7 +14,7 @@ import { pickFunLocalized } from "../lib/fun";
 import { getLang, useT } from "../lib/i18n";
 import { confirmDialog, promptDialog, toast } from "../store/feedback";
 import { LocalFilesPane } from "./LocalFilesPane";
-import type { SftpItem, Snippet } from "../types";
+import type { CommandHistory, SftpItem, Snippet } from "../types";
 
 function formatSize(n: number): string {
   if (n < 1024) return n + " B";
@@ -22,6 +22,13 @@ function formatSize(n: number): string {
   if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
   if (n < 1024 * 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
   return (n / 1024 / 1024 / 1024 / 1024).toFixed(2) + " TB";
+}
+
+function formatHistTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return hh + ":" + mm;
 }
 
 function formatMtime(ts: number): string {
@@ -227,7 +234,10 @@ export function SftpView() {
 
   // 快捷命令（原工具栏合并）
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [cmdTab, setCmdTab] = useState<"snippets" | "history">("snippets");
   const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [historyList, setHistoryList] = useState<CommandHistory[]>([]);
+  const [histCopiedId, setHistCopiedId] = useState<string | null>(null);
   const [cmdQuery, setCmdQuery] = useState("");
   const [cmdEditing, setCmdEditing] = useState<QuickCmdEditing | null>(null);
   const cmdSearchRef = useRef<HTMLInputElement>(null);
@@ -561,7 +571,7 @@ export function SftpView() {
       // 快捷命令同样写入历史，与终端直接输入/底部输入框保持同一份历史
       if (target.sessionId) {
         await ipc.historyAdd(target.sessionId, command);
-        document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT));
+        document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
       }
       terminalRegistry.focus(target.id);
     } catch (e) {
@@ -570,19 +580,62 @@ export function SftpView() {
     }
   };
 
-  const toggleQuickCmd = async () => {
-    const next = !cmdOpen;
-    setCmdOpen(next);
+  const loadHistory = async () => {
+    const targetSessionId = activeTab?.sessionId || sftpContext?.sessionId;
+    if (!targetSessionId) return;
+    try {
+      const list = await ipc.historyList(targetSessionId, 50);
+      setHistoryList(list);
+    } catch {
+      setHistoryList([]);
+    }
+  };
+
+  const copyHistoryCmd = async (e: React.MouseEvent, cmd: string, id: string) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setHistCopiedId(id);
+      window.setTimeout(() => setHistCopiedId((curr) => (curr === id ? null : curr)), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    const reload = () => {
+      if (cmdOpen && cmdTab === "history") {
+        void loadHistory();
+      }
+    };
+    document.addEventListener(HISTORY_CHANGED_EVENT, reload);
+    window.addEventListener(HISTORY_CHANGED_EVENT, reload);
+    return () => {
+      document.removeEventListener(HISTORY_CHANGED_EVENT, reload);
+      window.removeEventListener(HISTORY_CHANGED_EVENT, reload);
+    };
+  }, [cmdOpen, cmdTab, activeTab?.sessionId, sftpContext?.sessionId]);
+
+  const openCmdPanel = async (tab: "snippets" | "history") => {
+    if (cmdOpen && cmdTab === tab) {
+      setCmdOpen(false);
+      setCmdEditing(null);
+      return;
+    }
+    setCmdOpen(true);
+    setCmdTab(tab);
     setCmdEditing(null);
     setCmdQuery("");
-    if (next) {
+    if (tab === "snippets") {
       try {
         setSnippets(await ipc.snippetList());
       } catch {
         setSnippets([]);
       }
-      setTimeout(() => cmdSearchRef.current?.focus(), 30);
+    } else {
+      await loadHistory();
     }
+    setTimeout(() => cmdSearchRef.current?.focus(), 30);
   };
 
   const runSnippet = async (s: Snippet) => {
@@ -614,6 +667,10 @@ export function SftpView() {
         (s) => s.title.includes(cmdQuery.trim()) || s.command.includes(cmdQuery.trim())
       )
     : snippets;
+
+  const filteredHistory = cmdQuery.trim()
+    ? historyList.filter((h) => h.command.toLowerCase().includes(cmdQuery.trim().toLowerCase()))
+    : historyList;
 
   // ---- 文件操作 ----
 
@@ -1093,12 +1150,26 @@ export function SftpView() {
             <Icon name="search" size={12} />
           </button>
           <button
-            className="ds-btn ds-btn--secondary ds-btn--sm"
+            className={
+              "ds-btn ds-btn--secondary ds-btn--sm" +
+              (cmdOpen && cmdTab === "snippets" ? " is-active" : "")
+            }
             type="button"
             title={tr("sftp.quickCmd")}
-            onClick={() => void toggleQuickCmd()}
+            onClick={() => void openCmdPanel("snippets")}
           >
             <Icon name="terminal" size={12} />
+          </button>
+          <button
+            className={
+              "ds-btn ds-btn--secondary ds-btn--sm" +
+              (cmdOpen && cmdTab === "history" ? " is-active" : "")
+            }
+            type="button"
+            title={tr("sftp.historyCmd")}
+            onClick={() => void openCmdPanel("history")}
+          >
+            <Icon name="clock" size={12} />
           </button>
           <button
             className="ds-btn ds-btn--secondary ds-btn--sm"
@@ -1560,7 +1631,36 @@ export function SftpView() {
             ) : (
               <>
                 <div className="toolbar__qc-head">
-                  <span className="toolbar__qc-title">{tr("sftp.quickCmdTitle")}</span>
+                  <div className="toolbar__qc-tabs">
+                    <button
+                      type="button"
+                      className={
+                        "toolbar__qc-tab" + (cmdTab === "snippets" ? " is-active" : "")
+                      }
+                      onClick={() => {
+                        setCmdTab("snippets");
+                        setCmdQuery("");
+                        ipc.snippetList().then(setSnippets).catch(() => setSnippets([]));
+                      }}
+                    >
+                      <Icon name="terminal" size={12} />
+                      {tr("sftp.quickCmdTitle")}
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        "toolbar__qc-tab" + (cmdTab === "history" ? " is-active" : "")
+                      }
+                      onClick={() => {
+                        setCmdTab("history");
+                        setCmdQuery("");
+                        void loadHistory();
+                      }}
+                    >
+                      <Icon name="clock" size={12} />
+                      {tr("sftp.historyCmdTitle", { n: historyList.length })}
+                    </button>
+                  </div>
                   <button
                     className="ds-btn ds-btn--tertiary ds-btn--icon"
                     type="button"
@@ -1577,7 +1677,11 @@ export function SftpView() {
                   ref={cmdSearchRef}
                   className="ds-input toolbar__qc-search"
                   value={cmdQuery}
-                  placeholder={tr("sftp.searchCmdPh")}
+                  placeholder={
+                    cmdTab === "snippets"
+                      ? tr("sftp.searchCmdPh")
+                      : tr("sftp.searchHistoryPh")
+                  }
                   spellCheck={false}
                   onChange={(e) => setCmdQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -1587,6 +1691,7 @@ export function SftpView() {
                     }
                   }}
                 />
+                {cmdTab === "snippets" ? (
                 <div className="toolbar__qc-list">
                   {filteredSnippets.length === 0 && (
                     <div className="toolbar__qc-empty">
@@ -1606,6 +1711,56 @@ export function SftpView() {
                     </button>
                   ))}
                 </div>
+                ) : (
+                <div className="toolbar__qc-list">
+                  {filteredHistory.length === 0 ? (
+                    <div className="toolbar__qc-empty">
+                      {cmdQuery.trim() ? tr("cmdinput.noMatch") : tr("sftp.noHistory")}
+                    </div>
+                  ) : (
+                    filteredHistory.map((h) => (
+                      <div key={h.id} className="toolbar__qc-history-item">
+                        <div
+                          className="toolbar__qc-history-main"
+                          title={tr("sftp.runHistoryTip", { cmd: h.command })}
+                          onClick={() => {
+                            void sendCommand(h.command);
+                            setCmdOpen(false);
+                          }}
+                        >
+                          <span className="toolbar__qc-history-cmd">{h.command}</span>
+                          <span className="toolbar__qc-history-time">
+                            {formatHistTime(h.executedAt)}
+                          </span>
+                        </div>
+                        <div className="toolbar__qc-history-actions">
+                          <button
+                            type="button"
+                            className="ds-btn ds-btn--xs ds-btn--secondary"
+                            title={tr("cmdinput.copyTitle")}
+                            onClick={(e) => void copyHistoryCmd(e, h.command, h.id)}
+                          >
+                            <Icon name={histCopiedId === h.id ? "check-circle" : "copy"} size={11} />
+                            {histCopiedId === h.id ? tr("cmdinput.copied") : tr("common.copy")}
+                          </button>
+                          <button
+                            type="button"
+                            className="ds-btn ds-btn--xs ds-btn--brand"
+                            title={tr("cmdinput.execCmdTitle")}
+                            onClick={() => {
+                              void sendCommand(h.command);
+                              setCmdOpen(false);
+                            }}
+                          >
+                            <Icon name="send" size={11} />
+                            {tr("cmdinput.exec")}
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                )}
               </>
             )}
           </div>

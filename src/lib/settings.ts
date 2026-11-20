@@ -3,8 +3,36 @@
 
 import type { Lang } from "./i18n";
 
+export type FontFamilyId = "system" | "pingfang" | "sourceHan" | "wenkai" | "song" | "mono";
+
+export const FONT_FAMILIES: { id: FontFamilyId; labelKey: string }[] = [
+  { id: "system", labelKey: "st.font.system" },
+  { id: "pingfang", labelKey: "st.font.pingfang" },
+  { id: "sourceHan", labelKey: "st.font.sourceHan" },
+  { id: "wenkai", labelKey: "st.font.wenkai" },
+  { id: "song", labelKey: "st.font.song" },
+  { id: "mono", labelKey: "st.font.mono" },
+];
+
+const FONT_STACKS: Record<FontFamilyId, string> = {
+  system:
+    '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif',
+  pingfang:
+    '"PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif',
+  sourceHan:
+    '"Source Han Sans SC", "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+  wenkai:
+    '"LXGW WenKai", "LXGW WenKai Screen", "Kaiti SC", "KaiTi", "STKaiti", "PingFang SC", "Microsoft YaHei", sans-serif',
+  song:
+    '"Songti SC", "Noto Serif SC", "Noto Serif CJK SC", "SimSun", "PingFang SC", serif',
+  mono:
+    'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Cascadia Code", "JetBrains Mono", monospace',
+};
+
 export interface Settings {
-  theme: "dark" | "light" | "system";
+  theme: "dark" | "light";
+  /** 界面字体：默认沿用当前系统字体栈 */
+  fontFamily: FontFamilyId;
   fontSize: number;
   cursorStyle: "block" | "underline" | "bar";
   scrollback: number;
@@ -32,6 +60,7 @@ export const SETTINGS_CHANGE_EVENT = "termix-settings-change";
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
+  fontFamily: "system",
   fontSize: 13,
   cursorStyle: "block",
   scrollback: 5000,
@@ -51,7 +80,11 @@ export const DEFAULT_SETTINGS: Settings = {
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS;
+    if (!raw) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<Settings> & { theme?: string };
+    // 旧版本曾提供「跟随系统」；为保证默认深色，迁移为明确深色。
+    const theme: Settings["theme"] = parsed.theme === "light" ? "light" : "dark";
+    return { ...DEFAULT_SETTINGS, ...parsed, theme };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -62,19 +95,11 @@ export function saveSettings(settings: Settings) {
   window.dispatchEvent(new Event(SETTINGS_CHANGE_EVENT));
 }
 
-function resolveTheme(theme: Settings["theme"]): "dark" | "light" {
-  if (theme !== "system") return theme;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
 /** Apply startup-safe appearance before React mounts, then reuse for live setting changes. */
 export function applyAppearance(settings: Settings = loadSettings()) {
-  const resolved = resolveTheme(settings.theme);
   const root = document.documentElement;
-  root.dataset.theme = resolved;
-  root.style.colorScheme = resolved;
+  root.dataset.theme = settings.theme;
+  root.style.colorScheme = settings.theme;
 
   const ui = (n: number) => `clamp(${n}px, calc(${n}px + 0.15vw), ${n + 4}px)`;
   root.style.setProperty("--body-xs-font-size", ui(settings.fontSize - 3));
@@ -82,4 +107,7 @@ export function applyAppearance(settings: Settings = loadSettings()) {
   root.style.setProperty("--body-md-font-size", ui(settings.fontSize - 1));
   root.style.setProperty("--body-base-font-size", ui(settings.fontSize));
   root.style.setProperty("--code-terminal-font-size", ui(settings.fontSize - 1));
+  const fontStack = FONT_STACKS[settings.fontFamily] ?? FONT_STACKS.system;
+  root.style.setProperty("--font-family-default", fontStack);
+  root.style.setProperty("--font-family-heading", fontStack);
 }

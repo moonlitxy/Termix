@@ -244,6 +244,7 @@ pub async fn download_update(
     file_name: String,
     proxy: Option<String>,
 ) -> Result<(), String> {
+    sanitize_installer_name(&file_name)?;
     tauri::async_runtime::spawn(async move {
         if let Err(e) = run_download(&app, &url, &file_name, proxy.as_deref()).await {
             let _ = app.emit("update-download-error", json!({ "error": e }));
@@ -252,12 +253,43 @@ pub async fn download_update(
     Ok(())
 }
 
+/// 校验外部链接：仅允许 http(s) 协议，杜绝恶意伪协议与空白注入
+fn validate_external_url(raw: &str) -> Result<&str, String> {
+    let u = raw.trim();
+    if !(u.starts_with("https://") || u.starts_with("http://")) {
+        return Err("外部链接仅允许 http(s) 协议".to_string());
+    }
+    if u.contains(char::is_whitespace) {
+        return Err("链接包含非法空白字符".to_string());
+    }
+    Ok(u)
+}
+
+/// 过滤安装包文件名：防止路径穿越（..）并限制安装包类型（exe / dmg）
+fn sanitize_installer_name(raw: &str) -> Result<&str, String> {
+    let name = raw.trim();
+    let safe = std::path::Path::new(name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.is_empty() && *n == name)
+        .ok_or_else(|| "非法安装包文件名".to_string())?;
+    let ext = std::path::Path::new(safe)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !ext.eq_ignore_ascii_case("exe") && !ext.eq_ignore_ascii_case("dmg") {
+        return Err("非法安装包扩展名（仅支持 exe/dmg）".to_string());
+    }
+    Ok(safe)
+}
+
 async fn run_download(
     app: &AppHandle,
     url: &str,
     file_name: &str,
     proxy: Option<&str>,
 ) -> Result<(), String> {
+    let safe_name = sanitize_installer_name(file_name)?;
     let client = http_client(proxy)?;
     let mut resp = client
         .get(url)
@@ -272,7 +304,7 @@ async fn run_download(
         .path()
         .download_dir()
         .unwrap_or_else(|_| std::env::temp_dir());
-    let path = dir.join(file_name);
+    let path = dir.join(safe_name);
     let total = resp.content_length().unwrap_or(0);
     let mut file = tokio::fs::File::create(&path)
         .await
@@ -290,13 +322,13 @@ async fn run_download(
         };
         let _ = app.emit(
             "update-download-progress",
-            json!({ "fileName": file_name, "received": received, "total": total, "percent": percent }),
+            json!({ "fileName": safe_name, "received": received, "total": total, "percent": percent }),
         );
     }
     let _ = file.flush().await;
     let _ = app.emit(
         "update-download-done",
-        json!({ "fileName": file_name, "path": path.to_string_lossy() }),
+        json!({ "fileName": safe_name, "path": path.to_string_lossy() }),
     );
     Ok(())
 }
@@ -304,24 +336,37 @@ async fn run_download(
 /// 打开已下载的安装包：macOS 挂载 DMG，Windows 启动 EXE 安装程序
 #[tauri::command]
 pub async fn open_installer(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_file() {
+        return Err("安装包文件不存在".to_string());
+    }
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if cfg!(target_os = "windows") && !ext.eq_ignore_ascii_case("exe") {
+        return Err("非法安装包格式（仅支持 .exe）".to_string());
+    }
+    if cfg!(target_os = "macos") && !ext.eq_ignore_ascii_case("dmg") {
+        return Err("非法安装包格式（仅支持 .dmg）".to_string());
+    }
     open_with_system(&path)
 }
 
 /// 用系统默认方式打开外部链接（Release 下载页等）
 #[tauri::command]
 pub async fn open_external(url: String) -> Result<(), String> {
+    let raw = validate_external_url(&url)?;
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&url)
+            .arg(raw)
             .spawn()
             .map_err(|e| format!("打开链接失败：{e}"))?;
         Ok(())
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
+        // 避免使用 cmd /C start 防止 shell 参数注入；调用 explorer 更安全
+        std::process::Command::new("explorer")
+            .arg(raw)
             .spawn()
             .map_err(|e| format!("打开链接失败：{e}"))?;
         Ok(())
@@ -343,7 +388,9 @@ fn open_with_system(path: &str) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
+        // /UPDATE 让 NSIS 走覆盖安装，不卸载旧版，保留安装目录下的 data/downloads
         std::process::Command::new(path)
+            .arg("/UPDATE")
             .spawn()
             .map_err(|e| format!("启动安装程序失败：{e}"))?;
         Ok(())
@@ -455,5 +502,30 @@ mod tests {
         assert_eq!(custom[0].as_deref(), Some("https://mirror.example.com/"));
         assert_eq!(custom.len(), 4);
         assert!(custom.last().unwrap().is_none());
+    }
+
+    #[test]
+    fn validate_external_url_checks_scheme_and_whitespace() {
+        assert!(validate_external_url("https://github.com/moonlitxy/Termix").is_ok());
+        assert!(validate_external_url("http://localhost:8080").is_ok());
+        assert!(validate_external_url("file:///etc/passwd").is_err());
+        assert!(validate_external_url("cmd.exe /c calc").is_err());
+        assert!(validate_external_url("https://example.com/path with spaces").is_err());
+    }
+
+    #[test]
+    fn sanitize_installer_name_blocks_traversal_and_bad_extensions() {
+        assert_eq!(
+            sanitize_installer_name("Termix_1.0.5_x64-setup.exe").unwrap(),
+            "Termix_1.0.5_x64-setup.exe"
+        );
+        assert_eq!(
+            sanitize_installer_name("Termix_1.0.5_aarch64.dmg").unwrap(),
+            "Termix_1.0.5_aarch64.dmg"
+        );
+        assert!(sanitize_installer_name("../../../evil.exe").is_err());
+        assert!(sanitize_installer_name("foo/bar.exe").is_err());
+        assert!(sanitize_installer_name("setup.bat").is_err());
+        assert!(sanitize_installer_name("payload.sh").is_err());
     }
 }

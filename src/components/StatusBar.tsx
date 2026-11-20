@@ -9,7 +9,6 @@ export function StatusBar() {
   const shortcutMod = isWindowsPlatform() ? "Ctrl" : "⌘";
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
-  const remotePath = useApp((s) => s.remotePath);
   const transfers = useApp((s) => s.transfers);
   const rightPanelExpanded = useApp((s) => s.rightPanelExpanded);
   const setRightPanelExpanded = useApp((s) => s.setRightPanelExpanded);
@@ -44,9 +43,6 @@ export function StatusBar() {
         </span>
         <span className="status-bar__item">UTF-8</span>
         <span className="status-bar__item">SSH-2</span>
-      </div>
-      <div className="status-bar__center" title={connected ? remotePath : undefined}>
-        {connected ? remotePath : ""}
       </div>
       <div className="status-bar__right">
         <button

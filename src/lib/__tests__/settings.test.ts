@@ -97,21 +97,29 @@ describe("settings", () => {
     );
   });
 
-  it("跟随系统主题时读取 prefers-color-scheme", () => {
-    const { documentElement, matchMedia } = installBrowserStubs();
-    matchMedia.mockReturnValue({
-      matches: true,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    applyAppearance({ ...DEFAULT_SETTINGS, theme: "system" });
-    expect(matchMedia).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
-    expect(documentElement.dataset.theme).toBe("dark");
+  it("应用界面字体变量", () => {
+    const { setProperty } = installBrowserStubs();
+    applyAppearance({ ...DEFAULT_SETTINGS, fontFamily: "wenkai" });
+    expect(setProperty).toHaveBeenCalledWith(
+      "--font-family-default",
+      expect.stringContaining("LXGW WenKai")
+    );
+    expect(setProperty).toHaveBeenCalledWith(
+      "--font-family-heading",
+      expect.stringContaining("LXGW WenKai")
+    );
   });
 
-  it("系统主题浅色时应用 light", () => {
+  it("旧版跟随系统设置迁移为深色", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: "system" }));
+    expect(loadSettings().theme).toBe("dark");
+  });
+
+  it("用户选择浅色后下次启动仍为浅色", () => {
     const { documentElement } = installBrowserStubs();
-    applyAppearance({ ...DEFAULT_SETTINGS, theme: "system" });
+    saveSettings({ ...DEFAULT_SETTINGS, theme: "light" });
+    applyAppearance(loadSettings());
+    expect(loadSettings().theme).toBe("light");
     expect(documentElement.dataset.theme).toBe("light");
   });
 });

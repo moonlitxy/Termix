@@ -118,6 +118,13 @@ export function GlobalTooltip() {
       Math.max(8 + halfWidth, tip.x)
     );
     el.style.left = `${left}px`;
+    // 计算箭头在提示框内的水平位置，使其精确指向触发元素的中心 (tip.x)
+    // 提示框左边缘为 left - halfWidth（因有 transform: translateX(-50%)）
+    const tooltipLeft = left - halfWidth;
+    const rawArrowX = tip.x - tooltipLeft;
+    // 限制箭头在提示框内部（预留 10px 边距防溢出边框圆角）
+    const arrowX = Math.min(el.offsetWidth - 10, Math.max(10, rawArrowX));
+    el.style.setProperty("--tooltip-arrow-x", `${arrowX}px`);
   }, [tip]);
 
   if (!tip) return null;

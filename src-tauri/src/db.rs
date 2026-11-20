@@ -232,13 +232,24 @@ impl Db {
     }
 
     pub fn add_history(&self, session_id: &str, command: &str) -> Result<String, String> {
+        let trimmed = command.trim();
+        if trimmed.is_empty() {
+            return Ok(String::new());
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let c = self.conn.lock().unwrap();
         c.execute(
             "INSERT INTO command_history (id,session_id,command,executed_at) VALUES (?,?,?,?)",
-            params![id, session_id, command, now_ms()],
+            params![id, session_id, trimmed, now_ms()],
         )
         .map_err(|e| e.to_string())?;
+        // 限制每个会话最多保留最新的 50 条历史记录
+        let _ = c.execute(
+            "DELETE FROM command_history WHERE session_id=? AND id NOT IN (
+                SELECT id FROM command_history WHERE session_id=? ORDER BY executed_at DESC LIMIT 50
+            )",
+            params![session_id, session_id],
+        );
         Ok(id)
     }
 
@@ -626,6 +637,13 @@ mod tests {
         // 其他会话的历史不影响
         let other = db.create_session(session_input("other")).unwrap();
         assert!(db.list_history(&other, 50).unwrap().is_empty());
+
+        // 验证超过 50 条时自动淘汰旧记录，最多保留 50 条
+        for i in 0..60 {
+            db.add_history(&sid, &format!("cmd_{i}")).unwrap();
+        }
+        let capped = db.list_history(&sid, 100).unwrap();
+        assert_eq!(capped.len(), 50);
 
         db.clear_history(&sid).unwrap();
         assert!(db.list_history(&sid, 50).unwrap().is_empty());

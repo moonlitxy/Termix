@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "./Icon";
 import { ipc } from "../lib/ipc";
 import { useApp } from "../store/app";
 import {
+  FONT_FAMILIES,
   applyAppearance,
   loadSettings,
   saveSettings,
@@ -24,8 +25,26 @@ import { confirmDialog, toast } from "../store/feedback";
 import { isWindowsPlatform } from "../lib/windowControls";
 import type { AppPaths, BackupFile, MasterStatus } from "../types";
 
+interface Category {
+  id: "general" | "terminal" | "security" | "monitor" | "update";
+  labelKey: string;
+  icon: string;
+  desc: string;
+}
+
+const CATEGORIES: Category[] = [
+  { id: "general", labelKey: "st.cat.general", icon: "settings", desc: "基础外观、界面语言与偏好交互设置" },
+  { id: "terminal", labelKey: "st.cat.terminal", icon: "terminal", desc: "终端外观、光标样式与滚动缓冲区" },
+  { id: "security", labelKey: "st.cat.security", icon: "key", desc: "主密码保护、目录路径与快照备份" },
+  { id: "monitor", labelKey: "st.cat.monitor", icon: "bar", desc: "系统性能与资源指标刷新频率" },
+  { id: "update", labelKey: "st.cat.updates", icon: "download", desc: "版本检查、镜像加速与网络代理设置" },
+];
+
 export function SettingsView() {
   const t = useT();
+  const tab = useApp((s) => s.settingsTab);
+  const setTab = useApp((s) => s.setSettingsTab);
+  const [searchQuery, setSearchQuery] = useState("");
   const [settings, setSettings] = useState<Settings>(loadSettings);
 
   useEffect(() => {
@@ -241,13 +260,70 @@ export function SettingsView() {
     }
   };
 
+  const filteredCategories = useMemo(() => {
+    if (!searchQuery.trim()) return CATEGORIES;
+    const q = searchQuery.trim().toLowerCase();
+    return CATEGORIES.filter(
+      (c) =>
+        t(c.labelKey).toLowerCase().includes(q) ||
+        c.desc.toLowerCase().includes(q)
+    );
+  }, [searchQuery, t]);
+
+  const currentCat = CATEGORIES.find((c) => c.id === tab) ?? CATEGORIES[0];
+
   return (
-    <div className="st-view">
-      <div className="fw-toolbar">
-        <span className="fw-toolbar__title">{t("st.title")}</span>
+    <div className="st-view st-view--split">
+      <div className="st-nav">
+        <div className="st-nav__head">
+          <div className="st-nav__title">
+            <Icon name="settings" size={16} />
+            <span>{t("st.title")}</span>
+          </div>
+          <div className="st-nav__search">
+            <Icon name="search" size={12} />
+            <input
+              className="st-nav__search-input"
+              value={searchQuery}
+              placeholder={t("st.searchPh")}
+              spellCheck={false}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="st-nav__list">
+          {filteredCategories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={"st-nav__item" + (tab === c.id ? " is-active" : "")}
+              onClick={() => setTab(c.id)}
+            >
+              <Icon name={c.icon} size={15} />
+              <span>{t(c.labelKey)}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="st-body">
-        <div className="ds-card st-section">
+
+      <div className="st-main">
+        <div className="st-main__head">
+          <div className="st-main__head-info">
+            <h2 className="st-main__title">{t(currentCat.labelKey)}</h2>
+            <p className="st-main__desc">{currentCat.desc}</p>
+          </div>
+          <button
+            className="ds-btn ds-btn--tertiary ds-btn--icon st-main__close"
+            type="button"
+            title={t("st.backToTerminal")}
+            onClick={() => useApp.setState({ activity: "terminal" })}
+          >
+            <Icon name="x" size={15} />
+          </button>
+        </div>
+
+        <div className="st-body st-main__body" data-active-cat={tab}>
+        <div className="ds-card st-section" data-cat="general">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="settings" size={14} />{t("st.general")}</span>
@@ -259,7 +335,6 @@ export function SettingsView() {
                 [
                   ["dark", t("st.theme.dark")],
                   ["light", t("st.theme.light")],
-                  ["system", t("st.theme.system")],
                 ] as const
               ).map(([value, label]) => (
                 <label className="ds-radio" key={value}>
@@ -275,6 +350,23 @@ export function SettingsView() {
               ))}
             </div>
           </div>
+          <div className="st-row">
+            <label>{t("st.fontFamily")}</label>
+            <select
+              className="ds-select st-input"
+              value={settings.fontFamily}
+              onChange={(e) =>
+                set({ fontFamily: e.target.value as Settings["fontFamily"] })
+              }
+            >
+              {FONT_FAMILIES.map((font) => (
+                <option key={font.id} value={font.id}>
+                  {t(font.labelKey)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="st-hint">{t("st.fontFamilyHint")}</div>
           <div className="st-row">
             <label>{t("st.fontSize")}</label>
             <input
@@ -300,7 +392,7 @@ export function SettingsView() {
           <div className="st-hint">{t("st.languageHint")}</div>
         </div>
 
-        <div className="ds-card st-section">
+        <div className="ds-card st-section" data-cat="security">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="folder" size={14} />{t("st.storage")}
@@ -376,7 +468,7 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="ds-card st-section">
+        <div className="ds-card st-section" data-cat="terminal">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="terminal" size={14} />{t("st.terminal")}
@@ -408,7 +500,7 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="ds-card st-section">
+        <div className="ds-card st-section" data-cat="monitor">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="bar" size={14} />{t("st.monitor")}
@@ -428,7 +520,7 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="ds-card st-section">
+        <div className="ds-card st-section" data-cat="security">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="key" size={14} />安全
@@ -536,27 +628,7 @@ export function SettingsView() {
           <div className="st-hint">{t("st.securityHint")}</div>
         </div>
 
-        <div className="ds-card st-section">
-          <div className="res-card__head">
-            <span className="res-card__label">
-              <Icon name="key" size={14} />{t("st.shortcuts")}
-            </span>
-          </div>
-          <div className="st-row">
-            <label>{t("st.scNewSession")}</label>
-            <span className="st-kbd">⌘ / Ctrl + T</span>
-          </div>
-          <div className="st-row">
-            <label>{t("st.scDisconnect")}</label>
-            <span className="st-kbd">⌘ / Ctrl + D</span>
-          </div>
-          <div className="st-row">
-            <label>{t("st.scZoom")}</label>
-            <span className="st-kbd">Ctrl + / -</span>
-          </div>
-        </div>
-
-        <div className="ds-card st-section">
+        <div className="ds-card st-section" data-cat="security">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="copy" size={14} />{t("st.backup")}</span>
@@ -593,7 +665,7 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="ds-card st-section">
+        <div className="ds-card st-section" data-cat="update">
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="download" size={14} />{t("st.updates")}
@@ -713,6 +785,7 @@ export function SettingsView() {
           </div>
           {updateMsg && <div className="st-hint">{updateMsg}</div>}
         </div>
+      </div>
       </div>
     </div>
   );
