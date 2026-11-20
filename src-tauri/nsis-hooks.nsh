@@ -5,13 +5,14 @@
 
 !include "StrFunc.nsh"
 ${Using:StrFunc} StrStr
+${Using:StrFunc} un.StrStr
 
 Var TermixDeleteAllData
 
 !macro NSIS_HOOK_PREUNINSTALL
   StrCpy $TermixDeleteAllData 0
   ; 安装器升级时以 _?= 调用旧卸载器，属于覆盖安装，不能清理业务数据
-  ${StrStr} $0 "$CMDLINE" "_?="
+  ${un.StrStr} $0 "$CMDLINE" "_?="
   ${If} $0 != ""
     Goto termix_skip_all_data
   ${EndIf}
