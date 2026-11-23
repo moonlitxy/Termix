@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "./Icon";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { ipc } from "../lib/ipc";
 import { useApp } from "../store/app";
 import {
@@ -96,7 +97,16 @@ export function SettingsView() {
 
   // ---- 软件更新 ----
   const checking = useUpdate((s) => s.checking);
+  const updateInfo = useUpdate((s) => s.info);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+
+  // 打开“关于与更新”时若还没有版本信息，静默拉取一次最新说明
+  useEffect(() => {
+    if (tab !== "update" || updateInfo) return;
+    const state = useUpdate.getState();
+    if (state.checking) return;
+    void state.check();
+  }, [tab, updateInfo]);
 
   const handleCheckUpdate = async () => {
     setUpdateMsg(null);
@@ -761,6 +771,24 @@ export function SettingsView() {
           <div className="st-row">
             <label>{t("st.currentChannel")}</label>
             <span className="st-kbd">{describeUpdateEndpoint(settings)}</span>
+          </div>
+          <div className="st-row st-row--col">
+            <label>{t("st.releaseNotes")}</label>
+            {updateInfo ? (
+              <div className="st-release-notes">
+                <div className="st-release-notes__meta">
+                  <span>{t("st.latestVersion", { v: updateInfo.latestVersion })}</span>
+                  <span>{describeUpdateSource(updateInfo.source)}</span>
+                </div>
+                <ReleaseNotes
+                  notes={updateInfo.releaseNotes}
+                  emptyText={t("update.noNotes")}
+                  collapsedHeight={240}
+                />
+              </div>
+            ) : (
+              <div className="st-hint">{t("st.releaseNotesHint")}</div>
+            )}
           </div>
           <div className="st-row">
             <label />

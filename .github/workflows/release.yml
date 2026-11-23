@@ -237,6 +237,10 @@ jobs:
     needs: [guard, build-macos, build-windows, build-source]
     if: needs.guard.outputs.on_main == 'true'
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -252,12 +256,16 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -name '*-source.tar.gz' -print -quit)"
           ls -lh release-assets
 
+      - name: Generate release notes
+        shell: bash
+        run: bash scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
       # 先创建 draft，资产上传完成后再显式发布；中途失败最多留下不可见草稿。
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

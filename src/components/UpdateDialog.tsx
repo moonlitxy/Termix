@@ -1,4 +1,5 @@
 import { Icon } from "./Icon";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { ipc } from "../lib/ipc";
 import { useUpdate } from "../store/update";
 import { describeUpdateSource } from "../lib/updateSource";
@@ -82,7 +83,12 @@ export function UpdateDialog() {
 
         <div className="dialog__field">
           <div className="dialog__field-label">{t("update.notes")}</div>
-          <div className="upd-notes">{info.releaseNotes || t("update.noNotes")}</div>
+          <ReleaseNotes
+            notes={info.releaseNotes}
+            emptyText={t("update.noNotes")}
+            collapsedHeight={220}
+            className="upd-notes"
+          />
         </div>
 
         {error && <div className="dialog__field-error">{error}</div>}
