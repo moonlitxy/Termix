@@ -375,7 +375,7 @@ async fn run_download(
 
 /// 打开已下载的安装包：macOS 挂载 DMG，Windows 启动 EXE 安装程序
 #[tauri::command]
-pub async fn open_installer(path: String) -> Result<(), String> {
+pub async fn open_installer(app: AppHandle, path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     if !p.is_file() {
         return Err("安装包文件不存在".to_string());
@@ -387,7 +387,19 @@ pub async fn open_installer(path: String) -> Result<(), String> {
     if cfg!(target_os = "macos") && !ext.eq_ignore_ascii_case("dmg") {
         return Err("非法安装包格式（仅支持 .dmg）".to_string());
     }
-    open_with_system(&path)
+    open_with_system(&path)?;
+
+    // Windows 安装器已启动，退出当前进程释放 termix.exe 文件锁，
+    // 让 NSIS 以 /UPDATE 覆盖安装并保留安装目录下的 data/downloads。
+    #[cfg(target_os = "windows")]
+    app.exit(0);
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = &app;
+    }
+
+    Ok(())
 }
 
 /// 用系统默认方式打开外部链接（Release 下载页等）

@@ -1174,7 +1174,7 @@ a {
 
 /* 会话行：跳板 / Agent 转发标记 */
 .session-row__jump {
-  margin-left: 6px;
+  margin-left: 0;
   padding: 0 5px;
   border: 1px solid var(--border-neutral-l2);
   border-radius: var(--radius-full);
@@ -1351,7 +1351,7 @@ a {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 44px;
+  min-height: 38px;
   padding: 6px 12px;
   border-radius: 0;
   cursor: pointer;
@@ -1388,26 +1388,25 @@ a {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  justify-content: center;
+  gap: 0;
+}
+
+.session-row__name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .session-row__name {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
   font-size: 13px;
-}
-
-.session-row__host {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-family-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
 }
 
 .session-row__state {
@@ -1427,10 +1426,6 @@ a {
 
 .session-row__state--error {
   color: var(--status-error-default);
-}
-
-.session-row.is-active .session-row__host {
-  color: var(--text-secondary);
 }
 
 .session-row.is-active .session-row__state {
@@ -2625,14 +2620,46 @@ button.sftp-head__cell {
   top: calc(100% + 4px);
   left: 0;
   z-index: 210;
-  min-width: 240px;
-  max-width: 320px;
+  width: 340px;
+  min-width: 300px;
+  max-width: 360px;
+  max-height: 70vh;
+  overflow: hidden;
 }
 
 .editor-tabs__add-menu.is-portal {
   position: fixed;
   top: auto;
   left: auto;
+}
+
+.editor-tabs__menu-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-neutral-l1);
+}
+
+.editor-tabs__menu-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-default);
+  font-size: var(--body-sm-font-size);
+}
+
+.editor-tabs__menu-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.editor-tabs__menu-list {
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .editor-tabs__menu-head {
@@ -2644,6 +2671,10 @@ button.sftp-head__cell {
   color: var(--text-tertiary);
   font-weight: 600;
   border-bottom: 1px solid var(--border-neutral-l1);
+  background: var(--bg-base-tertiary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .editor-tabs__menu-empty {

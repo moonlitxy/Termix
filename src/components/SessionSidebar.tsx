@@ -380,9 +380,8 @@ export function SessionSidebar() {
           className={"ds-dot " + state.dot}
         />
         <span className="session-row__label">
-          <span className="session-row__name">{s.name}</span>
-          <span className="session-row__host">
-            {s.username}@{s.host}
+          <span className="session-row__name-row">
+            <span className="session-row__name">{s.name}</span>
             {s.jumpSessionId && <span className="session-row__jump" title={t("session.viaJumpTitle")}>{t("session.viaJump")}</span>}
             {s.agentForward && <span className="session-row__jump" title={t("session.agentFwdTitle")}>{t("session.agentFwd")}</span>}
           </span>

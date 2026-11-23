@@ -26,24 +26,60 @@ export function EditorTabs() {
   const updateTab = useApp((s) => s.updateTab);
   const requestReconnect = useApp((s) => s.requestReconnect);
   const sessions = useApp((s) => s.sessions);
+  const groups = useApp((s) => s.groups);
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addMenuPos, setAddMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [addMenuQuery, setAddMenuQuery] = useState("");
   const addBtnRef = useRef<HTMLButtonElement>(null);
+  const addMenuInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuReturnRef = useRef<HTMLElement | null>(null);
   const menuPosition = useClampedMenuPosition(ctx, menuRef);
 
-  const recentSessions = useMemo(() => {
+  const groupNameById = useMemo(
+    () => new Map(groups.map((group) => [group.id, group.name])),
+    [groups]
+  );
+
+  const allSessions = useMemo(() => {
     return sessions
-      .filter((s) => s.lastConnectedAt)
       .slice()
-      .sort(
-        (a, b) =>
-          (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0)
-      )
-      .slice(0, 5);
+      .sort((a, b) => {
+        const byRecent = (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0);
+        return byRecent || a.name.localeCompare(b.name, "zh-CN");
+      });
   }, [sessions]);
+
+  const recentSessions = useMemo(() => {
+    return allSessions
+      .filter((session) => session.lastConnectedAt)
+      .slice(0, 5);
+  }, [allSessions]);
+
+  const normalizedAddQuery = addMenuQuery.trim().toLowerCase();
+
+  const filteredSessions = useMemo(() => {
+    if (!normalizedAddQuery) return allSessions;
+    return allSessions.filter((session) => {
+      const groupName = session.groupId
+        ? groupNameById.get(session.groupId) ?? ""
+        : "";
+      return [
+        session.name,
+        session.username,
+        session.host,
+        String(session.port),
+        groupName,
+      ].some((value) => value.toLowerCase().includes(normalizedAddQuery));
+    });
+  }, [allSessions, groupNameById, normalizedAddQuery]);
+
+  const otherSessions = useMemo(() => {
+    if (normalizedAddQuery) return [];
+    const recentIds = new Set(recentSessions.map((session) => session.id));
+    return allSessions.filter((session) => !recentIds.has(session.id));
+  }, [allSessions, normalizedAddQuery, recentSessions]);
 
   const openSessionTab = (s: Session) => {
     useApp.setState({ activity: "terminal" });
@@ -56,20 +92,39 @@ export function EditorTabs() {
     });
   };
 
+  const closeAddMenu = () => {
+    setAddMenuOpen(false);
+    setAddMenuQuery("");
+  };
+
   const toggleAddMenu = () => {
     if (addMenuOpen) {
-      setAddMenuOpen(false);
+      closeAddMenu();
       return;
     }
+    setAddMenuQuery("");
     const rect = addBtnRef.current?.getBoundingClientRect();
     if (rect) {
       setAddMenuPos({
-        x: Math.max(8, Math.min(rect.left, window.innerWidth - 328)),
+        x: Math.max(8, Math.min(rect.left, window.innerWidth - 356)),
         y: rect.bottom + 4,
       });
     }
     setAddMenuOpen(true);
   };
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const timer = window.setTimeout(() => addMenuInputRef.current?.focus(), 0);
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddMenuOpen(false);
+    };
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [addMenuOpen]);
 
   const openTabMenu = (tabId: string, position: { x: number; y: number }) => {
     menuReturnRef.current = document.activeElement as HTMLElement | null;
@@ -213,6 +268,27 @@ export function EditorTabs() {
     requestReconnect(activeTab.id);
   };
 
+  const renderAddMenuSession = (session: Session) => (
+    <button
+      key={session.id}
+      type="button"
+      className="ctx-menu__item editor-tabs__menu-session"
+      title={`${session.name} (${session.username}@${session.host}:${session.port})`}
+      onClick={() => {
+        closeAddMenu();
+        openSessionTab(session);
+      }}
+    >
+      <Icon name="terminal" size={13} />
+      <div className="editor-tabs__session-text">
+        <span className="editor-tabs__session-name">{session.name}</span>
+        <span className="editor-tabs__session-host">
+          {session.username}@{session.host}:{session.port}
+        </span>
+      </div>
+    </button>
+  );
+
   return (
     <div className="editor-tabs">
       {tabs.filter((t) => !t.hidden).map((tab) => (
@@ -270,49 +346,80 @@ export function EditorTabs() {
             <>
               <div
                 className="editor-tabs__add-backdrop"
-                onClick={() => setAddMenuOpen(false)}
+                onClick={closeAddMenu}
               />
               <div
                 className="ctx-menu editor-tabs__add-menu is-portal"
                 style={{ left: addMenuPos.x, top: addMenuPos.y }}
               >
-              <div className="editor-tabs__menu-head">
-                <Icon name="clock" size={12} />
-                <span>{tr("tab.recentConnections")}</span>
+              <div className="editor-tabs__menu-search">
+                <Icon name="search" size={12} />
+                <input
+                  ref={addMenuInputRef}
+                  value={addMenuQuery}
+                  placeholder={tr("tab.searchConnections")}
+                  aria-label={tr("tab.searchConnections")}
+                  spellCheck={false}
+                  onChange={(event) => setAddMenuQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    const first = filteredSessions[0];
+                    if (!first) return;
+                    event.preventDefault();
+                    closeAddMenu();
+                    openSessionTab(first);
+                  }}
+                />
               </div>
-              {recentSessions.length === 0 ? (
-                <div className="editor-tabs__menu-empty">
-                  {tr("tab.noRecentConnections")}
-                </div>
-              ) : (
-                recentSessions.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    className="ctx-menu__item editor-tabs__menu-session"
-                    title={`${s.name} (${s.username}@${s.host}:${s.port})`}
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      openSessionTab(s);
-                    }}
-                  >
-                    <Icon name="terminal" size={13} />
-                    <div className="editor-tabs__session-text">
-                      <span className="editor-tabs__session-name">{s.name}</span>
-                      <span className="editor-tabs__session-host">
-                        {s.username}@{s.host}:{s.port}
-                      </span>
+              <div className="editor-tabs__menu-list">
+                {allSessions.length === 0 ? (
+                  <div className="editor-tabs__menu-empty">
+                    {tr("tab.noConnections")}
+                  </div>
+                ) : normalizedAddQuery ? (
+                  <>
+                    <div className="editor-tabs__menu-head">
+                      <Icon name="search" size={12} />
+                      <span>{tr("tab.searchResults")}</span>
                     </div>
-                  </button>
-                ))
-              )}
+                    {filteredSessions.length === 0 ? (
+                      <div className="editor-tabs__menu-empty">
+                        {tr("tab.noSearchResults")}
+                      </div>
+                    ) : (
+                      filteredSessions.map(renderAddMenuSession)
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {recentSessions.length > 0 && (
+                      <>
+                        <div className="editor-tabs__menu-head">
+                          <Icon name="clock" size={12} />
+                          <span>{tr("tab.recentConnections")}</span>
+                        </div>
+                        {recentSessions.map(renderAddMenuSession)}
+                      </>
+                    )}
+                    {otherSessions.length > 0 && (
+                      <>
+                        <div className="editor-tabs__menu-head">
+                          <Icon name="terminal" size={12} />
+                          <span>{tr("tab.allConnections")}</span>
+                        </div>
+                        {otherSessions.map(renderAddMenuSession)}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
               <div className="ctx-menu__sep" />
               <button
                 type="button"
                 className="ctx-menu__item"
                 title={tr("session.newConnTitle")}
                 onClick={() => {
-                  setAddMenuOpen(false);
+                  closeAddMenu();
                   useApp.getState().openNewConnection();
                 }}
               >
