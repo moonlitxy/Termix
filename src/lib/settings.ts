@@ -39,6 +39,8 @@ export interface Settings {
   monitorInterval: number; // 监控刷新间隔（毫秒）
   sftpPanelRatio: number; // 文件面板占工作区高度的比例（0-1）
   rightPanelExpanded: boolean;
+  /** 悬浮传输窗口是否展开（用户手动开关的持久偏好） */
+  transferWindowOpen: boolean;
   sftpCollapsed: boolean;
   lastLocalPath: string;
   /** 软件更新通道：direct 直连（默认）/ mirror 镜像加速 / proxy 代理 */
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   monitorInterval: 2000,
   sftpPanelRatio: 0.4,
   rightPanelExpanded: false,
+  transferWindowOpen: false,
   sftpCollapsed: false,
   lastLocalPath: "",
   updateMode: "direct",

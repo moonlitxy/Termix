@@ -8,6 +8,13 @@ import { formatBytePair, formatBytes } from "../lib/formatBytes";
 import { toast } from "../store/feedback";
 import { useT } from "../lib/i18n";
 import { loadSettings, saveSettings } from "../lib/settings";
+import {
+  isTransferActive,
+  isTransferTerminal,
+  transferEtaSeconds,
+  transferLocation,
+  transferPercent,
+} from "../lib/transfer";
 import type { TransferTask } from "../types";
 
 /** 系统运行时长 → 天小时分秒（如 1天23小时11分20秒） */
@@ -46,6 +53,8 @@ function taskStatusText(task: TransferTask, tr: (k: string) => string): string {
       return tr("panel.task.cancelled");
     case "paused":
       return tr("panel.task.paused");
+    case "interrupted":
+      return tr("panel.task.interrupted");
     case "running":
       return formatBytes(task.speed) + "/s";
     default:
@@ -56,13 +65,25 @@ function taskStatusText(task: TransferTask, tr: (k: string) => string): string {
 function TaskFillClass(t: TransferTask): string {
   if (t.status === "completed") return "res-bar__fill--success";
   if (t.status === "failed") return "res-bar__fill--error";
+  if (t.status === "interrupted" || t.status === "paused") return "res-bar__fill--warning";
   return "res-bar__fill--brand";
+}
+
+function formatEta(seconds: number): string {
+  const total = Math.max(1, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${m}:${pad(s)}`;
 }
 
 export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean }) {
   const tr = useT();
   const transfers = useApp((s) => s.transfers);
   const sftpContext = useApp((s) => s.sftpContext);
+  const appPaths = useApp((s) => s.appPaths);
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const expanded = useApp((s) => s.rightPanelExpanded);
@@ -116,6 +137,47 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
     }
   };
 
+  /** 找到该传输所属会话当前可用的连接（重连后 connectionId 会变化） */
+  const connectionForTask = (task: TransferTask): string | undefined =>
+    tabs.find(
+      (tab) =>
+        tab.sessionId === task.sessionId &&
+        tab.status === "connected" &&
+        !!tab.connectionId
+    )?.connectionId;
+
+  const openTransferLocation = async (task: TransferTask) => {
+    const location = transferLocation(task);
+    if (!location) return;
+    if (task.direction === "download") {
+      void ipc
+        .localOpenPath(location)
+        .catch((e) => toast.error(String(e), tr("panel.openFolderFailed")));
+      return;
+    }
+    const tab = tabs.find(
+      (candidate) =>
+        candidate.sessionId === task.sessionId &&
+        !candidate.hidden &&
+        candidate.status === "connected" &&
+        !!candidate.connectionId
+    );
+    if (!tab?.connectionId) {
+      toast.warning(tr("panel.sessionGone"));
+      return;
+    }
+    const st = useApp.getState();
+    if (st.sftpContext?.connectionId !== tab.connectionId) {
+      await st.setSftpContext(task.sessionId, tab.connectionId);
+    }
+    useApp.setState({
+      activeTabId: tab.id,
+      activity: "sftp",
+      remotePath: location,
+    });
+    void useApp.getState().loadRemote();
+  };
+
   // ---- 指标数据统一来自共享监控数据源（与「监控」模块同一份，单一轮询） ----
   const metrics = useMonitor((s) => s.metrics);
   const netSpeed = useMonitor((s) => s.netSpeed);
@@ -128,11 +190,12 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
   const connectionId = selectMonitorConnection(sftpContext, tabs, activeTabId);
   const connected = !!connectionId;
 
-  // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列
+  // 已完成/失败/取消的传输任务保留 5 秒后自动移出队列；
+  // 暂停/连接中断的任务必须保留，否则用户没有机会恢复。
   useEffect(() => {
     const done = transfers.filter(
       (t) =>
-        t.status !== "running" &&
+        isTransferTerminal(t) &&
         !pendingTransfers[t.id] &&
         !doneTimers.current.has(t.id)
     );
@@ -202,7 +265,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           aria-label={transfersOnly ? tr("panel.collapseTransfers") : tr("panel.collapseMonitor")}
           onClick={() => changeExpanded(false)}
         >
-          <Icon name="chevron-right" size={15} />
+          <Icon name={transfersOnly ? "x" : "chevron-right"} size={15} />
         </button>
       </div>
       <div className="right-panel__body">
@@ -356,91 +419,157 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
 
         <div className="right-panel__transfers">
           <div className="right-panel__section-title">{tr("panel.queue")}</div>
-          <div className="ds-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {appPaths?.downloadDir && (
+            <div className="transfer-pane__location">
+              <Icon name="folder" size={13} />
+              <span className="transfer-pane__location-label">{tr("panel.localDir")}</span>
+              <span className="transfer-pane__location-path" title={appPaths.downloadDir}>
+                {appPaths.downloadDir}
+              </span>
+              <button
+                className="ds-btn ds-btn--tertiary ds-btn--icon"
+                type="button"
+                title={tr("panel.openFolder")}
+                style={{ width: 20, height: 20, flexShrink: 0 }}
+                onClick={() => {
+                  void ipc
+                    .localOpenPath(appPaths.downloadDir)
+                    .catch((e) => toast.error(String(e), tr("panel.openFolderFailed")));
+                }}
+              >
+                <Icon name="folder" size={12} />
+              </button>
+            </div>
+          )}
+          <div className="ds-card transfer-pane__list">
           {transfers.length === 0 && (
             <div className="transfer-row__status">{tr("panel.noTasks")}</div>
           )}
-          {transfers.map((t) => (
-            <div key={t.id}>
-              <div className="transfer-row__head">
-                <span className="transfer-row__name">
-                  <Icon name={t.direction === "upload" ? "upload" : "download"} size={13} />
-                  {t.fileName}
-                </span>
-                <span className="transfer-row__status">
-                  {taskStatusText(t, tr)}
-                  {t.status === "failed" && (
-                    <button
-                      className="ds-btn ds-btn--secondary"
-                      type="button"
-                      title={tr("panel.retry")}
-                      style={{ height: 18, marginLeft: 2, padding: "0 6px" }}
-                      onClick={() => retryTransfer(t)}
-                    >
-                      {tr("panel.retry")}
-                    </button>
-                  )}
-                  {/* 目录传输不支持断点续传，不提供暂停/恢复 */}
-                  {(t.status === "running" || t.status === "paused") && !t.isDir && (
-                    <button
-                      className={
-                        "ds-btn ds-btn--icon" +
-                        (t.status === "paused"
-                          ? " ds-btn--secondary"
-                          : " ds-btn--tertiary")
-                      }
-                      type="button"
-                      disabled={!!pendingTransfers[t.id]}
-                      title={
-                        t.status === "running"
-                          ? tr("panel.pauseTitle")
-                          : tr("panel.resumeTitle")
-                      }
-                      style={{ width: 18, height: 18, marginLeft: 2 }}
-                      onClick={() => {
-                        if (t.status === "running") {
-                          console.log("[transfer] pause task", t.id);
-                          void mutateTransferStatus(t, "paused", () =>
-                            ipc.transferPause(t.id)
-                          );
-                        } else {
-                          console.log("[transfer] resume task", t.id);
-                          void mutateTransferStatus(t, "running", () =>
-                            ipc.transferResume(t.id)
-                          );
+          {transfers.map((t) => {
+            const pct = transferPercent(t);
+            const eta = transferEtaSeconds(t);
+            const location = transferLocation(t);
+            const canPauseResume =
+              (t.status === "running" ||
+                t.status === "paused" ||
+                t.status === "interrupted") &&
+              !t.isDir;
+            return (
+              <div className="transfer-row" key={t.id}>
+                <div className="transfer-row__head">
+                  <span
+                    className="transfer-row__name"
+                    title={t.direction === "download" ? t.localPath : t.remotePath}
+                  >
+                    <Icon name={t.direction === "upload" ? "upload" : "download"} size={13} />
+                    {t.fileName}
+                  </span>
+                  <span className="transfer-row__status">
+                    {taskStatusText(t, tr)}
+                    {t.status === "failed" && (
+                      <button
+                        className="ds-btn ds-btn--secondary"
+                        type="button"
+                        title={tr("panel.retry")}
+                        style={{ height: 18, marginLeft: 2, padding: "0 6px" }}
+                        onClick={() => retryTransfer(t)}
+                      >
+                        {tr("panel.retry")}
+                      </button>
+                    )}
+                    {/* 目录传输不支持断点续传，不提供暂停/恢复 */}
+                    {canPauseResume && (
+                      <button
+                        className={
+                          "ds-btn ds-btn--icon" +
+                          (t.status === "running"
+                            ? " ds-btn--tertiary"
+                            : " ds-btn--secondary")
                         }
-                      }}
-                    >
-                      <Icon name={t.status === "running" ? "pause" : "play"} size={12} />
-                    </button>
-                  )}
-                  {(t.status === "running" || t.status === "paused") && (
+                        type="button"
+                        disabled={!!pendingTransfers[t.id]}
+                        title={
+                          t.status === "running"
+                            ? tr("panel.pauseTitle")
+                            : tr("panel.resumeTitle")
+                        }
+                        style={{ width: 18, height: 18, marginLeft: 2 }}
+                        onClick={() => {
+                          if (t.status === "running") {
+                            void mutateTransferStatus(t, "paused", () =>
+                              ipc.transferPause(t.id)
+                            );
+                          } else {
+                            const connId = connectionForTask(t);
+                            if (!connId) {
+                              toast.warning(tr("panel.sessionGone"));
+                              return;
+                            }
+                            void mutateTransferStatus(t, "running", () =>
+                              ipc.transferResume(t.id, connId)
+                            );
+                          }
+                        }}
+                      >
+                        <Icon name={t.status === "running" ? "pause" : "play"} size={12} />
+                      </button>
+                    )}
+                    {isTransferActive(t) && (
+                      <button
+                        className="ds-btn ds-btn--tertiary ds-btn--icon"
+                        type="button"
+                        disabled={!!pendingTransfers[t.id]}
+                        title={tr("common.cancel")}
+                        style={{ width: 18, height: 18, marginLeft: 2 }}
+                        onClick={() => {
+                          void mutateTransferStatus(t, "cancelled", () =>
+                            ipc.transferCancel(t.id)
+                          );
+                        }}
+                      >
+                        <Icon name="x-circle" size={12} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <div className="transfer-row__meta">
+                  {location ? (
                     <button
-                      className="ds-btn ds-btn--tertiary ds-btn--icon"
+                      className="transfer-row__location"
                       type="button"
-                      disabled={!!pendingTransfers[t.id]}
-                      title={tr("common.cancel")}
-                      style={{ width: 18, height: 18, marginLeft: 2 }}
-                      onClick={() => {
-                        console.log("[transfer] cancel task", t.id);
-                        void mutateTransferStatus(t, "cancelled", () =>
-                          ipc.transferCancel(t.id)
-                        );
-                      }}
+                      title={tr("panel.locate")}
+                      onClick={() => void openTransferLocation(t)}
                     >
-                      <Icon name="x-circle" size={12} />
+                      <Icon name="folder" size={11} />
+                      <span>{location}</span>
                     </button>
+                  ) : (
+                    <span />
                   )}
-                </span>
+                  {(t.totalBytes ?? 0) > 0 && (
+                    <span className="transfer-row__size">
+                      {formatBytes(t.transferredBytes ?? 0)} / {formatBytes(t.totalBytes ?? 0)}
+                    </span>
+                  )}
+                </div>
+                <div className="res-bar">
+                  <div
+                    className={"res-bar__fill " + TaskFillClass(t)}
+                    style={{ width: pct + "%" }}
+                  />
+                </div>
+                <div className="transfer-row__foot">
+                  <span className="transfer-row__pct">{Math.floor(pct)}%</span>
+                  {eta !== null && (
+                    <span>{tr("panel.eta", { t: formatEta(eta) })}</span>
+                  )}
+                  {t.status === "interrupted" && (
+                    <span className="transfer-row__warn">{tr("panel.reconnectHint")}</span>
+                  )}
+                </div>
               </div>
-              <div className="res-bar res-bar--thin">
-                <div
-                  className={"res-bar__fill " + TaskFillClass(t)}
-                  style={{ width: Math.min(t.progress, 100) + "%" }}
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {transfers.length > 0 && (
             <div className="transfer-pane__hint">
               {tr("panel.hint")}

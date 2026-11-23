@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::crypto;
@@ -1182,9 +1182,40 @@ pub async fn transfer_pause(task_id: String, state: State<'_, AppState>) -> Resu
 pub async fn transfer_resume(
     app: AppHandle,
     task_id: String,
+    connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.sftp.transfer_resume(app, &task_id).await
+    state
+        .sftp
+        .transfer_resume(app, &task_id, connection_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn transfer_delete(
+    app: AppHandle,
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.sftp.transfer_delete(&task_id).await?;
+    let _ = app.emit(
+        "transfer-progress",
+        serde_json::json!({ "taskId": task_id, "removed": true }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn transfer_clear(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.sftp.transfer_clear().await?;
+    let _ = app.emit(
+        "transfer-progress",
+        serde_json::json!({ "taskId": "", "removedAll": true }),
+    );
+    Ok(())
 }
 
 // ---- 本地文件系统（SFTP 双栏本地侧） ----

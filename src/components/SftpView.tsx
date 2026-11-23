@@ -205,7 +205,6 @@ export function SftpView() {
   const [filterQuery, setFilterQuery] = useState("");
   const filterRef = useRef<HTMLInputElement>(null);
   const [dropHover, setDropHover] = useState(false);
-  const hoverRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   const [listViewport, setListViewport] = useState({ scrollTop: 0, height: 0 });
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
@@ -448,20 +447,57 @@ export function SftpView() {
 
   // 系统文件拖入（Tauri webview 事件）：拖到远程文件列表视为上传
   useEffect(() => {
-    if (!("__TAURI__" in window)) return;
+    // Tauri 2 默认不注入 window.__TAURI__；内部注入的是 __TAURI_INTERNALS__。
+    // 之前用 __TAURI__ 判断会导致整个拖拽监听被跳过，系统文件拖入完全无反应。
+    if (!("__TAURI_INTERNALS__" in window)) return;
     let un: (() => void) | undefined;
     import("@tauri-apps/api/webview")
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent((ev) => {
           const p = ev.payload;
+          if (p.type === "leave") {
+            setDropHover(false);
+            return;
+          }
+          const list = listRef.current;
+          const rect = list?.getBoundingClientRect();
+          // 隐藏的 SftpView 尺寸为 0，不参与拖拽，避免重复弹提示。
+          if (!list || !rect || rect.width === 0 || rect.height === 0) return;
+          const overRemoteList = (() => {
+            if (!p.position) return false;
+            const dpr = window.devicePixelRatio || 1;
+            const inList = (x: number, y: number) => {
+              const hit = document.elementFromPoint(x, y);
+              if (hit) return list.contains(hit);
+              return (
+                x >= rect.left &&
+                x <= rect.right &&
+                y >= rect.top &&
+                y <= rect.bottom
+              );
+            };
+            // Tauri 的 drop position 是 PhysicalPosition；部分平台/缩放比例下
+            // 也可能已经接近逻辑坐标，两种解释都试一次，避免 Retina 上误判。
+            return (
+              inList(p.position.x / dpr, p.position.y / dpr) ||
+              inList(p.position.x, p.position.y)
+            );
+          })();
+          if (p.type === "enter" || p.type === "over") {
+            setDropHover(overRemoteList);
+            return;
+          }
           if (p.type !== "drop" || !p.paths?.length) return;
-          console.log("[sftp] system files dropped:", p.paths, "onPane:", hoverRef.current);
+          setDropHover(false);
+          console.log("[sftp] system files dropped:", p.paths, {
+            overRemoteList,
+          });
           const st = useApp.getState();
           if (!st.sftpContext) {
             toast.warning(tr("sftp.connectFirst"));
             return;
           }
-          if (!hoverRef.current) {
+          if (!overRemoteList) {
             toast.warning(tr("sftp.dropToUpload"));
             return;
           }
@@ -1327,16 +1363,13 @@ export function SftpView() {
             onKeyDown={handleListKeyDown}
             onDragOver={(e) => {
               e.preventDefault();
-              hoverRef.current = true;
               setDropHover(true);
             }}
             onDragLeave={() => {
-              hoverRef.current = false;
               setDropHover(false);
             }}
             onDrop={(e) => {
               e.preventDefault();
-              hoverRef.current = false;
               setDropHover(false);
               const localPath = e.dataTransfer.getData("application/x-termix-local");
               if (localPath) {

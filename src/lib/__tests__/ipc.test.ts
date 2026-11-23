@@ -63,6 +63,8 @@ describe("ipc command wrappers", () => {
       ["transferCancel", ["task"]],
       ["transferPause", ["task"]],
       ["transferResume", ["task"]],
+      ["transferDelete", ["task"]],
+      ["transferClear", []],
       ["localList", ["/tmp"]],
       ["localHome", []],
       ["localMkdir", ["/tmp"]],

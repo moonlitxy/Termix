@@ -239,6 +239,8 @@ fn main() {
             commands::transfer_cancel,
             commands::transfer_pause,
             commands::transfer_resume,
+            commands::transfer_delete,
+            commands::transfer_clear,
             commands::local_list,
             commands::local_home,
             commands::local_ensure_dir,

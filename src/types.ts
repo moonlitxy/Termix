@@ -116,25 +116,45 @@ export interface SftpItem {
 export interface TransferTask {
   id: string;
   sessionId: string;
+  connectionId?: string;
   fileName: string;
   direction: "upload" | "download";
   localPath: string;
   remotePath: string;
-  status: "running" | "paused" | "completed" | "failed" | "cancelled";
+  status: "running" | "paused" | "interrupted" | "completed" | "failed" | "cancelled";
   progress: number;
   speed: number;
+  /** 已传输字节数 / 源文件总字节数；目录传输为 0 */
+  transferredBytes?: number;
+  totalBytes?: number;
   error?: string;
   isDir?: boolean;
+  createdAt?: number;
 }
 
 export interface TransferProgressEvent {
   taskId: string;
   fileName?: string;
   direction?: string;
+  sessionId?: string;
+  connectionId?: string;
+  localPath?: string;
+  remotePath?: string;
+  isDir?: boolean;
   progress?: number;
   speed?: number;
   status?: string;
   error?: string;
+  transferredBytes?: number;
+  totalBytes?: number;
+  /** 半成品无法通过校验，已丢弃并从头发送 */
+  restarted?: boolean;
+  /** 任务创建时间（毫秒），用于清空队列后忽略迟到的终止事件 */
+  createdAt?: number;
+  /** 单条任务已从后端队列删除 */
+  removed?: boolean;
+  /** 整个队列已清空 */
+  removedAll?: boolean;
 }
 
 /** 主功能区（Activity Rail） */

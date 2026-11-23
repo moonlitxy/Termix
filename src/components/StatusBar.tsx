@@ -3,6 +3,7 @@ import { isWindowsPlatform } from "../lib/windowControls";
 import { Icon } from "./Icon";
 import { broadcastTargets } from "../lib/terminalBroadcast";
 import { useT } from "../lib/i18n";
+import { loadSettings, saveSettings } from "../lib/settings";
 
 export function StatusBar() {
   const t = useT();
@@ -10,8 +11,8 @@ export function StatusBar() {
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const transfers = useApp((s) => s.transfers);
-  const rightPanelExpanded = useApp((s) => s.rightPanelExpanded);
-  const setRightPanelExpanded = useApp((s) => s.setRightPanelExpanded);
+  const transferWindowOpen = useApp((s) => s.transferWindowOpen);
+  const setTransferWindowOpen = useApp((s) => s.setTransferWindowOpen);
   const broadcastInput = useApp((s) => s.broadcastInput);
   const toggleBroadcastInput = useApp((s) => s.toggleBroadcastInput);
   const activeTab = tabs.find((t) => t.id === activeTabId && !t.hidden);
@@ -28,11 +29,18 @@ export function StatusBar() {
       ? "ds-dot--success"
       : "ds-dot--error";
   const activeTransfers = transfers.filter(
-    (t) => t.status === "running" || t.status === "paused"
+    (t) =>
+      t.status === "running" || t.status === "paused" || t.status === "interrupted"
   ).length;
   const broadcastTargetsCount = activeTabId
     ? broadcastTargets(tabs, activeTabId).length
     : 0;
+
+  const toggleTransfers = () => {
+    const next = !transferWindowOpen;
+    setTransferWindowOpen(next);
+    saveSettings({ ...loadSettings(), transferWindowOpen: next });
+  };
 
   return (
     <div className="status-bar">
@@ -66,12 +74,12 @@ export function StatusBar() {
         </button>
         <button
           className={
-            "status-bar__transfer" + (rightPanelExpanded ? " is-active" : "")
+            "status-bar__transfer" + (transferWindowOpen ? " is-active" : "")
           }
           type="button"
           title={t("statusbar.resourcesTitle")}
-          aria-pressed={rightPanelExpanded}
-          onClick={() => setRightPanelExpanded(!rightPanelExpanded)}
+          aria-pressed={transferWindowOpen}
+          onClick={toggleTransfers}
         >
           <Icon name="bar" size={11} />
           {t("statusbar.resources")}

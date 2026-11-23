@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useApp } from "./store/app";
-import { useT } from "./lib/i18n";
+import { t as translate, useT } from "./lib/i18n";
 import { useMonitor, selectMonitorConnection } from "./store/monitor";
 import { ActivityRail } from "./components/ActivityRail";
 import { TitleBar } from "./components/TitleBar";
@@ -15,7 +15,7 @@ import { SessionSidebar } from "./components/SessionSidebar";
 import { EditorTabs } from "./components/EditorTabs";
 import { TerminalView } from "./components/TerminalView";
 import { CommandInput } from "./components/CommandInput";
-import { RightPanel } from "./components/RightPanel";
+import { TransferWindow } from "./components/TransferWindow";
 import { StatusBar } from "./components/StatusBar";
 import { NewConnectionDialog } from "./components/NewConnectionDialog";
 import { UpdateDialog } from "./components/UpdateDialog";
@@ -34,6 +34,7 @@ import {
 import { terminalRegistry } from "./lib/terminalRegistry";
 import { isWindowsPlatform } from "./lib/windowControls";
 import { useUpdate } from "./store/update";
+import { toast } from "./store/feedback";
 import {
   applyAppearance,
   loadSettings,
@@ -111,6 +112,7 @@ function ViewLoading() {
 export default function App() {
   const t = useT();
   const tabs = useApp((s) => s.tabs);
+  const transfers = useApp((s) => s.transfers);
   const activeTabId = useApp((s) => s.activeTabId);
   const activity = useApp((s) => s.activity);
   const sftpCollapsed = useApp((s) => s.sftpCollapsed);
@@ -173,6 +175,11 @@ export default function App() {
     };
   }, []);
 
+  // 恢复用户上次手动开关的悬浮传输窗状态（自动弹出不会改写这个偏好）
+  useEffect(() => {
+    useApp.setState({ transferWindowOpen: loadSettings().transferWindowOpen });
+  }, []);
+
   // 文件面板跟随当前激活标签：切换标签/连接状态变化时重新绑定 SFTP 上下文，
   // 避免多会话场景继续显示上一条连接的目录与监控数据。
   useEffect(() => {
@@ -209,6 +216,9 @@ export default function App() {
       try {
         const un = await onTransferProgress((e) => {
           useApp.getState().upsertTransfer(e);
+          if (e.restarted) {
+            toast.warning(translate("panel.restarted"));
+          }
         });
         unlistens.push(un);
       } catch {
@@ -242,6 +252,53 @@ export default function App() {
       unlistens.forEach((u) => u());
     };
   }, []);
+
+  // 新传输开始时自动展开右侧队列，避免用户看不到进度条；
+  // 每个任务只触发一次，用户随后手动收起不会被反复打开。
+  const autoOpenedTransfers = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = transfers.filter(
+      (task) => task.status === "running" && !autoOpenedTransfers.current.has(task.id)
+    );
+    if (fresh.length === 0) return;
+    fresh.forEach((task) => autoOpenedTransfers.current.add(task.id));
+    if (!useApp.getState().transferWindowOpen) {
+      useApp.getState().setTransferWindowOpen(true);
+    }
+  }, [transfers]);
+
+  // 连接中断的传输在会话重连后自动续传（用户主动暂停的任务保持暂停）。
+  const resumeAttempts = useRef<Record<string, number>>({});
+  const resumeInFlight = useRef(new Set<string>());
+  useEffect(() => {
+    for (const task of transfers) {
+      if (task.status !== "interrupted") {
+        delete resumeAttempts.current[task.id];
+        continue;
+      }
+      if (!task.sessionId) continue;
+      if (resumeInFlight.current.has(task.id)) continue;
+      const tab = tabs.find(
+        (candidate) =>
+          candidate.sessionId === task.sessionId &&
+          candidate.status === "connected" &&
+          !!candidate.connectionId
+      );
+      if (!tab?.connectionId) continue;
+      // 必须等到重连产生新的 connectionId，避免在已失效的旧连接上重试
+      if (task.connectionId && task.connectionId === tab.connectionId) continue;
+      const attempts = resumeAttempts.current[task.id] ?? 0;
+      if (attempts >= 3) continue;
+      resumeAttempts.current[task.id] = attempts + 1;
+      resumeInFlight.current.add(task.id);
+      ipc
+        .transferResume(task.id, tab.connectionId)
+        .catch((e) => console.warn("[transfer] auto resume failed", e))
+        .finally(() => {
+          window.setTimeout(() => resumeInFlight.current.delete(task.id), 2000);
+        });
+    }
+  }, [tabs, transfers]);
 
   // 软件更新：启动后延迟自动检查（不打断首次交互），并监听下载进度 / 完成 / 失败事件
   useEffect(() => {
@@ -516,8 +573,10 @@ export default function App() {
         <div className="app__main-row">
           <ActivityRail />
           <SessionSidebar />
-          <div className="workspace">{renderMain()}</div>
-          <RightPanel transfersOnly />
+          <div className="workspace-shell">
+            <div className="workspace">{renderMain()}</div>
+            <TransferWindow />
+          </div>
         </div>
       </div>
       <StatusBar />

@@ -59,6 +59,8 @@ interface AppState {
   sftpCollapsed: boolean;
   /** 右侧资源面板展开状态：收起时仅保留迷你指标条 */
   rightPanelExpanded: boolean;
+  /** 悬浮传输窗口是否展开 */
+  transferWindowOpen: boolean;
   /** 底部命令输入条展开状态：默认隐藏，Ctrl+L 唤出 */
   commandInputOpen: boolean;
   /** 各标签的重连触发计数：请求重新连接时自增，终端视图据此重建连接 */
@@ -100,6 +102,7 @@ interface AppState {
   /** 切换 SFTP 面板收起/展开状态 */
   toggleSftpCollapsed: () => void;
   setRightPanelExpanded: (open: boolean) => void;
+  setTransferWindowOpen: (open: boolean) => void;
   setCommandInputOpen: (open: boolean) => void;
   toggleBroadcastInput: () => void;
   /** 请求指定标签重新连接（外部触发，如标题栏重连按钮） */
@@ -120,6 +123,10 @@ const REMOTE_CACHE_MAX = 12;
 const inflightRemote = new Set<string>();
 /** 后台补充目录大小/属主信息的 in-flight 集合（key: connectionId|path） */
 const inflightEnrich = new Set<string>();
+/** 已删除任务 id：抑制清空/删除后迟到的终止事件，避免行重新出现 */
+const removedTransferIds = new Set<string>();
+/** 最近一次清空队列的时间，用于忽略清空前创建的迟到事件 */
+let transferClearAt = 0;
 
 export function joinPath(a: string, b: string): string {
   if (!a) return b;
@@ -162,6 +169,7 @@ export const useApp = create<AppState>((set, get) => ({
   remoteCache: {},
   sftpCollapsed: false,
   rightPanelExpanded: false,
+  transferWindowOpen: false,
   commandInputOpen: false,
   reconnectNonce: {},
   helpAnchor: null,
@@ -226,6 +234,21 @@ export const useApp = create<AppState>((set, get) => ({
   setTransfers: (list) => set({ transfers: list }),
   upsertTransfer: (e) =>
     set((s) => {
+      if (e.removedAll) {
+        transferClearAt = Date.now();
+        removedTransferIds.clear();
+        return { transfers: [] };
+      }
+      if (e.removed) {
+        removedTransferIds.add(e.taskId);
+        return {
+          transfers: s.transfers.filter((task) => task.id !== e.taskId),
+        };
+      }
+      if (removedTransferIds.has(e.taskId)) return {};
+      if (e.createdAt && transferClearAt && e.createdAt < transferClearAt) {
+        return {};
+      }
       const tasks = [...s.transfers];
       const idx = tasks.findIndex((t) => t.id === e.taskId);
       if (idx >= 0) {
@@ -234,24 +257,38 @@ export const useApp = create<AppState>((set, get) => ({
           ...t,
           fileName: e.fileName ?? t.fileName,
           direction: (e.direction as "upload" | "download") ?? t.direction,
+          sessionId: e.sessionId || t.sessionId,
+          connectionId: e.connectionId || t.connectionId,
+          localPath: e.localPath || t.localPath,
+          remotePath: e.remotePath || t.remotePath,
+          isDir: e.isDir ?? t.isDir,
           status: (e.status as TransferTask["status"]) ?? t.status,
           progress: e.progress ?? t.progress,
           speed: e.speed ?? t.speed,
-          error: e.error ?? t.error,
+          transferredBytes: e.transferredBytes ?? t.transferredBytes,
+          totalBytes: e.totalBytes ?? t.totalBytes,
+          error:
+            e.error ??
+            (e.status === "running" || e.status === "completed" ? undefined : t.error),
+          createdAt: e.createdAt ?? t.createdAt,
         };
       } else if (e.fileName) {
         tasks.unshift({
           id: e.taskId,
-          sessionId: "",
+          sessionId: e.sessionId ?? "",
+          connectionId: e.connectionId ?? "",
           fileName: e.fileName,
           direction: e.direction === "download" ? "download" : "upload",
-          localPath: "",
-          remotePath: "",
+          localPath: e.localPath ?? "",
+          remotePath: e.remotePath ?? "",
           status: (e.status as TransferTask["status"]) ?? "running",
           progress: e.progress ?? 0,
           speed: e.speed ?? 0,
+          transferredBytes: e.transferredBytes ?? 0,
+          totalBytes: e.totalBytes ?? 0,
           error: e.error,
-          isDir: false,
+          isDir: e.isDir ?? false,
+          createdAt: e.createdAt ?? Date.now(),
         });
       }
       return { transfers: tasks };
@@ -379,6 +416,7 @@ export const useApp = create<AppState>((set, get) => ({
       return { sftpCollapsed: next };
     }),
   setRightPanelExpanded: (open) => set({ rightPanelExpanded: open }),
+  setTransferWindowOpen: (open) => set({ transferWindowOpen: open }),
   setCommandInputOpen: (open) => set({ commandInputOpen: open }),
   toggleBroadcastInput: () =>
     set((s) => {

@@ -125,7 +125,10 @@ export const ipc = {
   transferList: () => invoke<TransferTask[]>("transfer_list"),
   transferCancel: (taskId: string) => invoke<void>("transfer_cancel", { taskId }),
   transferPause: (taskId: string) => invoke<void>("transfer_pause", { taskId }),
-  transferResume: (taskId: string) => invoke<void>("transfer_resume", { taskId }),
+  transferResume: (taskId: string, connectionId?: string) =>
+    invoke<void>("transfer_resume", { taskId, connectionId: connectionId ?? null }),
+  transferDelete: (taskId: string) => invoke<void>("transfer_delete", { taskId }),
+  transferClear: () => invoke<void>("transfer_clear"),
 
   // local fs
   localList: (path: string) => invoke<SftpItem[]>("local_list", { path }),
