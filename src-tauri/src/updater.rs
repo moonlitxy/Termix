@@ -44,6 +44,11 @@ struct GhAsset {
 
 const LATEST_URL: &str = "https://api.github.com/repos/moonlitxy/Termix/releases/latest";
 const USER_AGENT: &str = "Termix-Updater";
+/// 版本检查只请求小 JSON，保持短超时。
+const CHECK_TIMEOUT_SECS: u64 = 20;
+/// 下载安装包单独设置连接超时与总超时，避免大文件被短超时截断。
+const DOWNLOAD_CONNECT_TIMEOUT_SECS: u64 = 15;
+const DOWNLOAD_TIMEOUT_SECS: u64 = 30 * 60;
 
 /// 镜像基址校验：仅允许 http(s)，统一补末尾 /（前端已规范过，这里是后端兜底）
 fn normalize_mirror_base(raw: &str) -> Result<String, String> {
@@ -73,16 +78,32 @@ fn apply_mirror(url: &str, mirror: Option<&str>) -> Result<String, String> {
     }
 }
 
-fn http_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(std::time::Duration::from_secs(20));
+/// 构建带可选代理的客户端；超时由调用方按场景设置。
+fn client_builder(proxy: Option<&str>) -> Result<reqwest::ClientBuilder, String> {
+    let mut builder = reqwest::Client::builder().user_agent(USER_AGENT);
     if let Some(p) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
-        let proxy =
-            reqwest::Proxy::all(p).map_err(|e| format!("代理地址无效（{p}）：{e}"))?;
+        let proxy = reqwest::Proxy::all(p).map_err(|e| format!("代理地址无效（{p}）：{e}"))?;
         builder = builder.proxy(proxy);
     }
-    builder
+    Ok(builder)
+}
+
+/// 版本检查只请求很小的 JSON，20 秒总超时足够。
+fn http_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
+    client_builder(proxy)?
+        .timeout(std::time::Duration::from_secs(CHECK_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))
+}
+
+/// 安装包体积较大，不能沿用版本检查的 20 秒总超时；
+/// 否则镜像或代理稍慢就会在读取响应体时被强制中断。
+fn download_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
+    client_builder(proxy)?
+        .connect_timeout(std::time::Duration::from_secs(
+            DOWNLOAD_CONNECT_TIMEOUT_SECS,
+        ))
+        .timeout(std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))
 }
@@ -290,12 +311,12 @@ async fn run_download(
     proxy: Option<&str>,
 ) -> Result<(), String> {
     let safe_name = sanitize_installer_name(file_name)?;
-    let client = http_client(proxy)?;
+    let client = download_client(proxy)?;
     let mut resp = client
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("下载安装包失败：{e}"))?;
+        .map_err(|e| format!("下载安装包失败：{}", describe_reqwest_error(&e)))?;
     if !resp.status().is_success() {
         return Err(format!("下载安装包失败（服务器返回 {}）", resp.status()));
     }
@@ -310,10 +331,24 @@ async fn run_download(
         .await
         .map_err(|e| format!("创建下载文件失败：{e}"))?;
     let mut received: u64 = 0;
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("下载中断：{e}"))? {
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("写入下载文件失败：{e}"))?;
+    loop {
+        let chunk = match resp.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(e) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(format!(
+                    "下载中断（可能超时或连接被镜像断开）：{}",
+                    describe_reqwest_error(&e)
+                ));
+            }
+        };
+        if let Err(e) = file.write_all(&chunk).await {
+            drop(file);
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(format!("写入下载文件失败：{e}"));
+        }
         received += chunk.len() as u64;
         let percent = if total > 0 {
             ((received as f64 / total as f64) * 100.0) as u32
@@ -324,6 +359,11 @@ async fn run_download(
             "update-download-progress",
             json!({ "fileName": safe_name, "received": received, "total": total, "percent": percent }),
         );
+    }
+    if total > 0 && received != total {
+        drop(file);
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(format!("下载不完整：已收到 {received}/{total} 字节"));
     }
     let _ = file.flush().await;
     let _ = app.emit(
@@ -404,6 +444,14 @@ fn open_with_system(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 下载安装包必须使用独立的长超时，不能再退回版本检查的 20 秒。
+    #[test]
+    fn download_timeout_allows_large_installers() {
+        assert!(DOWNLOAD_TIMEOUT_SECS > CHECK_TIMEOUT_SECS);
+        assert!(DOWNLOAD_TIMEOUT_SECS >= 10 * 60);
+        assert!(DOWNLOAD_CONNECT_TIMEOUT_SECS < DOWNLOAD_TIMEOUT_SECS);
+    }
 
     #[test]
     fn compare_version_orders_numeric_segments() {
