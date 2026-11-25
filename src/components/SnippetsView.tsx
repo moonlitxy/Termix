@@ -6,6 +6,9 @@ import { applyVariables, buildVarDefs, type VarDef } from "../lib/variables";
 import { confirmDialog, toast } from "../store/feedback";
 import { useFocusTrap } from "../lib/focusTrap";
 import { useT } from "../lib/i18n";
+import { scheduleRemoteCwdSync } from "../lib/shellCommand";
+import { terminalRegistry } from "../lib/terminalRegistry";
+import { selectWorkspaceTargetTab } from "../lib/workspaceTarget";
 import type { Snippet, SnippetInput } from "../types";
 
 const EMPTY: SnippetInput = { title: "", command: "", groupId: undefined };
@@ -73,13 +76,16 @@ export function SnippetsView() {
   };
 
   const send = async (command: string) => {
-    const tab = tabs.find((t) => t.id === activeTabId);
+    const tab =
+      selectWorkspaceTargetTab(tabs, activeTabId, terminalRegistry.getFocus()) ??
+      tabs.find((t) => t.id === activeTabId);
     if (!tab?.connectionId || !tab.shellId) {
       toast.warning(tr("sftp.noConnectedTab"));
       return;
     }
     try {
       await ipc.terminalWrite(tab.connectionId, tab.shellId, command + "\n");
+      scheduleRemoteCwdSync(command, tab.connectionId, tab.shellId);
     } catch (e) {
       toast.error(String(e));
     }

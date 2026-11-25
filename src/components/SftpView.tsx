@@ -10,6 +10,8 @@ import { filterItems } from "../lib/fileFilter";
 import { rangeSelection, selectAllPaths, toggleSelection } from "../lib/selection";
 import { getVirtualRange } from "../lib/virtualList";
 import { selectionHint, shouldAutoFit } from "../lib/sftpLayout";
+import { scheduleRemoteCwdSync } from "../lib/shellCommand";
+import { selectWorkspaceTargetTab } from "../lib/workspaceTarget";
 import { pickFunLocalized } from "../lib/fun";
 import { getLang, useT } from "../lib/i18n";
 import { confirmDialog, promptDialog, toast } from "../store/feedback";
@@ -405,10 +407,7 @@ export function SftpView() {
     setRemoteDraft(remotePath);
   }, [remotePath]);
 
-  // 文件面板会话跟随连接状态：
-  // - 绑定的连接已断开/失效（重连后 connectionId 变化、手动断开等）时先自动解除，
-  //   避免残留旧 connectionId 导致目录请求持续报 "connection not found" 而列表空白；
-  // - 无上下文且存在已连接会话时自动建立。
+  // 文件面板的绑定与重绑由 App 统一处理；这里只清理已经没有任何连接标签引用的旧上下文。
   useEffect(() => {
     const st = useApp.getState();
     if (
@@ -592,19 +591,24 @@ export function SftpView() {
 
   const sendCommand = async (command: string) => {
     const connectedTabs = tabs.filter((t) => t.connectionId && t.shellId);
+    const preferred = selectWorkspaceTargetTab(
+      tabs,
+      activeTabId,
+      terminalRegistry.getFocus()
+    );
     const target =
-      activeTab?.connectionId && activeTab.shellId
-        ? activeTab
-        : connectedTabs.find(
-            (t) => t.connectionId === sftpContext?.connectionId
-          ) ?? connectedTabs[0];
+      (preferred?.connectionId && preferred.shellId ? preferred : undefined) ??
+      connectedTabs.find(
+        (t) => t.connectionId === sftpContext?.connectionId
+      ) ?? connectedTabs[0];
     if (!target?.connectionId || !target.shellId) {
       toast.warning(tr("sftp.noConnectedTab"));
       return;
     }
     try {
-      useApp.getState().setActiveTab(target.id);
+      if (!target.hidden) useApp.getState().setActiveTab(target.id);
       await ipc.terminalWrite(target.connectionId, target.shellId, command + "\n");
+      scheduleRemoteCwdSync(command, target.connectionId, target.shellId);
       // 快捷命令同样写入历史，与终端直接输入/底部输入框保持同一份历史
       if (target.sessionId) {
         await ipc.historyAdd(target.sessionId, command);

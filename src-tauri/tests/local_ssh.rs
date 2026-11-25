@@ -154,6 +154,13 @@ async fn local_sshd_exec_and_sftp_when_configured() {
         .await
         .expect("sftp list");
     assert!(items.iter().any(|item| item.path == file_path));
+    assert!(
+        sftp.canonical_dir(&connection_id, &file_path)
+            .await
+            .expect("sftp canonical file")
+            .is_none(),
+        "regular file must not be accepted as a cd target"
+    );
     sftp.rename(&connection_id, &file_path, &renamed_path)
         .await
         .expect("sftp rename");
@@ -169,6 +176,12 @@ async fn local_sshd_exec_and_sftp_when_configured() {
     sftp.chmod(&connection_id, &dir_path, 0o755)
         .await
         .expect("sftp chmod");
+    let canonical_dir = sftp
+        .canonical_dir(&connection_id, &dir_path)
+        .await
+        .expect("sftp canonical dir")
+        .expect("directory should be accepted");
+    assert!(canonical_dir.ends_with(&dir_name));
     let items = sftp
         .list(&connection_id, &sandbox)
         .await

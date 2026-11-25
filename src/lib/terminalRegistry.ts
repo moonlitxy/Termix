@@ -5,6 +5,15 @@ const terms = new Map<string, Terminal>();
 const searches = new Map<string, SearchAddon>();
 let focusedTabId: string | null = null;
 
+export const TERMINAL_FOCUS_CHANGED_EVENT = "termix:terminal-focus-changed";
+
+function notifyFocusChanged(tabId: string | null) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(TERMINAL_FOCUS_CHANGED_EVENT, { detail: { tabId } })
+  );
+}
+
 /** 终端实例与输出缓冲注册表（按 tabId），供工具栏/快捷键跨组件访问。 */
 export const terminalRegistry = {
   set(tabId: string, t: Terminal): void {
@@ -21,7 +30,9 @@ export const terminalRegistry = {
 
   /** 记录最近获得焦点的终端（分屏 pane 无法被激活，搜索等操作以此为目标） */
   setFocus(tabId: string): void {
+    if (focusedTabId === tabId) return;
     focusedTabId = tabId;
+    notifyFocusChanged(tabId);
   },
   getFocus(): string | null {
     return focusedTabId;

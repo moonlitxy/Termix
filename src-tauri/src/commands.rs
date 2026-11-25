@@ -1053,6 +1053,15 @@ pub async fn sftp_cwd(
 }
 
 #[tauri::command]
+pub async fn sftp_canonical_dir(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.sftp.canonical_dir(&connection_id, &path).await
+}
+
+#[tauri::command]
 pub async fn sftp_mkdir(
     connection_id: String,
     path: String,

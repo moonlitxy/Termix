@@ -403,6 +403,21 @@ impl SftpService {
         Ok(cwd)
     }
 
+    /// 将路径规范化为远端绝对路径；仅当目标确实是目录时返回。
+    pub async fn canonical_dir(
+        &self,
+        connection_id: &str,
+        path: &str,
+    ) -> Result<Option<String>, String> {
+        let sftp = self.session(connection_id).await?;
+        let resolved = sftp.canonicalize(path).await.map_err(|e| {
+            log::warn!("sftp: canonicalize conn={connection_id} path={path} failed: {e}");
+            e.to_string()
+        })?;
+        let meta = sftp.metadata(&resolved).await.map_err(|e| e.to_string())?;
+        Ok(meta.is_dir().then_some(resolved))
+    }
+
     pub async fn list(&self, connection_id: &str, path: &str) -> Result<Vec<SftpItem>, String> {
         self.list_inner(connection_id, path, false).await
     }

@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -31,10 +32,14 @@ import {
   onUpdateDownloadError,
   onUpdateDownloadProgress,
 } from "./lib/ipc";
-import { terminalRegistry } from "./lib/terminalRegistry";
+import {
+  TERMINAL_FOCUS_CHANGED_EVENT,
+  terminalRegistry,
+} from "./lib/terminalRegistry";
 import { isWindowsPlatform } from "./lib/windowControls";
 import { useUpdate } from "./store/update";
 import { toast } from "./store/feedback";
+import { selectWorkspaceTargetTab } from "./lib/workspaceTarget";
 import {
   applyAppearance,
   loadSettings,
@@ -180,26 +185,43 @@ export default function App() {
     useApp.setState({ transferWindowOpen: loadSettings().transferWindowOpen });
   }, []);
 
-  // 文件面板跟随当前激活标签：切换标签/连接状态变化时重新绑定 SFTP 上下文，
-  // 避免多会话场景继续显示上一条连接的目录与监控数据。
+  // 文件面板跟随当前激活标签或分屏中最近聚焦的终端；上下文被清空时也会自动重绑。
   useEffect(() => {
-    const st = useApp.getState();
-    const active = st.tabs.find((tab) => tab.id === st.activeTabId && !tab.hidden);
-    if (active?.status === "connected" && active.connectionId) {
-      if (st.sftpContext?.connectionId !== active.connectionId) {
-        void st.setSftpContext(active.sessionId, active.connectionId);
+    const syncSftpContext = () => {
+      const st = useApp.getState();
+      const target = selectWorkspaceTargetTab(
+        st.tabs,
+        st.activeTabId,
+        terminalRegistry.getFocus()
+      );
+      if (target?.status === "connected" && target.connectionId) {
+        if (st.sftpContext?.connectionId !== target.connectionId) {
+          void st.setSftpContext(target.sessionId, target.connectionId);
+        }
+      } else if (st.sftpContext) {
+        void st.setSftpContext(st.sftpContext.sessionId, null);
       }
-    } else if (st.sftpContext) {
-      void st.setSftpContext(st.sftpContext.sessionId, null);
-    }
-  }, [activeTabId, tabs]);
+    };
+    syncSftpContext();
+    window.addEventListener(TERMINAL_FOCUS_CHANGED_EVENT, syncSftpContext);
+    return () =>
+      window.removeEventListener(TERMINAL_FOCUS_CHANGED_EVENT, syncSftpContext);
+  }, [activeTabId, tabs, sftpContext?.connectionId]);
 
   // 全局唯一监控轮询：跟随连接状态（终端右侧资源监控与「监控」模块共享同一数据源，
   // 由本组件统一驱动 useMonitor.sync，两处展示的数据完全一致）
   const monitorConnId = selectMonitorConnection(sftpContext, tabs, activeTabId);
-  useEffect(() => {
+  useLayoutEffect(() => {
     useMonitor.getState().sync(monitorConnId);
   }, [monitorConnId]);
+
+  // 为其他已连接标签预取一份监控快照，切换时先显示旧数据再刷新。
+  useEffect(() => {
+    const connIds = tabs
+      .filter((tab) => tab.status === "connected" && tab.connectionId)
+      .map((tab) => tab.connectionId!);
+    useMonitor.getState().prefetch(connIds);
+  }, [tabs]);
 
   useEffect(() => {
     const st = useApp.getState();

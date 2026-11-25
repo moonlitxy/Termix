@@ -66,6 +66,20 @@ export interface CpuMeta {
   freq: string;
 }
 
+interface MonitorSnapshot {
+  metrics: Metrics;
+  netSpeed: { rx: number; tx: number };
+  cpuMeta: CpuMeta | null;
+  sysInfo: SysInfo | null;
+  cpuHist: number[];
+  lastSampleAt: number;
+  uptimeBase: { uptime: number; ts: number };
+}
+
+/** 每个连接保留最近成功快照，切回标签先展示旧值，随后由轮询刷新 */
+const snapshotCache = new Map<string, Partial<MonitorSnapshot>>();
+const prefetching = new Set<string>();
+
 interface MonitorState {
   /** 当前监控的连接（null = 无连接，停止采集） */
   connectionId: string | null;
@@ -85,6 +99,8 @@ interface MonitorState {
 
   /** 与目标连接同步（幂等）：连接变化时重启唯一轮询，无连接时停止并清空 */
   sync: (connId: string | null) => void;
+  /** 为后台连接预取一次监控快照，切换标签时无需等待首轮采样 */
+  prefetch: (connIds: string[]) => void;
 }
 
 let pollTimer: number | null = null;
@@ -118,11 +134,17 @@ function startPolling(
   ipc
     .systemInfo(connId)
     .then((info) => {
+      const cpuMeta = {
+        cores: info.cpuCores,
+        freq: extractCpuFreq(info.cpuModel),
+      };
+      snapshotCache.set(connId, {
+        ...(snapshotCache.get(connId) ?? {}),
+        cpuMeta,
+        sysInfo: info,
+      });
       if (get().connectionId === connId) {
-        set({
-          cpuMeta: { cores: info.cpuCores, freq: extractCpuFreq(info.cpuModel) },
-          sysInfo: info,
-        });
+        set({ cpuMeta, sysInfo: info });
       }
     })
     .catch(() => {
@@ -143,25 +165,38 @@ function startPolling(
       try {
         const m = await ipc.monitorMetrics(connId);
         if (get().connectionId !== connId) return;
+        let netSpeed = get().netSpeed;
         if (lastSample && lastTs > 0) {
           const dt = (ts - lastTs) / 1000; // 实际采样间隔（秒）
           if (dt > 0) {
-            set({
-              netSpeed: {
-                rx: Math.max(0, m.netRx - lastSample.netRx) / dt,
-                tx: Math.max(0, m.netTx - lastSample.netTx) / dt,
-              },
-            });
+            netSpeed = {
+              rx: Math.max(0, m.netRx - lastSample.netRx) / dt,
+              tx: Math.max(0, m.netTx - lastSample.netTx) / dt,
+            };
           }
         }
         lastSample = m;
         lastTs = ts;
-        set((s) => ({
-          metrics: m,
-          uptimeBase: { uptime: m.uptime, ts },
-          lastSampleAt: ts,
-          cpuHist: [...s.cpuHist.slice(-59), m.cpu],
-        }));
+        set((s) => {
+          const cpuHist = [...s.cpuHist.slice(-59), m.cpu];
+          const uptimeBase = { uptime: m.uptime, ts };
+          snapshotCache.set(connId, {
+            metrics: m,
+            netSpeed,
+            cpuMeta: s.cpuMeta,
+            sysInfo: s.sysInfo,
+            cpuHist,
+            lastSampleAt: ts,
+            uptimeBase,
+          });
+          return {
+            metrics: m,
+            netSpeed,
+            uptimeBase,
+            lastSampleAt: ts,
+            cpuHist,
+          };
+        });
       } catch {
         /* 采样失败忽略：下次轮询重试 */
       } finally {
@@ -203,7 +238,77 @@ export const useMonitor = create<MonitorState>((set, get) => ({
       set({ ...EMPTY });
       return;
     }
-    set({ ...EMPTY, connectionId: connId });
+    const cached = snapshotCache.get(connId);
+    set({
+      ...EMPTY,
+      ...(cached ?? {}),
+      connectionId: connId,
+      nowTs: cached ? Date.now() : 0,
+    });
     startPolling(connId, set, get);
+  },
+
+  prefetch: (connIds) => {
+    const current = get().connectionId;
+    for (const connId of connIds) {
+      if (!connId || connId === current || prefetching.has(connId)) continue;
+      const cached = snapshotCache.get(connId);
+      if (cached?.lastSampleAt && Date.now() - cached.lastSampleAt < 30_000) {
+        continue;
+      }
+      prefetching.add(connId);
+      const ts = Date.now();
+      void Promise.all([
+        ipc
+          .systemInfo(connId)
+          .then((info) => {
+            const cpuMeta = {
+              cores: info.cpuCores,
+              freq: extractCpuFreq(info.cpuModel),
+            };
+            snapshotCache.set(connId, {
+              ...(snapshotCache.get(connId) ?? {}),
+              cpuMeta,
+              sysInfo: info,
+            });
+            if (get().connectionId === connId) {
+              set((s) => (s.cpuMeta ? {} : { cpuMeta, sysInfo: info }));
+            }
+          })
+          .catch(() => {}),
+        ipc
+          .monitorMetrics(connId)
+          .then((m) => {
+            const previous = snapshotCache.get(connId) ?? {};
+            if (previous.lastSampleAt && previous.lastSampleAt > ts) return;
+            const netSpeed = previous.netSpeed ?? { rx: 0, tx: 0 };
+            const cpuHist = [...(previous.cpuHist ?? []).slice(-59), m.cpu];
+            const uptimeBase = { uptime: m.uptime, ts };
+            snapshotCache.set(connId, {
+              ...previous,
+              metrics: m,
+              netSpeed,
+              cpuHist,
+              lastSampleAt: ts,
+              uptimeBase,
+            });
+            if (get().connectionId === connId) {
+              set((s) =>
+                s.metrics
+                  ? {}
+                  : {
+                      metrics: m,
+                      netSpeed,
+                      cpuHist,
+                      lastSampleAt: ts,
+                      uptimeBase,
+                      nowTs: Date.now(),
+                    }
+              );
+            }
+          })
+          .catch(() => {}),
+      ]).finally(() => prefetching.delete(connId));
+    }
   },
 }));

@@ -13,6 +13,11 @@ import { ipc } from "../lib/ipc";
 import { loadSettings, saveSettings } from "../lib/settings";
 import { setBoundedTimestampCache } from "../lib/boundedCache";
 import { switchRemotePath } from "../lib/remotePath";
+import {
+  normalizeRemotePath,
+  parseCdIntent,
+  resolveCdTarget,
+} from "../lib/cdPath";
 
 interface SftpContext {
   sessionId: string;
@@ -44,6 +49,10 @@ interface AppState {
   remotePath: string;
   /** 每条连接最后浏览的远程目录，切回标签时恢复 */
   remotePaths: Record<string, string>;
+  /** 每条连接解析 ~ 用的 SFTP 家目录缓存 */
+  remoteHomes: Record<string, string>;
+  /** 每条 shell 最近一次 cd 后的逻辑目录（shellId 唯一） */
+  shellCwds: Record<string, string>;
   remoteSelected: SftpItem | null;
   /** 本地下载目标目录（无本地文件面板，下载直接落到该目录） */
   localPath: string;
@@ -96,6 +105,11 @@ interface AppState {
   loadRemote: () => Promise<void>;
   openRemoteDir: (item: SftpItem) => Promise<void>;
   upRemote: () => Promise<void>;
+  syncRemoteCwd: (
+    command: string,
+    connectionId: string,
+    shellId: string
+  ) => Promise<void>;
   selectRemote: (item: SftpItem | null) => void;
   /** 目录变更（新建/重命名/删除/上传完成）后使缓存失效，下次加载强制重新请求 */
   invalidateRemoteCache: () => void;
@@ -127,6 +141,8 @@ const inflightEnrich = new Set<string>();
 const removedTransferIds = new Set<string>();
 /** 最近一次清空队列的时间，用于忽略清空前创建的迟到事件 */
 let transferClearAt = 0;
+/** 每个 shell 的 cwd 同步序号，防止较慢的旧请求覆盖较新的目录 */
+const cwdSyncSeq = new Map<string, number>();
 
 export function joinPath(a: string, b: string): string {
   if (!a) return b;
@@ -161,6 +177,8 @@ export const useApp = create<AppState>((set, get) => ({
   remoteItems: [],
   remotePath: "/",
   remotePaths: {},
+  remoteHomes: {},
+  shellCwds: {},
   remoteSelected: null,
   localPath: "",
   appPaths: null,
@@ -384,11 +402,15 @@ export const useApp = create<AppState>((set, get) => ({
           current.remotePath === remotePath
         );
       };
-      // 连接失效（重连后 connectionId 变化 / 后端连接被清理）：
-      // 立即解除文件面板上下文，避免目录请求持续失败导致列表空白，随后由 SftpView 自动重新绑定
+      // 连接失效时保留面板绑定：重连产生新 connectionId 后由 App 统一切换上下文。
+      // 这里不能清空 sftpContext，否则 cd 跟随会在后续命令上持续被连接校验拦截。
       if (String(e).includes("connection not found")) {
         if (isCurrent()) {
-          set({ sftpContext: null, remotePath: "/", remoteItems: [], remoteLoading: false, remoteError: null });
+          set({
+            remoteItems: [],
+            remoteLoading: false,
+            remoteError: String(e),
+          });
         }
         return;
       }
@@ -406,6 +428,97 @@ export const useApp = create<AppState>((set, get) => ({
   upRemote: async () => {
     set({ remotePath: dirname(get().remotePath), remoteSelected: null });
     await get().loadRemote();
+  },
+  syncRemoteCwd: async (command, connectionId, shellId) => {
+    const intent = parseCdIntent(command);
+    if (!intent) return;
+    const seq = (cwdSyncSeq.get(shellId) ?? 0) + 1;
+    cwdSyncSeq.set(shellId, seq);
+    const isCurrent = () => cwdSyncSeq.get(shellId) === seq;
+
+    const initial = get();
+    if (initial.sftpContext?.connectionId !== connectionId) {
+      console.warn("[cwd] skip: SFTP context mismatch", {
+        connectionId,
+        sftpContext: initial.sftpContext?.connectionId,
+        command,
+      });
+      return;
+    }
+
+    let home = initial.remoteHomes[connectionId] ?? "";
+    const hasShellCwd = !!initial.shellCwds[shellId];
+    const baseNeedsHome =
+      intent.needsHome || (!hasShellCwd && !intent.target.startsWith("/"));
+    if (!home && baseNeedsHome) {
+      try {
+        home = await ipc.sftpCwd(connectionId);
+        set((s) => ({
+          remoteHomes: { ...s.remoteHomes, [connectionId]: home },
+        }));
+      } catch {
+        return;
+      }
+      if (!isCurrent()) return;
+    }
+
+    const current = get();
+    if (current.sftpContext?.connectionId !== connectionId) return;
+    const base = current.shellCwds[shellId] ?? (home || current.remotePath);
+    const target = resolveCdTarget(intent, base, home);
+    if (!target) return;
+    let resolved: string | null = null;
+    try {
+      const canonical = await ipc.sftpCanonicalDir(connectionId, target);
+      // 保留用户实际输入的逻辑路径：符号链接下 cd .. 才能与 shell 的 PWD 一致。
+      resolved = canonical ? normalizeRemotePath(target) : null;
+    } catch (e) {
+      // 兼容尚未重启的 dev 后端：旧进程没有 sftp_canonical_dir，
+      // 用现有 sftp_list 校验目标是否为可读目录。
+      console.warn("[cwd] canonical command unavailable, fallback to list", {
+        target,
+        error: e,
+      });
+      try {
+        await ipc.sftpList(connectionId, target);
+        resolved = normalizeRemotePath(target);
+      } catch (e2) {
+        console.warn("[cwd] fallback list failed", { command, target, error: e2 });
+        return;
+      }
+    }
+    if (!isCurrent()) return;
+    try {
+      const latest = get();
+      if (latest.sftpContext?.connectionId !== connectionId || !resolved) {
+        if (!resolved) {
+          console.debug("[cwd] target is not a directory", { command, target });
+        }
+        return;
+      }
+      const pathChanged = latest.remotePath !== resolved;
+      const shellChanged = latest.shellCwds[shellId] !== resolved;
+      const savedChanged = latest.remotePaths[connectionId] !== resolved;
+      if (!pathChanged && !shellChanged && !savedChanged) return;
+
+      console.debug("[cwd] resolved", { command, target, resolved, pathChanged });
+      set({
+        remotePath: resolved,
+        remotePaths: {
+          ...latest.remotePaths,
+          [connectionId]: resolved,
+        },
+        shellCwds: {
+          ...latest.shellCwds,
+          [shellId]: resolved,
+        },
+        ...(pathChanged ? { remoteSelected: null } : {}),
+      });
+      if (pathChanged) await get().loadRemote();
+    } catch (e) {
+      console.warn("[cwd] resolve failed", { command, target, error: e });
+      // cd 可能失败、目标不是目录或包含无法解析的 shell 展开，静默保持当前目录
+    }
   },
   selectRemote: (item) => set({ remoteSelected: item }),
   invalidateRemoteCache: () => set({ remoteCache: {} }),

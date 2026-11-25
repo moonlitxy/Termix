@@ -50,6 +50,7 @@ describe("ipc command wrappers", () => {
       ["sftpList", ["conn", "/"]],
       ["sftpEnrich", ["conn", "/"]],
       ["sftpCwd", ["conn"]],
+      ["sftpCanonicalDir", ["conn", "/tmp"]],
       ["sftpMkdir", ["conn", "/tmp"]],
       ["sftpCreateFile", ["conn", "/tmp/f"]],
       ["sftpRemove", ["conn", "/tmp/f", false]],

@@ -86,6 +86,8 @@ export const ipc = {
     invoke<SftpItem[]>("sftp_list_enriched", { connectionId, path }),
   sftpCwd: (connectionId: string) =>
     invoke<string>("sftp_cwd", { connectionId }),
+  sftpCanonicalDir: (connectionId: string, path: string) =>
+    invoke<string | null>("sftp_canonical_dir", { connectionId, path }),
   sftpMkdir: (connectionId: string, path: string) =>
     invoke<void>("sftp_mkdir", { connectionId, path }),
   sftpCreateFile: (connectionId: string, path: string) =>

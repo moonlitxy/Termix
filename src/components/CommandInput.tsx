@@ -3,6 +3,9 @@ import { Icon } from "./Icon";
 import { useT } from "../lib/i18n";
 import { useApp } from "../store/app";
 import { ipc, HISTORY_CHANGED_EVENT } from "../lib/ipc";
+import { scheduleRemoteCwdSync } from "../lib/shellCommand";
+import { terminalRegistry } from "../lib/terminalRegistry";
+import { selectWorkspaceTargetTab } from "../lib/workspaceTarget";
 import type { CommandHistory } from "../types";
 
 /** 历史列表最大条数（完整展示当前会话输入过的所有命令） */
@@ -55,12 +58,20 @@ export function CommandInput() {
   const execute = async (cmd: string) => {
     const command = cmd.trim();
     if (!command) return;
-    if (tab?.connectionId && tab?.shellId) {
-      await ipc.terminalWrite(tab.connectionId, tab.shellId, command + "\n");
-      if (tab.sessionId) {
-        await ipc.historyAdd(tab.sessionId, command);
+    const target =
+      selectWorkspaceTargetTab(tabs, activeTabId, terminalRegistry.getFocus()) ??
+      tab;
+    if (target?.connectionId && target.shellId) {
+      await ipc.terminalWrite(target.connectionId, target.shellId, command + "\n");
+      if (target.sessionId) {
+        await ipc.historyAdd(target.sessionId, command);
         document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
       }
+    }
+    const connectionId = target?.connectionId;
+    const shellId = target?.shellId;
+    if (connectionId && shellId) {
+      scheduleRemoteCwdSync(command, connectionId, shellId);
     }
     setValue("");
     setHistIdx(-1);

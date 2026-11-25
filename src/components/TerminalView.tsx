@@ -10,6 +10,9 @@ import { terminalRegistry } from "../lib/terminalRegistry";
 import { confirmDialog } from "../store/feedback";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import { broadcastTargets } from "../lib/terminalBroadcast";
+import { scheduleRemoteCwdSync } from "../lib/shellCommand";
+import { extractCdFromLine } from "../lib/cdPath";
+import { createTerminalCommandTracker } from "../lib/terminalCommand";
 import { backendError, useT } from "../lib/i18n";
 import {
   terminalBufferToText,
@@ -105,6 +108,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       if (!current.connectionId || !current.shellId) return;
       try {
         await ipc.terminalWrite(current.connectionId, current.shellId, text);
+        scheduleRemoteCwdSync(text, current.connectionId, current.shellId);
       } catch (e) {
         console.error("terminal clipboard write failed:", e);
       }
@@ -220,52 +224,33 @@ export function TerminalView({ tab }: { tab: Tab }) {
 
     // 用户输入回传后端；同时跟踪当前命令行，回车时写入历史，
     // 使终端直接输入的命令与底部输入框/历史按钮共用同一份历史（双向同步）
-    let cmdLine = "";
+    const bufferCommand = (): string | null => {
+      try {
+        const buf = terminal.buffer.active;
+        const line = buf.getLine(buf.baseY + buf.cursorY);
+        if (!line) return null;
+        const raw = line.translateToString(true).trim();
+        // 匹配常见 shell 提示符如 "# ", "$ ", "> ", "% ", "]# ", "]$ " 之后的内容
+        const m = raw.match(/(?:[#$%>]|\]#|\]\$)\s+(.+)$/);
+        if (m && m[1].trim()) return m[1].trim();
+        // 自定义提示符（如 ➜）没有常见结尾符号时，专门提取 cd/pushd
+        return extractCdFromLine(raw);
+      } catch {
+        return null;
+      }
+    };
+    const commandTracker = createTerminalCommandTracker();
     const dataDisp = terminal.onData((data) => {
       const t = tabRef.current;
-      if (data.startsWith("\x1b")) {
-        // 如果是方向键左右移动，不打断行记录；仅上下切换历史或中断时重置跟踪
-        if (data === "\x1b[A" || data === "\x1b[B") {
-          cmdLine = "";
+      const commands = commandTracker.feed(data, bufferCommand);
+      for (const cmd of commands) {
+        if (t.sessionId) {
+          ipc.historyAdd(t.sessionId, cmd).catch(() => {});
+          document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
         }
-      } else {
-        for (const ch of data) {
-          if (ch === "\r" || ch === "\n") {
-            let cmd = cmdLine.trim();
-            // 如果键盘跟踪为空（如按上下键调出历史、或 Tab 补全），尝试从终端当前光标行提取命令
-            if (!cmd) {
-              try {
-                const buf = terminal.buffer.active;
-                const line = buf.getLine(buf.baseY + buf.cursorY);
-                if (line) {
-                  const raw = line.translateToString(true).trim();
-                  // 匹配常见 shell 提示符如 "# ", "$ ", "> ", "% ", "]# ", "]$ " 之后的内容
-                  const m = raw.match(/(?:[#$%>]|\]#|\]\$)\s+(.+)$/);
-                  if (m && m[1].trim()) {
-                    cmd = m[1].trim();
-                  }
-                }
-              } catch {
-                /* ignore */
-              }
-            }
-            if (cmd && t.sessionId) {
-              ipc.historyAdd(t.sessionId, cmd).catch(() => {});
-              document.dispatchEvent(new CustomEvent(HISTORY_CHANGED_EVENT, { bubbles: true }));
-            }
-            cmdLine = "";
-          } else if (ch === "\u007f" || ch === "\b") {
-            // 退格
-            cmdLine = cmdLine.slice(0, -1);
-          } else if (ch === "\u0003" || ch === "\u0015") {
-            // Ctrl+C 或 Ctrl+U：中断/清空当前行
-            cmdLine = "";
-          } else if (ch === "\u0017") {
-            // Ctrl+W：删除最后一个词
-            cmdLine = cmdLine.replace(/\s*\S+\s*$/, "");
-          } else if (ch >= " " && ch !== "\u001b") {
-            cmdLine += ch;
-          }
+        // cd/pushd 等命令会改变 shell CWD，让底部文件面板跟随终端。
+        if (t.connectionId && t.shellId) {
+          scheduleRemoteCwdSync(cmd, t.connectionId, t.shellId);
         }
       }
       if (t.connectionId && t.shellId) {
@@ -508,6 +493,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     if (!cur.connectionId || !cur.shellId) return;
     try {
       await ipc.terminalWrite(cur.connectionId, cur.shellId, text);
+      scheduleRemoteCwdSync(text, cur.connectionId, cur.shellId);
       const trimmed = text.trim();
       if (trimmed && cur.sessionId && text.includes("\n") && !trimmed.includes("\n")) {
         ipc.historyAdd(cur.sessionId, trimmed).catch(() => {});
