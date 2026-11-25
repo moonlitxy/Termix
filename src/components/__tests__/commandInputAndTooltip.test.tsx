@@ -53,14 +53,12 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     "utf-8"
   );
 
-  it("GlobalTooltip 动态计算箭头偏移量 --tooltip-arrow-x 并保留边角边距", () => {
-    expect(tooltipSrc).toContain("--tooltip-arrow-x");
-    expect(tooltipSrc).toContain("rawArrowX = tip.x - tooltipLeft");
-    expect(tooltipSrc).toContain("Math.min(el.offsetWidth - 10, Math.max(10, rawArrowX))");
-  });
-
-  it("global.css 中箭头使用 --tooltip-arrow-x 动态定位", () => {
-    expect(cssSrc).toContain("left: var(--tooltip-arrow-x, 50%);");
+  it("GlobalTooltip 不再渲染指向触发元素的箭头", () => {
+    expect(tooltipSrc).not.toContain("--tooltip-arrow-x");
+    expect(tooltipSrc).not.toContain("rawArrowX");
+    expect(cssSrc).not.toContain(".global-tooltip::before");
+    expect(cssSrc).not.toContain(".global-tooltip::after");
+    expect(cssSrc).toContain(".global-tooltip.is-above");
   });
 
   it("CommandInput 历史项包含独立的复制按钮与执行按钮", () => {

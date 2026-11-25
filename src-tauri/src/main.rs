@@ -249,6 +249,7 @@ fn main() {
             commands::local_rename,
             commands::local_delete,
             commands::local_open_path,
+            commands::local_reveal_path,
             commands::app_paths,
             commands::download_dir_set,
             commands::snippet_list,
@@ -271,7 +272,7 @@ fn main() {
             commands::master_clear,
             updater::check_update,
             updater::download_update,
-            updater::open_installer,
+            updater::install_update,
             updater::open_external,
         ])
         .run(tauri::generate_context!())

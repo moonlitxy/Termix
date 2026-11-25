@@ -18,7 +18,7 @@ body,
 }
 
 /* =========================================================================
-   全局悬浮提示（统一深色底 + 边框 + 箭头，浅色/深色主题下均清晰可读）
+   全局悬浮提示（统一深色底 + 边框，浅色/深色主题下均清晰可读）
    ========================================================================= */
 .global-tooltip {
   position: fixed;
@@ -38,41 +38,9 @@ body,
   pointer-events: none;
 }
 
-/* 箭头（默认在元素下方，箭头朝上） */
-.global-tooltip::before,
-.global-tooltip::after {
-  content: "";
-  position: absolute;
-  left: var(--tooltip-arrow-x, 50%);
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-}
-
-.global-tooltip::before {
-  top: -10px;
-  border-top: none;
-  border-bottom-color: rgba(255, 255, 255, 0.16);
-}
-
-.global-tooltip::after {
-  top: -8px;
-  border-top: none;
-  border-bottom-color: #23262b;
-}
-
-/* 空间不足时显示在元素上方（箭头朝下） */
-.global-tooltip.is-above::before {
-  top: auto;
-  bottom: -10px;
-  border-bottom: none;
-  border-top-color: rgba(255, 255, 255, 0.16);
-}
-
-.global-tooltip.is-above::after {
-  top: auto;
-  bottom: -8px;
-  border-bottom: none;
-  border-top-color: #23262b;
+/* 空间不足时以底边贴住元素上方 */
+.global-tooltip.is-above {
+  transform: translate(-50%, -100%);
 }
 
 body {
@@ -5418,6 +5386,10 @@ button.sftp-head__cell {
   animation: tooltip-enter var(--motion-duration-fast) ease-out;
 }
 
+.global-tooltip.is-above {
+  animation-name: tooltip-enter-above;
+}
+
 button:focus-visible,
 [role="button"]:focus-visible,
 .session-row:focus-visible,
@@ -5476,6 +5448,17 @@ button:focus-visible,
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes tooltip-enter-above {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 2px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
   }
 }
 

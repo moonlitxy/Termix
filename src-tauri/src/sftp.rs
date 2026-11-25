@@ -2056,6 +2056,30 @@ pub fn local_open_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 在系统文件管理器中选中指定文件或目录。
+pub fn local_reveal_path(path: &str) -> Result<(), String> {
+    let p = ensure_safe_local_path(path)?;
+    if !p.exists() {
+        return Err("path not found".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| format!("reveal failed: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", p.display()))
+            .spawn()
+            .map_err(|e| format!("explorer failed: {e}"))?;
+    }
+    Ok(())
+}
+
 // ---- 目录递归传输 ----
 
 fn join_remote(base: &str, name: &str) -> String {

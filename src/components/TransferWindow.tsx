@@ -7,6 +7,10 @@ import { confirmDialog, toast } from "../store/feedback";
 import { useT } from "../lib/i18n";
 import { loadSettings, saveSettings } from "../lib/settings";
 import {
+  TransferContextMenu,
+  type TransferMenuState,
+} from "./TransferContextMenu";
+import {
   formatEta,
   isTransferActive,
   transferEtaSeconds,
@@ -110,6 +114,7 @@ export function TransferWindow() {
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [clearing, setClearing] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [menu, setMenu] = useState<TransferMenuState | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<FloatLayout | null>(null);
   const dragRef = useRef<{
@@ -126,6 +131,16 @@ export function TransferWindow() {
   useEffect(() => {
     layoutRef.current = layout;
   }, [layout]);
+
+  useEffect(() => {
+    if (!open) setMenu(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (menu && !transfers.some((task) => task.id === menu.task.id)) {
+      setMenu(null);
+    }
+  }, [menu, transfers]);
 
   // 打开时恢复上次位置/大小，并按当前工作区尺寸夹紧
   useEffect(() => {
@@ -520,7 +535,14 @@ export function TransferWindow() {
           const busy = !!pending[task.id];
           const canPause = isTransferActive(task) && !task.isDir;
           return (
-            <div className="tf-row" key={task.id}>
+            <div
+              className="tf-row"
+              key={task.id}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ x: e.clientX, y: e.clientY, task });
+              }}
+            >
               <div className="tf-row__head">
                 <span
                   className="tf-row__name"
@@ -620,6 +642,7 @@ export function TransferWindow() {
         onPointerCancel={endDrag}
         onLostPointerCapture={endDrag}
       />
+      <TransferContextMenu menu={menu} onClose={() => setMenu(null)} />
     </div>
   );
 }

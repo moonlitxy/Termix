@@ -72,6 +72,7 @@ describe("ipc command wrappers", () => {
       ["localRename", ["/a", "/b"]],
       ["localDelete", ["/a", false]],
       ["localOpenPath", ["/a"]],
+      ["localRevealPath", ["/a"]],
       ["snippetList", []],
       ["snippetCreate", [{ title: "t" }]],
       ["snippetUpdate", ["id", { title: "t" }]],
@@ -99,7 +100,7 @@ describe("ipc command wrappers", () => {
       ["backupList", []],
       ["backupRestore", ["sessions-1-auto.json"]],
       ["backupNow", []],
-      ["openInstaller", ["/tmp/file"]],
+      ["installUpdate", ["/tmp/file"]],
       ["openExternal", ["https://example.com"]],
     ];
 

@@ -10,7 +10,7 @@ interface Tip {
 
 /**
  * 全局悬浮提示：对带 title / data-tooltip 的元素在 100ms 延迟后
- * 显示统一样式（深色底、浅色文字、边框、箭头）的提示框。
+ * 显示统一样式（深色底、浅色文字、边框）的提示框。
  * 基于 pointerover/pointerout 事件委托：终端高频 pointermove 不再触发逻辑，
  * 在同一元素内部移动也不重置计时，避免闪烁与残留。
  * 优先读取 data-tooltip，其次 title；显示期间临时禁用原生 title 提示。
@@ -118,13 +118,6 @@ export function GlobalTooltip() {
       Math.max(8 + halfWidth, tip.x)
     );
     el.style.left = `${left}px`;
-    // 计算箭头在提示框内的水平位置，使其精确指向触发元素的中心 (tip.x)
-    // 提示框左边缘为 left - halfWidth（因有 transform: translateX(-50%)）
-    const tooltipLeft = left - halfWidth;
-    const rawArrowX = tip.x - tooltipLeft;
-    // 限制箭头在提示框内部（预留 10px 边距防溢出边框圆角）
-    const arrowX = Math.min(el.offsetWidth - 10, Math.max(10, rawArrowX));
-    el.style.setProperty("--tooltip-arrow-x", `${arrowX}px`);
   }, [tip]);
 
   if (!tip) return null;

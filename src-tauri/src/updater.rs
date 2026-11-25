@@ -1,4 +1,8 @@
 use std::cmp::Ordering;
+#[cfg(target_os = "macos")]
+use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -366,6 +370,7 @@ async fn run_download(
         return Err(format!("下载不完整：已收到 {received}/{total} 字节"));
     }
     let _ = file.flush().await;
+    drop(file);
     let _ = app.emit(
         "update-download-done",
         json!({ "fileName": safe_name, "path": path.to_string_lossy() }),
@@ -373,9 +378,9 @@ async fn run_download(
     Ok(())
 }
 
-/// 打开已下载的安装包：macOS 挂载 DMG，Windows 启动 EXE 安装程序
+/// 安装已下载的更新包：macOS 自动替换应用并重启，Windows 启动 NSIS 覆盖安装。
 #[tauri::command]
-pub async fn open_installer(app: AppHandle, path: String) -> Result<(), String> {
+pub async fn install_update(app: AppHandle, path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     if !p.is_file() {
         return Err("安装包文件不存在".to_string());
@@ -387,18 +392,247 @@ pub async fn open_installer(app: AppHandle, path: String) -> Result<(), String> 
     if cfg!(target_os = "macos") && !ext.eq_ignore_ascii_case("dmg") {
         return Err("非法安装包格式（仅支持 .dmg）".to_string());
     }
-    open_with_system(&path)?;
 
-    // Windows 安装器已启动，退出当前进程释放 termix.exe 文件锁，
-    // 让 NSIS 以 /UPDATE 覆盖安装并保留安装目录下的 data/downloads。
-    #[cfg(target_os = "windows")]
-    app.exit(0);
-
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        let _ = &app;
+        let mut fallback_reason = "当前运行环境不支持自动替换应用".to_string();
+        if let Some(bundle) = current_app_bundle() {
+            let target = macos_install_target(&bundle);
+            match spawn_macos_updater(p, &target) {
+                Ok(()) => {
+                    log::info!(
+                        "updater: replacing {} after current app exits",
+                        target.display()
+                    );
+                    app.exit(0);
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::warn!("updater: automatic install unavailable ({e}); opening DMG");
+                    fallback_reason = e;
+                }
+            }
+        } else {
+            log::warn!("updater: not running from an app bundle; opening DMG");
+        }
+        open_with_system(&path)?;
+        return Err(format!(
+            "自动安装失败：{fallback_reason}。已打开安装镜像，请手动完成安装。"
+        ));
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        // 安装器已启动，退出当前进程释放 termix.exe 文件锁，
+        // 让 NSIS 以 /UPDATE 覆盖安装并保留安装目录下的 data/downloads。
+        open_with_system(&path)?;
+        app.exit(0);
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = &app;
+        let _ = &path;
+        Err("当前平台暂不支持自动安装".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn app_bundle_from_path(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|candidate| {
+            candidate
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("app"))
+                .unwrap_or(false)
+        })
+        .map(Path::to_path_buf)
+}
+
+#[cfg(target_os = "macos")]
+fn current_app_bundle() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| app_bundle_from_path(&exe))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_install_target(bundle: &Path) -> PathBuf {
+    let raw = bundle.to_string_lossy();
+    if raw.starts_with("/Volumes/") || raw.contains("/AppTranslocation/") {
+        let name = bundle
+            .file_name()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("Termix.app"));
+        Path::new("/Applications").join(name)
+    } else {
+        bundle.to_path_buf()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn find_app_bundle(root: &Path, depth: u8) -> Option<PathBuf> {
+    if depth == 0 {
+        return None;
+    }
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("app"))
+            .unwrap_or(false)
+        {
+            return Some(path);
+        }
+        if let Some(found) = find_app_bundle(&path, depth - 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_UPDATE_SCRIPT: &str = r#"
+pid="$1"
+src="$2"
+dst="$3"
+mnt="$4"
+dmg="$5"
+backup="${dst}.old.$$"
+stage="${dst}.update.$$"
+
+log_dir="${HOME:-/tmp}/Library/Logs/Termix"
+mkdir -p "$log_dir" 2>/dev/null || true
+exec >>"$log_dir/updater.log" 2>&1
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] update start pid=$pid src=$src dst=$dst"
+
+fallback() {
+  /usr/bin/hdiutil detach "$mnt" -quiet 2>/dev/null || true
+  rmdir "$mnt" 2>/dev/null || true
+  [ -d "$dst" ] && /usr/bin/open -n "$dst"
+  /usr/bin/open "$dmg"
+}
+
+i=0
+while kill -0 "$pid" 2>/dev/null; do
+  i=$((i + 1))
+  if [ "$i" -ge 600 ]; then
+    echo "timed out waiting for app exit"
+    fallback
+    exit 1
+  fi
+  sleep 0.2
+done
+
+mkdir -p "$(dirname "$dst")" || {
+  echo "cannot create target parent"
+  fallback
+  exit 1
+}
+
+if ! /bin/rm -rf "$stage"; then
+  echo "cannot prepare staging path"
+  fallback
+  exit 1
+fi
+
+/usr/bin/ditto "$src" "$stage" || {
+  echo "ditto failed"
+  /bin/rm -rf "$stage"
+  fallback
+  exit 1
+}
+
+if ! /bin/mv "$dst" "$backup"; then
+  echo "cannot move existing app aside"
+  /bin/rm -rf "$stage" 2>/dev/null || true
+  fallback
+  exit 1
+fi
+
+if ! /bin/mv "$stage" "$dst"; then
+  echo "cannot activate new app; restoring previous app"
+  /bin/rm -rf "$stage"
+  /bin/mv "$backup" "$dst" 2>/dev/null || true
+  fallback
+  exit 1
+fi
+
+/bin/rm -rf "$backup" 2>/dev/null || true
+/usr/bin/hdiutil detach "$mnt" -quiet 2>/dev/null || true
+rmdir "$mnt" 2>/dev/null || true
+echo "update installed; relaunching $dst"
+/usr/bin/open -n "$dst"
+"#;
+
+#[cfg(target_os = "macos")]
+fn detach_mount(mount: &Path) {
+    let _ = Command::new("/usr/bin/hdiutil")
+        .arg("detach")
+        .arg(mount)
+        .arg("-quiet")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = std::fs::remove_dir(mount);
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_macos_updater(dmg: &Path, target: &Path) -> Result<(), String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let mount = std::env::temp_dir().join(format!("termix-update-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(&mount).map_err(|e| format!("创建更新挂载点失败：{e}"))?;
+
+    let output = Command::new("/usr/bin/hdiutil")
+        .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
+        .arg(&mount)
+        .arg(dmg)
+        .output()
+        .map_err(|e| {
+            let _ = std::fs::remove_dir(&mount);
+            format!("挂载安装镜像失败：{e}")
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let _ = std::fs::remove_dir(&mount);
+        return Err(format!("挂载安装镜像失败：{detail}"));
+    }
+
+    let source = match find_app_bundle(&mount, 3) {
+        Some(path) => path,
+        None => {
+            detach_mount(&mount);
+            return Err("安装镜像中未找到 .app 应用".to_string());
+        }
+    };
+
+    let child = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(MACOS_UPDATE_SCRIPT)
+        .arg("termix-updater")
+        .arg(std::process::id().to_string())
+        .arg(&source)
+        .arg(target)
+        .arg(&mount)
+        .arg(dmg)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    if let Err(e) = child {
+        detach_mount(&mount);
+        return Err(format!("启动更新脚本失败：{e}"));
+    }
     Ok(())
 }
 
@@ -463,6 +697,51 @@ mod tests {
         assert!(DOWNLOAD_TIMEOUT_SECS > CHECK_TIMEOUT_SECS);
         assert!(DOWNLOAD_TIMEOUT_SECS >= 10 * 60);
         assert!(DOWNLOAD_CONNECT_TIMEOUT_SECS < DOWNLOAD_TIMEOUT_SECS);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_bundle_is_resolved_from_executable_path() {
+        let bundle =
+            app_bundle_from_path(Path::new("/Applications/Termix.app/Contents/MacOS/termix"))
+                .expect("bundle");
+        assert_eq!(bundle, PathBuf::from("/Applications/Termix.app"));
+        assert!(app_bundle_from_path(Path::new("/tmp/termix")).is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mounted_or_translocated_app_installs_to_applications() {
+        assert_eq!(
+            macos_install_target(Path::new("/Volumes/Termix/Termix.app")),
+            PathBuf::from("/Applications/Termix.app")
+        );
+        assert_eq!(
+            macos_install_target(Path::new(
+                "/private/var/folders/x/AppTranslocation/ABC/Termix.app"
+            )),
+            PathBuf::from("/Applications/Termix.app")
+        );
+        assert_eq!(
+            macos_install_target(Path::new("/Applications/Termix.app")),
+            PathBuf::from("/Applications/Termix.app")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_update_script_has_valid_shell_syntax() {
+        let output = Command::new("/bin/sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(MACOS_UPDATE_SCRIPT)
+            .output()
+            .expect("run shell syntax check");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

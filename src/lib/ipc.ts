@@ -142,6 +142,8 @@ export const ipc = {
   localDelete: (path: string, isDir: boolean) =>
     invoke<void>("local_delete", { path, isDir }),
   localOpenPath: (path: string) => invoke<void>("local_open_path", { path }),
+  localRevealPath: (path: string) =>
+    invoke<void>("local_reveal_path", { path }),
 
   // ---- v0.3: 命令片段 ----
   snippetList: () => invoke<Snippet[]>("snippet_list"),
@@ -184,7 +186,7 @@ export const ipc = {
   authRespond: (authId: string, responses: string[]) =>
     invoke<void>("auth_respond", { authId, responses }),
   authCancel: (authId: string) => invoke<void>("auth_cancel", { authId }),
-  openInstaller: (path: string) => invoke<void>("open_installer", { path }),
+  installUpdate: (path: string) => invoke<void>("install_update", { path }),
   openExternal: (url: string) => invoke<void>("open_external", { url }),
 };
 

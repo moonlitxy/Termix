@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
+import {
+  TransferContextMenu,
+  type TransferMenuState,
+} from "./TransferContextMenu";
 import { useApp } from "../store/app";
 import { useMonitor, selectMonitorConnection, computeUptimeSec } from "../store/monitor";
 import { ipc } from "../lib/ipc";
@@ -104,6 +108,12 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
   };
   const doneTimers = useRef(new Set<string>());
   const [pendingTransfers, setPendingTransfers] = useState<Record<string, boolean>>({});
+  const [menu, setMenu] = useState<TransferMenuState | null>(null);
+  useEffect(() => {
+    if (menu && !transfers.some((task) => task.id === menu.task.id)) {
+      setMenu(null);
+    }
+  }, [menu, transfers]);
   // 传输重试节流：失败任务连点「重试」会重复创建传输任务，600ms 窗口内只允许一次
   const lastRetryAt = useRef(0);
 
@@ -455,7 +465,14 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
                 t.status === "interrupted") &&
               !t.isDir;
             return (
-              <div className="transfer-row" key={t.id}>
+              <div
+                className="transfer-row"
+                key={t.id}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, task: t });
+                }}
+              >
                 <div className="transfer-row__head">
                   <span
                     className="transfer-row__name"
@@ -580,6 +597,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           </>
         )}
       </div>
+      <TransferContextMenu menu={menu} onClose={() => setMenu(null)} />
         </>
       )}
     </aside>

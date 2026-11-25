@@ -341,8 +341,8 @@ export default function App() {
         const un = await onUpdateDownloadDone((e) => {
           const st = useUpdate.getState();
           st.setDownloadDone(e.path);
-          // 下载完成后自动打开安装程序（macOS 挂载 DMG / Windows 启动 EXE 安装程序）
-          void ipc.openInstaller(e.path).catch((err) => st.setDownloadError(String(err)));
+          // 下载完成后自动安装：macOS 替换 .app 并重启，Windows 启动 NSIS 覆盖安装
+          void ipc.installUpdate(e.path).catch((err) => st.setDownloadError(String(err)));
         });
         unlistens.push(un);
       } catch {

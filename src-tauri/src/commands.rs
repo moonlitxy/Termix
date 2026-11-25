@@ -1265,6 +1265,11 @@ pub fn local_open_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn local_reveal_path(path: String) -> Result<(), String> {
+    crate::sftp::local_reveal_path(&path)
+}
+
+#[tauri::command]
 pub fn app_paths(state: State<'_, AppState>) -> AppPaths {
     state.app_paths()
 }
