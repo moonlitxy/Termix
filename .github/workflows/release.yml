@@ -114,6 +114,12 @@ jobs:
           DMG="$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -n1)"
           MOUNT="$(hdiutil attach -nobrowse -readonly "$DMG" | tail -n1 | awk -F'\t' '{print $3}')"
           trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+          APP="$MOUNT/Termix.app"
+          test -d "$APP" || { echo "::error::Termix.app missing from DMG"; exit 1; }
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+          test "$BUNDLE_ID" = "com.termix.client" || { echo "::error::Unexpected bundle ID: $BUNDLE_ID"; exit 1; }
+          EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
+          test "$EXECUTABLE" = "termix" || { echo "::error::Unexpected executable: $EXECUTABLE"; exit 1; }
           BIN="$MOUNT/Termix.app/Contents/MacOS/termix"
           file "$BIN"
           file "$BIN" | grep -q arm64 || { echo "::error::DMG does not contain an arm64 binary"; exit 1; }

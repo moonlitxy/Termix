@@ -237,11 +237,16 @@ pub async fn check_update(
         let has_update = compare_versions(&latest, &cur) == Ordering::Greater;
         let asset = pick_asset(&gh.assets);
         let asset_url = match asset {
-            Some(a) => apply_mirror(&a.browser_download_url, candidate.as_deref()).unwrap_or_default(),
+            Some(a) => {
+                apply_mirror(&a.browser_download_url, candidate.as_deref()).unwrap_or_default()
+            }
             None => String::new(),
         };
         if !failures.is_empty() {
-            log::info!("check_update: succeeded via {label} after {} fallback(s)", failures.len());
+            log::info!(
+                "check_update: succeeded via {label} after {} fallback(s)",
+                failures.len()
+            );
         }
         return Ok(UpdateInfo {
             current_version: cur,
@@ -480,7 +485,7 @@ fn find_app_bundle(root: &Path, depth: u8) -> Option<PathBuf> {
     let entries = std::fs::read_dir(root).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        if !path.is_dir() || path.is_symlink() {
             continue;
         }
         if path
@@ -496,6 +501,57 @@ fn find_app_bundle(root: &Path, depth: u8) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(target_os = "macos")]
+fn app_bundle_identity(bundle: &Path) -> Option<(String, String)> {
+    let plist = bundle.join("Contents/Info.plist");
+    let output = Command::new("/usr/libexec/PlistBuddy")
+        .args([
+            "-c",
+            "Print :CFBundleIdentifier",
+            "-c",
+            "Print :CFBundleExecutable",
+        ])
+        .arg(&plist)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut lines = text.lines().map(str::trim);
+    let identifier = lines.next()?.to_string();
+    let executable = lines.next()?.to_string();
+    if identifier.is_empty() || executable.is_empty() {
+        return None;
+    }
+    Some((identifier, executable))
+}
+
+#[cfg(target_os = "macos")]
+fn validated_app_bundle(root: &Path, depth: u8) -> Result<PathBuf, String> {
+    let expected_name = Path::new("Termix.app");
+    let candidate = root.join(expected_name);
+    let bundle = if candidate.is_dir() && !candidate.is_symlink() {
+        candidate
+    } else {
+        find_app_bundle(root, depth).ok_or_else(|| "安装镜像中未找到 .app 应用".to_string())?
+    };
+    let (identifier, executable) = app_bundle_identity(&bundle)
+        .ok_or_else(|| format!("无法读取应用身份：{}", bundle.display()))?;
+    if !bundle.file_name().is_some_and(|name| name == expected_name)
+        || identifier != "com.termix.client"
+        || executable != "termix"
+    {
+        return Err(format!(
+            "安装包身份不匹配：{}（Bundle ID: {}，可执行文件: {}）",
+            bundle.display(),
+            identifier,
+            executable
+        ));
+    }
+    Ok(bundle)
 }
 
 #[cfg(target_os = "macos")]
@@ -608,11 +664,11 @@ fn spawn_macos_updater(dmg: &Path, target: &Path) -> Result<(), String> {
         return Err(format!("挂载安装镜像失败：{detail}"));
     }
 
-    let source = match find_app_bundle(&mount, 3) {
-        Some(path) => path,
-        None => {
+    let source = match validated_app_bundle(&mount, 3) {
+        Ok(path) => path,
+        Err(error) => {
             detach_mount(&mount);
-            return Err("安装镜像中未找到 .app 应用".to_string());
+            return Err(error);
         }
     };
 
@@ -744,6 +800,94 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dmg_applications_symlink_is_not_followed() {
+        let suffix = std::process::id();
+        let root = std::env::temp_dir().join(format!("termix-updater-symlink-test-{suffix}"));
+        let external = std::env::temp_dir().join(format!("termix-updater-external-test-{suffix}"));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&external);
+        std::fs::create_dir_all(&root).expect("create test root");
+        std::fs::create_dir_all(external.join("Clash Verge.app")).expect("create external app");
+        std::os::unix::fs::symlink(&external, root.join("Applications"))
+            .expect("create Applications symlink");
+
+        assert!(find_app_bundle(&root, 3).is_none());
+
+        std::fs::remove_dir_all(&root).expect("clean test root");
+        std::fs::remove_dir_all(&external).expect("clean external root");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dmg_root_requires_exact_termix_bundle_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "termix-updater-identity-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Termix.app/Contents/MacOS"))
+            .expect("create test bundle");
+        let valid_plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.termix.client</string><key>CFBundleExecutable</key><string>termix</string></dict></plist>
+"#;
+        std::fs::write(root.join("Termix.app/Contents/Info.plist"), valid_plist)
+            .expect("write test plist");
+
+        let selected = validated_app_bundle(&root, 3).expect("valid Termix bundle");
+        assert_eq!(selected, root.join("Termix.app"));
+        assert_eq!(
+            app_bundle_identity(&selected),
+            Some(("com.termix.client".into(), "termix".into()))
+        );
+
+        let foreign_plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.github.clash-verge-rev.clash-verge-rev</string><key>CFBundleExecutable</key><string>clash-verge</string></dict></plist>
+"#;
+        std::fs::write(root.join("Termix.app/Contents/Info.plist"), foreign_plist)
+            .expect("write mismatched plist");
+        let error = validated_app_bundle(&root, 3).expect_err("must reject foreign bundle");
+        assert!(error.contains("身份不匹配"));
+
+        std::fs::remove_dir_all(&root).expect("clean test root");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires an explicitly supplied Termix DMG path"]
+    fn real_dmg_selects_only_root_termix_bundle() {
+        let dmg = std::env::var_os("TERMIX_TEST_DMG").expect("TERMIX_TEST_DMG");
+        let mount =
+            std::env::temp_dir().join(format!("termix-real-dmg-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&mount);
+        std::fs::create_dir_all(&mount).expect("create mount point");
+        let output = Command::new("/usr/bin/hdiutil")
+            .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
+            .arg(&mount)
+            .arg(&dmg)
+            .output()
+            .expect("mount test DMG");
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&mount);
+            panic!("mount failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        let selected = validated_app_bundle(&mount, 3).expect("select Termix from real DMG");
+        assert_eq!(selected, mount.join("Termix.app"));
+        assert!(selected.join("..").join("Applications").is_symlink());
+        assert!(mount.join("Applications").is_symlink());
+
+        let _ = Command::new("/usr/bin/hdiutil")
+            .arg("detach")
+            .arg(&mount)
+            .arg("-quiet")
+            .status();
+        let _ = std::fs::remove_dir_all(&mount);
+    }
+
     #[test]
     fn compare_version_orders_numeric_segments() {
         assert_eq!(compare_versions("1.0.1", "1.0.1"), Ordering::Equal);
@@ -773,7 +917,11 @@ mod tests {
             },
         ];
         let asset = pick_asset(&assets).expect("should match an installer asset");
-        let ext = if cfg!(target_os = "windows") { "exe" } else { "dmg" };
+        let ext = if cfg!(target_os = "windows") {
+            "exe"
+        } else {
+            "dmg"
+        };
         assert!(asset.name.ends_with(ext));
     }
 
