@@ -7,7 +7,8 @@ import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
 import { resBarColor, resTextColor } from "../lib/resColor";
 import { formatBytePair, formatBytes } from "../lib/formatBytes";
 import { useT } from "../lib/i18n";
-import type { ProcInfo } from "../types";
+import { toast } from "../store/feedback";
+import type { ProcInfo, ServerIpAddresses } from "../types";
 
 function polyline(points: number[], width = 600, height = 160): string {
   if (points.length === 0) return "";
@@ -27,6 +28,8 @@ export function MonitorView() {
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const [procs, setProcs] = useState<ProcInfo[]>([]);
+  const [serverIps, setServerIps] = useState<ServerIpAddresses | null>(null);
+  const [ipLoading, setIpLoading] = useState(false);
 
   // ---- 指标数据统一来自共享监控数据源（与终端右侧资源监控同一份，单一轮询） ----
   const metrics = useMonitor((s) => s.metrics);
@@ -39,10 +42,26 @@ export function MonitorView() {
   useEffect(() => {
     if (!connectionId) {
       setProcs([]);
+      setServerIps(null);
       return;
     }
     let stopped = false;
     let pv: number | undefined;
+    let pendingIp = false;
+    const loadIps = async () => {
+      if (pendingIp) return;
+      pendingIp = true;
+      setIpLoading(true);
+      try {
+        const addresses = await ipc.serverIpAddresses(connectionId);
+        if (!stopped) setServerIps(addresses);
+      } catch {
+        if (!stopped) setServerIps({ private: [], public: [] });
+      } finally {
+        pendingIp = false;
+        if (!stopped) setIpLoading(false);
+      }
+    };
     // 进程 Top 列表（MonitorView 专属）：扫描成本高于基础指标，默认至少 10 秒刷新一次。
     const startProcs = () => {
       clearInterval(pv);
@@ -59,6 +78,7 @@ export function MonitorView() {
       pv = setInterval(() => void load(), Math.max(interval * 3, 10000));
     };
     startProcs();
+    void loadIps();
     const onSettings = () => startProcs();
     window.addEventListener(SETTINGS_CHANGE_EVENT, onSettings);
     return () => {
@@ -67,6 +87,37 @@ export function MonitorView() {
       clearInterval(pv);
     };
   }, [connectionId]);
+
+  const copyIp = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      toast.success(t("common.copyDone"));
+    } catch {
+      toast.error(t("common.copyFailed"));
+    }
+  };
+
+  const renderIpRows = (items: ServerIpAddresses["private"] | ServerIpAddresses["public"]) =>
+    items.length > 0 ? (
+      items.map((item) => (
+        <div className="mon-ip-row" key={`${item.interface}-${item.address}`}>
+          <span className="mon-ip-row__label">
+            {item.interface} · {item.family}
+          </span>
+          <span className="mon-ip-row__value">{item.address}</span>
+          <button
+            className="mon-ip-copy"
+            type="button"
+            title={t("common.copy")}
+            onClick={() => void copyIp(item.address)}
+          >
+            <Icon name="copy" size={12} />
+          </button>
+        </div>
+      ))
+    ) : (
+      <div className="mon-ip-empty">{t("mon.noData")}</div>
+    );
 
   if (!connectionId) {
     return (
@@ -243,6 +294,46 @@ export function MonitorView() {
               <span>{t("mon.noData")}</span>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="ds-card mon-procs">
+        <div className="res-card__head">
+          <span className="res-card__label">
+            <Icon name="globe" size={14} />{t("mon.serverIp")}
+          </span>
+          <button
+            className="mon-ip-refresh"
+            type="button"
+            disabled={ipLoading}
+            onClick={() => {
+              if (!connectionId) return;
+              setIpLoading(true);
+              void ipc.serverIpAddresses(connectionId)
+                .then(setServerIps)
+                .catch(() => setServerIps({ private: [], public: [] }))
+                .finally(() => setIpLoading(false));
+            }}
+          >
+            {ipLoading ? t("mon.refreshing") : t("common.refresh")}
+          </button>
+        </div>
+        <div className="mon-ip-grid">
+          <div className="mon-ip-group">
+            <div className="mon-ip-group__head">
+              <span>{t("mon.privateIp")}</span>
+              <span className="mon-ip-tag mon-ip-tag--private">{t("mon.private")}</span>
+            </div>
+            {serverIps ? renderIpRows(serverIps.private) : <div className="mon-ip-empty">{t("mon.noData")}</div>}
+          </div>
+          <div className="mon-ip-group">
+            <div className="mon-ip-group__head">
+              <span>{t("mon.publicIp")}</span>
+              <span className="mon-ip-tag mon-ip-tag--public">{t("mon.public")}</span>
+            </div>
+            {serverIps ? renderIpRows(serverIps.public) : <div className="mon-ip-empty">{t("mon.noData")}</div>}
+            <div className="mon-ip-note">{t("mon.publicIpNote")}</div>
+          </div>
         </div>
       </div>
 

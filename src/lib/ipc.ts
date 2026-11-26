@@ -17,6 +17,7 @@ import type {
   SftpItem,
   Snippet,
   SnippetInput,
+  ServerIpAddresses,
   SysInfo,
   TransferProgressEvent,
   TransferTask,
@@ -169,6 +170,8 @@ export const ipc = {
     invoke<ProcInfo[]>("monitor_processes", { connectionId, limit }),
   systemInfo: (connectionId: string) =>
     invoke<SysInfo>("system_info", { connectionId }),
+  serverIpAddresses: (connectionId: string) =>
+    invoke<ServerIpAddresses>("server_ip_addresses", { connectionId }),
 
   // ---- 安全（主密码） ----
   masterStatus: () => invoke<MasterStatus>("master_status"),

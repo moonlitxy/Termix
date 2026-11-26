@@ -10,8 +10,8 @@ use crate::db::Db;
 use crate::forward::ForwardService;
 use crate::models::{
     CommandHistory, DiskInfo, ForwardRule, ForwardRuleInput, Group, GroupInput, MasterStatus,
-    Metrics, ProcInfo, Session, SessionExport, SessionImportResult, SessionInput, Snippet,
-    SnippetInput, SysInfo,
+    Metrics, ProcInfo, ServerIpAddresses, ServerIpInfo, Session, SessionExport,
+    SessionImportResult, SessionInput, Snippet, SnippetInput, SysInfo,
 };
 use crate::sftp::{SftpItem, SftpService, TransferTask};
 use crate::ssh::{HostKeyStatus, SshManager};
@@ -1512,6 +1512,94 @@ fn parse_first_f64(s: &str) -> Option<f64> {
         .and_then(|t| t.parse().ok())
 }
 
+fn parse_server_ips(output: &str) -> (Vec<ServerIpInfo>, Vec<ServerIpInfo>) {
+    let mut private_ips = Vec::new();
+    let mut public_ips = Vec::new();
+    let mut section = "";
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed == "PRIVATE" || trimmed == "PUBLIC" {
+            section = trimmed;
+            continue;
+        }
+        let fields: Vec<&str> = trimmed.split_whitespace().collect();
+        if fields.len() < 2 {
+            continue;
+        }
+        let interface = fields[0].to_string();
+        let address = fields[1].to_string();
+        if address == "-" || address.is_empty() {
+            continue;
+        }
+        let family = if address.contains(':') { "IPv6" } else { "IPv4" };
+        let is_private = address.starts_with("10.")
+            || address.starts_with("192.168.")
+            || address.starts_with("172.16.")
+            || address.starts_with("172.17.")
+            || address.starts_with("172.18.")
+            || address.starts_with("172.19.")
+            || address.starts_with("172.20.")
+            || address.starts_with("172.21.")
+            || address.starts_with("172.22.")
+            || address.starts_with("172.23.")
+            || address.starts_with("172.24.")
+            || address.starts_with("172.25.")
+            || address.starts_with("172.26.")
+            || address.starts_with("172.27.")
+            || address.starts_with("172.28.")
+            || address.starts_with("172.29.")
+            || address.starts_with("172.30.")
+            || address.starts_with("172.31.")
+            || address.starts_with("127.")
+            || address.starts_with("169.254.")
+            || address.starts_with("fc00:")
+            || address.starts_with("fd")
+            || address.starts_with("fe80:");
+        let item = ServerIpInfo {
+            address,
+            family: family.to_string(),
+            interface,
+            scope: if section == "PUBLIC" { "public" } else { "private" }.to_string(),
+        };
+        if is_private || section != "PUBLIC" {
+            private_ips.push(item);
+        } else {
+            public_ips.push(item);
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    private_ips.retain(|item| seen.insert(item.address.clone()));
+    public_ips.retain(|item| seen.insert(item.address.clone()));
+    (private_ips, public_ips)
+}
+
+#[tauri::command]
+pub async fn server_ip_addresses(
+    connection_id: String,
+    state: State<'_, AppState>,
+) -> Result<ServerIpAddresses, String> {
+    let script = r#"
+echo PRIVATE
+(ip -o -4 addr show scope global 2>/dev/null || true) | awk '{print $2, $4}' | cut -d/ -f1
+(ip -o -6 addr show scope global 2>/dev/null || true) | awk '{print $2, $4}' | cut -d/ -f1
+echo PUBLIC
+for cmd in "curl -4 -sS --max-time 3 https://api.ipify.org" "curl -4 -sS --max-time 3 https://ifconfig.me/ip"; do
+  value=$(eval "$cmd" 2>/dev/null | tr -d '\r\n')
+  case "$value" in
+    [0-9]*.[0-9]*.[0-9]*.[0-9]*) echo "wan $value"; break ;;
+  esac
+done
+"#;
+    let out = state.ssh.exec_command(&connection_id, script).await?;
+    let (private_ips, public_ips) = parse_server_ips(&out);
+    Ok(ServerIpAddresses {
+        private: private_ips,
+        public: public_ips,
+    })
+}
+
 fn parse_mem(s: &str) -> (u64, u64) {
     let f: Vec<&str> = s.split_whitespace().collect();
     if f.len() >= 3 && f.first().copied() == Some("Mem:") {
@@ -1597,6 +1685,18 @@ mod tests {
         assert_eq!(parse_first_f64("-1.5"), Some(1.5));
         // 非法数字片段
         assert_eq!(parse_first_f64("abc 1.2.3 def"), None);
+    }
+
+    #[test]
+    fn parse_server_ips_separates_private_and_public() {
+        let output = "PRIVATE\neth0 10.0.8.15\ndocker0 172.17.0.1\nPUBLIC\nwan 47.98.123.45\n";
+        let (private_ips, public_ips) = parse_server_ips(output);
+        assert_eq!(private_ips.len(), 2);
+        assert_eq!(private_ips[0].address, "10.0.8.15");
+        assert_eq!(private_ips[1].address, "172.17.0.1");
+        assert_eq!(public_ips.len(), 1);
+        assert_eq!(public_ips[0].address, "47.98.123.45");
+        assert_eq!(public_ips[0].interface, "wan");
     }
 
     #[test]

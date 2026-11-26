@@ -204,6 +204,22 @@ pub struct SysInfo {
     pub disks: Vec<DiskInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerIpInfo {
+    pub address: String,
+    pub family: String,
+    pub interface: String,
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerIpAddresses {
+    pub private: Vec<ServerIpInfo>,
+    pub public: Vec<ServerIpInfo>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

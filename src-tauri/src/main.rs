@@ -265,6 +265,7 @@ fn main() {
             commands::monitor_metrics,
             commands::monitor_processes,
             commands::system_info,
+            commands::server_ip_addresses,
             commands::master_status,
             commands::master_set,
             commands::master_unlock,

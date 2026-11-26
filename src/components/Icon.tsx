@@ -43,6 +43,10 @@ import user from "../assets/icons/user.svg?raw";
 import x from "../assets/icons/x.svg?raw";
 import xCircle from "../assets/icons/x-circle.svg?raw";
 import zap from "../assets/icons/zap.svg?raw";
+import windowClose from "../assets/icons/window-close.svg?raw";
+import windowMaximize from "../assets/icons/window-maximize.svg?raw";
+import windowMinimize from "../assets/icons/window-minimize.svg?raw";
+import userRound from "../assets/icons/user-round.svg?raw";
 
 const ICONS: Record<string, string> = {
   "alert-circle": alertCircle,
@@ -90,6 +94,10 @@ const ICONS: Record<string, string> = {
   x,
   "x-circle": xCircle,
   zap,
+  "window-close": windowClose,
+  "window-maximize": windowMaximize,
+  "window-minimize": windowMinimize,
+  "user-round": userRound,
 };
 
 export function Icon({

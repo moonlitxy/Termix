@@ -143,4 +143,17 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     expect(titlebarSrc).not.toContain('openSettingsCategory("general")');
     expect(titlebarSrc).toContain('setActivity("help")');
   });
+
+  it("头像卡片可直接打开选择器且移除重复更换头像栏目", () => {
+    expect(titlebarSrc).toContain('className="titlebar__avatar-badge"');
+    expect(titlebarSrc).toContain("const toggleAvatarPicker");
+    expect(titlebarSrc).toContain("onClick={toggleAvatarPicker}");
+    expect(titlebarSrc).toContain('type="file"');
+    expect(titlebarSrc).toContain("readAvatarFile");
+    expect(titlebarSrc).toContain('setPickAvatarOpen(false)');
+    expect(titlebarSrc).toContain("titlebar__avatar-pick--default");
+    expect(titlebarSrc).toContain("DEFAULT_AVATAR_ID");
+    expect(titlebarSrc).not.toContain("titlebar__avatar-toggle");
+    expect(cssSrc).not.toContain(".titlebar__avatar-toggle");
+  });
 });

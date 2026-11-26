@@ -257,6 +257,18 @@ export interface SysInfo {
   disks: DiskInfo[];
 }
 
+export interface ServerIpInfo {
+  address: string;
+  family: string;
+  interface: string;
+  scope: string;
+}
+
+export interface ServerIpAddresses {
+  private: ServerIpInfo[];
+  public: ServerIpInfo[];
+}
+
 // ---- 安全（主密码） ----
 
 export interface MasterStatus {

@@ -1,5 +1,16 @@
-import { useEffect, useState } from "react";
-import { AVATARS, getAvatar, loadAvatarId, randomAvatarId, saveAvatarId } from "../lib/avatar";
+import { useEffect, useRef, useState } from "react";
+import {
+  AVATARS,
+  CUSTOM_AVATAR_ID,
+  DEFAULT_AVATAR_ID,
+  getAvatar,
+  isDefaultAvatar,
+  loadAvatarId,
+  loadCustomAvatar,
+  readAvatarFile,
+  saveAvatarId,
+  saveCustomAvatar,
+} from "../lib/avatar";
 import { getLang, useT, type Lang } from "../lib/i18n";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
@@ -20,11 +31,17 @@ export function TitleBar() {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [pickAvatarOpen, setPickAvatarOpen] = useState(false);
   const [avatarId, setAvatarId] = useState(loadAvatarId);
+  const [customAvatar, setCustomAvatar] = useState(loadCustomAvatar);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [isWindows] = useState(isWindowsPlatform);
   const [curTheme, setCurTheme] = useState<"dark" | "light">(() => loadSettings().theme);
   const [curLang, setCurLang] = useState<Lang>(getLang);
   const shortcutMod = isWindows ? "Ctrl" : "⌘";
-  const avatar = getAvatar(avatarId);
+  const selectedAvatar = getAvatar(avatarId);
+  const avatar = selectedAvatar.id === CUSTOM_AVATAR_ID && customAvatar
+    ? { ...selectedAvatar, src: customAvatar, name: t("avatar.custom"), bg: "#64748b" }
+    : selectedAvatar;
+  const avatarSrc = avatar.src;
 
   useEffect(() => {
     setCurLang(getLang());
@@ -34,6 +51,24 @@ export function TitleBar() {
   const pickAvatar = (id: string) => {
     setAvatarId(id);
     saveAvatarId(id);
+  };
+
+  const toggleAvatarPicker = () => {
+    setPickAvatarOpen((open) => !open);
+  };
+
+  const uploadAvatar = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const src = await readAvatarFile(file);
+      saveCustomAvatar(src);
+      setCustomAvatar(src);
+      pickAvatar(CUSTOM_AVATAR_ID);
+      setPickAvatarOpen(false);
+      toast.success(t("avatar.uploadSuccess"));
+    } catch (error) {
+      toast.error(t("avatar.uploadFailed", { e: String(error) }));
+    }
   };
   const avatarName = (id: string) => t(`avatar.${id}`);
 
@@ -78,9 +113,6 @@ export function TitleBar() {
       <WindowControls />
       <div className="titlebar__left">
         <span className="titlebar__brand">
-          <span className="titlebar__brand-mark">
-            <Icon name="terminal" size={13} />
-          </span>
           <span className="titlebar__brand-text">Termix</span>
         </span>
         <button
@@ -117,7 +149,7 @@ export function TitleBar() {
             style={{ background: avatar.bg }}
             onClick={() => setAvatarOpen((v) => !v)}
           >
-            <img className="titlebar__avatar-img" src={avatar.src} alt="" />
+            <img className="titlebar__avatar-img" src={avatarSrc} alt="" />
           </button>
           {avatarOpen && (
             <>
@@ -130,8 +162,19 @@ export function TitleBar() {
                   <div
                     className="titlebar__avatar-badge"
                     style={{ background: avatar.bg }}
+                    role="button"
+                    tabIndex={0}
+                    title={t("avatar.switchAvatar")}
+                    aria-label={t("avatar.switchAvatar")}
+                    onClick={toggleAvatarPicker}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        toggleAvatarPicker();
+                      }
+                    }}
                   >
-                    <img src={avatar.src} alt="" />
+                    <img src={avatarSrc} alt="" />
                   </div>
                   <div className="titlebar__avatar-meta-main">
                     <div className="titlebar__avatar-name-row">
@@ -144,19 +187,21 @@ export function TitleBar() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="ctx-menu__item titlebar__avatar-toggle"
-                  onClick={() => setPickAvatarOpen((v) => !v)}
-                >
-                  <Icon name="sparkles" size={12} />
-                  <span>{t("avatar.switchAvatar")}</span>
-                  <Icon name={pickAvatarOpen ? "chevron-up" : "chevron-down"} size={11} />
-                </button>
-
                 {pickAvatarOpen && (
                   <div className="titlebar__avatar-picker-wrap">
                     <div className="titlebar__avatar-grid">
+                      <button
+                        type="button"
+                        className={
+                          "titlebar__avatar-pick titlebar__avatar-pick--default" +
+                          (isDefaultAvatar(avatarId) ? " is-active" : "")
+                        }
+                        title={t("avatar.default")}
+                        aria-label={t("avatar.default")}
+                        onClick={() => pickAvatar(DEFAULT_AVATAR_ID)}
+                      >
+                        <Icon name="user-round" size={20} />
+                      </button>
                       {AVATARS.map((a) => (
                         <button
                           key={a.id}
@@ -172,14 +217,23 @@ export function TitleBar() {
                         </button>
                       ))}
                     </div>
+                    <input
+                      ref={avatarInputRef}
+                      className="titlebar__avatar-file"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(event) => {
+                        void uploadAvatar(event.target.files?.[0]);
+                        event.target.value = "";
+                      }}
+                    />
                     <button
                       type="button"
-                      className="ctx-menu__item"
-                      title={t("avatar.randomTitle")}
-                      onClick={() => pickAvatar(randomAvatarId(avatarId))}
+                      className="ctx-menu__item titlebar__avatar-upload"
+                      onClick={() => avatarInputRef.current?.click()}
                     >
-                      <Icon name="sparkles" size={12} />
-                      {t("avatar.random")}
+                      <Icon name="upload" size={13} />
+                      {t("avatar.upload")}
                     </button>
                   </div>
                 )}

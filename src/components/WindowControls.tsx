@@ -1,6 +1,7 @@
 import { useT } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Icon } from "./Icon";
 import { isWindowsPlatform, windowControls } from "../lib/windowControls";
 
 /** 自绘窗口控制：macOS 左侧三点、Windows 右侧三键，风格与暗色标题栏统一 */
@@ -40,7 +41,9 @@ export function WindowControls() {
           aria-label={t("win.close")}
           onClick={() => void windowControls.close()}
           onDoubleClick={(e) => e.stopPropagation()}
-        />
+        >
+          <Icon name="window-close" size={9} className="window-controls__glyph" />
+        </button>
         <button
           className="window-controls__dot window-controls__dot--minimize"
           type="button"
@@ -48,7 +51,9 @@ export function WindowControls() {
           aria-label={t("win.min")}
           onClick={() => void windowControls.minimize()}
           onDoubleClick={(e) => e.stopPropagation()}
-        />
+        >
+          <Icon name="window-minimize" size={9} className="window-controls__glyph" />
+        </button>
         <button
           className="window-controls__dot window-controls__dot--maximize"
           type="button"
@@ -56,7 +61,9 @@ export function WindowControls() {
           aria-label={t("win.zoom")}
           onClick={() => void windowControls.toggleMaximize()}
           onDoubleClick={(e) => e.stopPropagation()}
-        />
+        >
+          <Icon name="window-maximize" size={9} className="window-controls__glyph" />
+        </button>
       </div>
     );
   }
