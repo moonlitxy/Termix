@@ -285,6 +285,8 @@ export interface UpdateInfo {
   releaseUrl: string;
   assetUrl: string;
   assetName: string;
+  /** 安装包 SHA-256（小写 hex，空串表示无法校验，自动安装会被后端拒绝） */
+  assetDigest: string;
   releaseNotes: string;
   /** 本次实际连通的通道：镜像基址或 "direct" */
   source: string;

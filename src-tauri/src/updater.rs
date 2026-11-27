@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
+use std::path::Path;
 #[cfg(target_os = "macos")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
@@ -25,6 +26,8 @@ pub struct UpdateInfo {
     pub asset_url: String,
     /// 安装包文件名
     pub asset_name: String,
+    /// 安装包 SHA-256（小写 hex，空串表示无法校验，前端应禁止自动安装）
+    pub asset_digest: String,
     /// 更新说明（Markdown 正文）
     pub release_notes: String,
     /// 本次实际连通的通道（mirror 基址 / "direct"），用于界面如实展示
@@ -44,6 +47,8 @@ struct GhRelease {
 struct GhAsset {
     name: String,
     browser_download_url: String,
+    /// GitHub 自 2023 起为 release asset 提供 "sha256:<hex>" 摘要
+    digest: Option<String>,
 }
 
 const LATEST_URL: &str = "https://api.github.com/repos/moonlitxy/Termix/releases/latest";
@@ -192,6 +197,25 @@ fn describe_reqwest_error(e: &reqwest::Error) -> String {
     msg
 }
 
+/// 直连 GitHub 获取当前平台安装包摘要，用于复核镜像返回的 JSON。
+/// 镜像能同时改写 JSON 与安装包，因此摘要必须来自独立的直连通道。
+async fn fetch_authoritative_digest(proxy: Option<&str>) -> Option<String> {
+    let client = client_builder(proxy)
+        .ok()?
+        .timeout(std::time::Duration::from_secs(6))
+        .build()
+        .ok()?;
+    let resp = client.get(LATEST_URL).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let gh: GhRelease = resp.json().await.ok()?;
+    pick_asset(&gh.assets)?
+        .digest
+        .as_deref()
+        .and_then(|d| parse_asset_digest(d).ok())
+}
+
 /// 查询 GitHub 最新 release，返回版本对比结果与安装包下载信息。
 /// 所选通道失败时自动尝试其余镜像与直连，取第一个成功的结果。
 #[tauri::command]
@@ -242,6 +266,23 @@ pub async fn check_update(
             }
             None => String::new(),
         };
+        let mut asset_digest = asset
+            .and_then(|a| a.digest.as_deref())
+            .and_then(|d| parse_asset_digest(d).ok())
+            .unwrap_or_default();
+        if candidate.is_some() {
+            // 镜像通道的 JSON 可能被篡改，摘要改由直连 GitHub 复核；
+            // 直连也不可用时清空摘要，download_update 会拒绝自动安装。
+            match fetch_authoritative_digest(proxy.as_deref()).await {
+                Some(hex) => asset_digest = hex,
+                None => {
+                    log::warn!(
+                        "check_update: cannot verify installer digest via GitHub; automatic update disabled"
+                    );
+                    asset_digest.clear();
+                }
+            }
+        }
         if !failures.is_empty() {
             log::info!(
                 "check_update: succeeded via {label} after {} fallback(s)",
@@ -255,6 +296,7 @@ pub async fn check_update(
             release_url: gh.html_url,
             asset_url,
             asset_name: asset.map(|a| a.name.clone()).unwrap_or_default(),
+            asset_digest,
             release_notes: gh.body.unwrap_or_default(),
             source: label.to_string(),
         });
@@ -272,11 +314,21 @@ pub async fn download_update(
     app: AppHandle,
     url: String,
     file_name: String,
+    digest: String,
     proxy: Option<String>,
 ) -> Result<(), String> {
     sanitize_installer_name(&file_name)?;
+    if digest.trim().is_empty() {
+        return Err(
+            "缺少安装包校验值，无法验证更新包；请从 Release 页面手动下载安装".to_string(),
+        );
+    }
+    let expected = parse_asset_digest(&digest)?;
+    validate_update_url(&url)?;
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = run_download(&app, &url, &file_name, proxy.as_deref()).await {
+        if let Err(e) =
+            run_download(&app, &url, &file_name, &expected, proxy.as_deref()).await
+        {
             let _ = app.emit("update-download-error", json!({ "error": e }));
         }
     });
@@ -293,6 +345,72 @@ fn validate_external_url(raw: &str) -> Result<&str, String> {
         return Err("链接包含非法空白字符".to_string());
     }
     Ok(u)
+}
+
+/// 解析 GitHub asset 摘要 `sha256:<hex>`，返回小写 hex。
+fn parse_asset_digest(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    let hex = value
+        .strip_prefix("sha256:")
+        .ok_or_else(|| "安装包校验值格式不支持（需要 sha256:…）".to_string())?;
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("安装包校验值不是合法的 SHA-256".to_string());
+    }
+    Ok(hex.to_ascii_lowercase())
+}
+
+/// 流式计算文件 SHA-256（小写 hex）。
+async fn file_sha256_hex(path: &Path) -> Result<String, String> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| format!("读取安装包失败：{e}"))?;
+    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .map_err(|e| format!("读取安装包失败：{e}"))?;
+        if n == 0 {
+            break;
+        }
+        ctx.update(&buf[..n]);
+    }
+    let digest = ctx.finish();
+    Ok(digest.as_ref().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// 安装包下载地址必须是 https，且不含空白字符。
+fn validate_update_url(raw: &str) -> Result<&str, String> {
+    let u = raw.trim();
+    if u.contains(char::is_whitespace) {
+        return Err("安装包下载地址含非法空白字符".to_string());
+    }
+    let parsed = reqwest::Url::parse(u).map_err(|_| "安装包下载地址无效".to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("安装包下载地址必须使用 https".to_string());
+    }
+    Ok(u)
+}
+
+/// 安装包只允许来自系统下载目录或临时目录（词法检查，拒绝 .. 跳转）。
+fn install_path_allowed(path: &Path, download_dir: &Path, temp_dir: &Path) -> bool {
+    fn inside(path: &Path, root: &Path) -> bool {
+        if !path.is_absolute() || !root.is_absolute() {
+            return false;
+        }
+        if path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        }) {
+            return false;
+        }
+        path.starts_with(root)
+    }
+    inside(path, download_dir) || inside(path, temp_dir)
 }
 
 /// 过滤安装包文件名：防止路径穿越（..）并限制安装包类型（exe / dmg）
@@ -317,6 +435,7 @@ async fn run_download(
     app: &AppHandle,
     url: &str,
     file_name: &str,
+    expected_sha256: &str,
     proxy: Option<&str>,
 ) -> Result<(), String> {
     let safe_name = sanitize_installer_name(file_name)?;
@@ -376,6 +495,20 @@ async fn run_download(
     }
     let _ = file.flush().await;
     drop(file);
+    // 完整性校验：与 release 提供的 SHA-256 比对，不匹配就删除，绝不安装被替换的包
+    let actual = match file_sha256_hex(&path).await {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(e);
+        }
+    };
+    if actual != expected_sha256 {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(format!(
+            "安装包校验失败（期望 {expected_sha256}，实际 {actual}），已删除下载文件"
+        ));
+    }
     let _ = app.emit(
         "update-download-done",
         json!({ "fileName": safe_name, "path": path.to_string_lossy() }),
@@ -389,6 +522,29 @@ pub async fn install_update(app: AppHandle, path: String) -> Result<(), String> 
     let p = std::path::Path::new(&path);
     if !p.is_file() {
         return Err("安装包文件不存在".to_string());
+    }
+    // 只允许执行系统下载目录或临时目录里的安装包，避免 IPC 被诱导执行任意本地程序
+    let download_dir = app
+        .path()
+        .download_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let temp_dir = std::env::temp_dir();
+    if !install_path_allowed(p, &download_dir, &temp_dir) {
+        return Err("安装包不在受信任的下载目录".to_string());
+    }
+    // 防符号链接绕过：解析真实路径后再确认一次
+    if let Ok(real) = p.canonicalize() {
+        let allowed = download_dir
+            .canonicalize()
+            .map(|root| real.starts_with(&root))
+            .unwrap_or(false)
+            || temp_dir
+                .canonicalize()
+                .map(|root| real.starts_with(&root))
+                .unwrap_or(false);
+        if !allowed {
+            return Err("安装包解析后的路径不在受信任目录".to_string());
+        }
     }
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
     if cfg!(target_os = "windows") && !ext.eq_ignore_ascii_case("exe") {
@@ -747,6 +903,56 @@ fn open_with_system(path: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn parse_asset_digest_requires_sha256_hex() {
+        let hex = "a".repeat(64);
+        assert_eq!(parse_asset_digest(&format!("sha256:{hex}")).unwrap(), hex);
+        assert!(parse_asset_digest("").is_err());
+        assert!(parse_asset_digest("md5:abc").is_err());
+        assert!(parse_asset_digest(&format!("sha256:{}", "g".repeat(64))).is_err());
+        assert!(parse_asset_digest(&format!("sha256:{}", "a".repeat(63))).is_err());
+    }
+
+    #[tokio::test]
+    async fn file_sha256_matches_known_vector() {
+        let dir = std::env::temp_dir().join(format!("termix-sha-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("abc.bin");
+        std::fs::write(&path, b"abc").unwrap();
+        assert_eq!(
+            file_sha256_hex(&path).await.unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn validate_update_url_requires_https_without_whitespace() {
+        assert!(validate_update_url("https://github.com/a/b.dmg").is_ok());
+        assert!(validate_update_url("http://github.com/a/b.dmg").is_err());
+        assert!(validate_update_url("file:///tmp/x.dmg").is_err());
+        assert!(validate_update_url("https://exa mple.com/x.dmg").is_err());
+        assert!(validate_update_url("not a url").is_err());
+    }
+
+    #[test]
+    fn install_path_must_be_inside_download_or_temp() {
+        let dl = Path::new("/Users/me/Downloads");
+        let tmp = Path::new("/tmp");
+        assert!(install_path_allowed(
+            Path::new("/Users/me/Downloads/Termix.dmg"),
+            dl,
+            tmp
+        ));
+        assert!(install_path_allowed(Path::new("/tmp/termix/Termix.dmg"), tmp, tmp));
+        assert!(!install_path_allowed(Path::new("/Users/me/evil.dmg"), dl, tmp));
+        assert!(!install_path_allowed(
+            Path::new("/Users/me/Downloads/../evil.dmg"),
+            dl,
+            tmp
+        ));
+    }
+
     /// 下载安装包必须使用独立的长超时，不能再退回版本检查的 20 秒。
     #[test]
     fn download_timeout_allows_large_installers() {
@@ -906,14 +1112,17 @@ mod tests {
             GhAsset {
                 name: "termix-v1.0.1-source.tar.gz".into(),
                 browser_download_url: "src-url".into(),
+                digest: None,
             },
             GhAsset {
                 name: "Termix_1.0.1_aarch64.dmg".into(),
                 browser_download_url: "dmg-url".into(),
+                digest: None,
             },
             GhAsset {
                 name: "Termix_1.0.1_x64-setup.exe".into(),
                 browser_download_url: "exe-url".into(),
+                digest: None,
             },
         ];
         let asset = pick_asset(&assets).expect("should match an installer asset");

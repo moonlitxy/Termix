@@ -291,6 +291,12 @@ fn encode_terminal_input(
     Ok(bytes.to_vec())
 }
 
+/// exec 通道的静默判定：首条输出前给足命令执行时间；收到数据后放宽到 5s
+/// 以容纳间歇输出；服务器发来 exit-status 后只需短暂收尾剩余数据。
+const EXEC_IDLE_BEFORE_DATA: Duration = Duration::from_secs(15);
+const EXEC_IDLE_AFTER_DATA: Duration = Duration::from_secs(5);
+const EXEC_IDLE_AFTER_EXIT: Duration = Duration::from_secs(1);
+
 pub struct SshManager {
     connections: Arc<Mutex<HashMap<String, Connection>>>,
     forwards: Arc<ForwardRegistry>,
@@ -850,16 +856,23 @@ impl SshManager {
         // 麒麟/Dropbear 等服务器执行 exec 后不会主动发送结束信号（无 exit-status/EOF/close），
         // 必须由客户端在输出结束后主动关闭。策略：
         // - 收到第一条数据前：给足命令执行宽限（top/df 在部分设备上可达数秒）
-        // - 收到数据后：静默 2s 即认为输出完成，立即关闭，避免 channel 占用过久
+        // - 收到数据后：静默 5s 才认为输出完成，避免间歇输出被截断
+        // - 已收到 exit-status：命令已结束，只需 1s 收尾剩余输出
         // 若服务器正常发送 close/EOF，则提前退出。
-        let mut idle = Duration::from_secs(15);
+        let mut idle = EXEC_IDLE_BEFORE_DATA;
+        let mut saw_exit = false;
         loop {
             match tokio::time::timeout(idle, channel.wait()).await {
                 Ok(Some(ChannelMsg::Data { data })) => {
                     output.push_str(&decode_remote_bytes(&data, encoding));
-                    idle = Duration::from_secs(2);
+                    if !saw_exit {
+                        idle = EXEC_IDLE_AFTER_DATA;
+                    }
                 }
-                Ok(Some(ChannelMsg::ExitStatus { .. })) => {}
+                Ok(Some(ChannelMsg::ExitStatus { .. })) => {
+                    saw_exit = true;
+                    idle = EXEC_IDLE_AFTER_EXIT;
+                }
                 Ok(Some(ChannelMsg::Eof)) | Ok(Some(ChannelMsg::Close)) | Ok(None) => break,
                 Ok(_) => {}
                 // 静默超时：认为命令输出完成
@@ -1040,6 +1053,15 @@ impl SshManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exec_idle_allows_bursty_output() {
+        // 命令执行中的间歇输出不能被过早判定为结束
+        assert!(EXEC_IDLE_AFTER_DATA >= Duration::from_secs(5));
+        // 已收到 exit-status 后只需短暂等待剩余数据
+        assert!(EXEC_IDLE_AFTER_EXIT <= Duration::from_secs(2));
+        assert!(EXEC_IDLE_BEFORE_DATA >= EXEC_IDLE_AFTER_DATA);
+    }
 
     #[test]
     fn resolve_encoding_supports_utf8_and_gbk_aliases() {

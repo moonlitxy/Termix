@@ -207,15 +207,14 @@ fn transform_all_sessions(
 
 /// 对所有会话执行转换并统一写库：先在内存中全部转换成功，再一次性落盘。
 /// 转换（如解密）任一条失败则整体报错、不写库，保证原子性。
+#[cfg(test)]
 fn transform_and_persist(
     db: &Db,
     f: impl Fn(&mut SessionInput) -> Result<(), String>,
 ) -> Result<(), String> {
     let inputs = transform_all_sessions(db, f)?;
-    for (id, input) in inputs {
-        db.update_session(&id, input)?;
-    }
-    Ok(())
+    // 全部转换成功后再一次性提交；任意一条失败整体回滚
+    db.update_sessions_atomic(inputs)
 }
 
 /// 校验导入的会话密文：无法用当前主密钥解密的密文（来自其他设备）清空该字段，
@@ -311,16 +310,19 @@ pub fn master_set(
     // 新盐 + 新密钥
     let salt = crypto::gen_salt();
     let key = crypto::derive_key(&master, &salt);
-    // 全部转换在内存中完成，全部成功后才统一写库（原子性）
-    transform_and_persist(&state.db, |input| {
+    // 全部转换在内存中完成；会话密文与新的 salt/verify 在同一事务里提交
+    let inputs = transform_all_sessions(&state.db, |input| {
         if let Some(ok) = &old_key {
             decrypt_session_fields(input, ok)?;
         }
         encrypt_session_fields(input, &key);
         Ok(())
     })?;
-    state.db.set_setting("master_salt", &crypto::to_hex(&salt))?;
-    state.db.set_setting("master_verify", &crypto::make_verify(&key))?;
+    state.db.rotate_master_key(
+        inputs,
+        &crypto::to_hex(&salt),
+        &crypto::make_verify(&key),
+    )?;
     state.master.set_key(key);
     log::info!("master: password set/changed");
     Ok(())
@@ -365,10 +367,10 @@ pub fn master_clear(master: String, state: State<'_, AppState>) -> Result<(), St
     if !crypto::verify_master(&key, &verify) {
         return Err("主密码错误".into());
     }
-    // 先在内存中全部解密成功，再统一写库（失败不落盘）
-    transform_and_persist(&state.db, |input| decrypt_session_fields(input, &key))?;
-    state.db.remove_setting("master_salt")?;
-    state.db.remove_setting("master_verify")?;
+    // 先在内存中全部解密成功，再与删除 salt/verify 一起原子提交
+    let inputs =
+        transform_all_sessions(&state.db, |input| decrypt_session_fields(input, &key))?;
+    state.db.clear_master_key(inputs)?;
     state.master.clear_key();
     log::info!("master: cleared");
     Ok(())
@@ -376,7 +378,8 @@ pub fn master_clear(master: String, state: State<'_, AppState>) -> Result<(), St
 
 #[tauri::command]
 pub async fn session_list(state: State<'_, AppState>) -> Result<Vec<Session>, String> {
-    state.db.list_sessions()
+    let sessions = state.db.list_sessions()?;
+    Ok(sessions_for_ui(sessions, state.master.key().as_ref()))
 }
 
 /// 同一分组（无分组视为同一组）内连接名称唯一性校验。
@@ -427,8 +430,24 @@ pub async fn session_update(
 ) -> Result<(), String> {
     ensure_session_name_unique(&state.db, &input.name, input.group_id.as_deref(), Some(&id))?;
     if state.db.get_setting("master_salt").is_some() {
-        let key = state.master.key().ok_or_else(|| "已设置主密码，请先在设置中解锁".to_string())?;
-        encrypt_session_fields(&mut input, &key);
+        match state.master.key() {
+            Some(key) => encrypt_session_fields(&mut input, &key),
+            None => {
+                // 锁定状态：允许改名称/端口等字段，但不允许改写或清空密码
+                if has_plaintext_secret(&input) {
+                    return Err(
+                        "已设置主密码，请先在设置中解锁后再修改密码".to_string()
+                    );
+                }
+                let existing = state
+                    .db
+                    .list_sessions()?
+                    .into_iter()
+                    .find(|s| s.id == id)
+                    .ok_or_else(|| "session not found".to_string())?;
+                preserve_locked_secrets(&existing, &mut input);
+            }
+        }
     }
     state.db.update_session(&id, input)?;
     snapshot_sessions(&state);
@@ -463,16 +482,10 @@ pub async fn sessions_export(state: State<'_, AppState>) -> Result<String, Strin
     serde_json::to_string_pretty(&out).map_err(|e| e.to_string())
 }
 
-/// 组装备份内容（导出与自动备份共用）：分组 + 会话列表。
-/// 主密码已解锁时密码字段解密为明文，否则保留数据库当前存储值。
-fn build_session_export(db: &Db, master: &MasterService) -> Result<SessionExport, String> {
+/// 组装数据库中的分组与会话，不做任何解密（自动备份只能用它）。
+fn build_session_export_raw(db: &Db) -> Result<SessionExport, String> {
     let groups = db.list_groups()?;
-    let mut sessions = db.list_sessions()?;
-    if let Some(key) = master.key() {
-        for s in sessions.iter_mut() {
-            decrypt_session_secrets(s, &key)?;
-        }
-    }
+    let sessions = db.list_sessions()?;
     let exported_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -484,6 +497,45 @@ fn build_session_export(db: &Db, master: &MasterService) -> Result<SessionExport
         groups,
         sessions,
     })
+}
+
+/// 用户主动导出：主密码已解锁时密码字段解密为明文，否则保留数据库当前存储值。
+fn build_session_export(db: &Db, master: &MasterService) -> Result<SessionExport, String> {
+    let mut out = build_session_export_raw(db)?;
+    if let Some(key) = master.key() {
+        for s in out.sessions.iter_mut() {
+            decrypt_session_secrets(s, &key)?;
+        }
+    }
+    Ok(out)
+}
+
+/// 会话列表展示用：已解锁时解密密码字段；单条解密失败保留原值，
+/// 不让一条来自其他设备的密文拖垮整个列表。
+fn sessions_for_ui(mut sessions: Vec<Session>, key: Option<&crypto::MasterKey>) -> Vec<Session> {
+    if let Some(key) = key {
+        for s in sessions.iter_mut() {
+            if let Err(e) = decrypt_session_secrets(s, key) {
+                log::warn!("session {} secret decrypt failed: {e}", s.id);
+            }
+        }
+    }
+    sessions
+}
+
+/// 输入里是否带新的明文密码（锁定状态下不允许，需先解锁）。
+fn has_plaintext_secret(input: &SessionInput) -> bool {
+    [input.password.as_deref(), input.private_key_passphrase.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|v| !v.is_empty() && !crypto::is_encrypted(v))
+}
+
+/// 锁定状态下更新会话时保留数据库中的密码字段：
+/// 不允许在未解锁时改写或清空密钥。
+fn preserve_locked_secrets(existing: &Session, input: &mut SessionInput) {
+    input.password = existing.password.clone();
+    input.private_key_passphrase = existing.private_key_passphrase.clone();
 }
 
 /// 从 JSON 备份导入会话与分组。
@@ -612,7 +664,8 @@ fn snapshot_sessions(state: &State<'_, AppState>) {
 }
 
 fn snapshot_sessions_inner(state: &State<'_, AppState>, reason: &str) -> Result<(), String> {
-    let out = build_session_export(&state.db, &state.master)?;
+    // 自动备份绝不写入明文密码：始终导出数据库存储值（密文）
+    let out = build_session_export_raw(&state.db)?;
     write_backup_snapshot(&backup_dir(state), &out, reason, BACKUP_KEEP).map(|_| ())
 }
 
@@ -624,13 +677,31 @@ fn write_backup_snapshot(
     keep: usize,
 ) -> Result<String, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // 备份可能含会话敏感字段：目录 0700、文件 0600，且创建时即收紧权限
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
     let name = format!("sessions-{millis:015}-{reason}.json");
     let json = serde_json::to_string_pretty(out).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(&name), json).map_err(|e| e.to_string())?;
+    let file_path = dir.join(&name);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    {
+        use std::io::Write;
+        let mut file = options.open(&file_path).map_err(|e| e.to_string())?;
+        file.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+    }
     // 滚动保留：按文件名倒序（毫秒时间戳同序）删超出的
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
@@ -1669,6 +1740,124 @@ fn parse_net(s: &str) -> (u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session_input_with_password(password: &str) -> SessionInput {
+        SessionInput {
+            name: "prod".into(),
+            host: "10.0.0.1".into(),
+            port: 22,
+            username: "root".into(),
+            auth_type: "password".into(),
+            password: Some(password.into()),
+            private_key_path: None,
+            private_key_passphrase: None,
+            group_id: None,
+            memo: None,
+            encoding: None,
+            jump_session_id: None,
+            agent_forward: None,
+        }
+    }
+
+    #[test]
+    fn backup_snapshot_keeps_secrets_encrypted() {
+        let db = Db::open(":memory:").unwrap();
+        let key = crypto::derive_key("master-pass", b"0123456789abcdef");
+        let ciphertext = crypto::encrypt(&key, "secret-pass");
+        db.create_session(session_input_with_password(&ciphertext))
+            .unwrap();
+
+        let master = MasterService::new();
+        master.set_key(key);
+
+        // 自动备份用 raw 导出：密码必须保持密文
+        let raw = build_session_export_raw(&db).unwrap();
+        assert_eq!(
+            raw.sessions[0].password.as_deref(),
+            Some(ciphertext.as_str())
+        );
+
+        // 用户主动导出仍解密为明文
+        let exported = build_session_export(&db, &master).unwrap();
+        assert_eq!(
+            exported.sessions[0].password.as_deref(),
+            Some("secret-pass")
+        );
+    }
+
+    #[test]
+    fn has_plaintext_secret_detects_new_secret() {
+        let mut input = session_input_with_password("plain");
+        assert!(has_plaintext_secret(&input));
+        input.password = Some("enc:v1:aa:bb".into());
+        assert!(!has_plaintext_secret(&input));
+        input.password = Some(String::new());
+        assert!(!has_plaintext_secret(&input));
+        input.password = None;
+        assert!(!has_plaintext_secret(&input));
+    }
+
+    #[test]
+    fn preserve_locked_secrets_keeps_stored_ciphertext() {
+        let db = Db::open(":memory:").unwrap();
+        db.create_session(session_input_with_password("enc:v1:a:b"))
+            .unwrap();
+        let existing = db.list_sessions().unwrap().remove(0);
+
+        let mut input = session_input_with_password("typed-new");
+        input.private_key_passphrase = Some("typed-pass".into());
+        preserve_locked_secrets(&existing, &mut input);
+
+        assert_eq!(input.password.as_deref(), Some("enc:v1:a:b"));
+        assert_eq!(
+            input.private_key_passphrase,
+            existing.private_key_passphrase
+        );
+    }
+
+    #[test]
+    fn sessions_for_ui_decrypts_when_unlocked_and_keeps_broken_values() {
+        let db = Db::open(":memory:").unwrap();
+        let key = crypto::derive_key("master-pass", b"0123456789abcdef");
+        let ciphertext = crypto::encrypt(&key, "secret");
+        db.create_session(session_input_with_password(&ciphertext))
+            .unwrap();
+        db.create_session(session_input_with_password("enc:v1:aaaa:bbbb"))
+            .unwrap();
+
+        let sessions = sessions_for_ui(db.list_sessions().unwrap(), Some(&key));
+        assert!(sessions
+            .iter()
+            .any(|s| s.password.as_deref() == Some("secret")));
+        // 无法解密的存量数据保留原值，不能让整个列表失败
+        assert!(sessions
+            .iter()
+            .any(|s| s.password.as_deref() == Some("enc:v1:aaaa:bbbb")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_uses_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("termix-bak-{}", uuid::Uuid::new_v4()));
+        let out = SessionExport {
+            app: "termix".into(),
+            version: 1,
+            exported_at: 0,
+            groups: vec![],
+            sessions: vec![],
+        };
+        let name = write_backup_snapshot(&dir, &out, "test", 5).unwrap();
+        let file_mode = std::fs::metadata(dir.join(&name))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let dir_mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(file_mode, 0o600);
+        assert_eq!(dir_mode, 0o700);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn parse_first_f64_basic() {

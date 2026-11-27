@@ -145,6 +145,49 @@ impl Db {
         Ok(())
     }
 
+    /// 在单个事务中批量更新会话：任意一条失败整体回滚。
+    pub fn update_sessions_atomic(
+        &self,
+        updates: Vec<(String, SessionInput)>,
+    ) -> Result<(), String> {
+        let mut c = self.conn.lock().unwrap();
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        apply_session_updates(&tx, updates)?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    /// 轮换主密码：会话密文与新的 salt/verify 在同一个事务里提交。
+    /// 任一步失败整体回滚，绝不会出现「密文已换、salt 没换」的不可解密状态。
+    pub fn rotate_master_key(
+        &self,
+        updates: Vec<(String, SessionInput)>,
+        salt_hex: &str,
+        verify_ct: &str,
+    ) -> Result<(), String> {
+        let mut c = self.conn.lock().unwrap();
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        apply_session_updates(&tx, updates)?;
+        upsert_setting(&tx, "master_salt", salt_hex)?;
+        upsert_setting(&tx, "master_verify", verify_ct)?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    /// 清除主密码：会话解密回明文与删除 salt/verify 在同一个事务里提交。
+    pub fn clear_master_key(
+        &self,
+        updates: Vec<(String, SessionInput)>,
+    ) -> Result<(), String> {
+        let mut c = self.conn.lock().unwrap();
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        apply_session_updates(&tx, updates)?;
+        tx.execute(
+            "DELETE FROM app_settings WHERE key IN ('master_salt','master_verify')",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
     /// 仅调整会话所属分组，不触碰密码等加密字段。
     pub fn move_session(&self, id: &str, group_id: Option<&str>) -> Result<(), String> {
         let c = self.conn.lock().unwrap();
@@ -447,6 +490,42 @@ impl Db {
     }
 }
 
+/// 在事务里批量写入会话更新；调用方负责 commit/rollback。
+fn apply_session_updates(
+    tx: &rusqlite::Transaction<'_>,
+    updates: Vec<(String, SessionInput)>,
+) -> Result<(), String> {
+    for (id, input) in updates {
+        let encoding = input.encoding.unwrap_or_else(|| "utf-8".into());
+        let agent_forward: i64 = if input.agent_forward.unwrap_or(false) { 1 } else { 0 };
+        tx.execute(
+            "UPDATE sessions SET name=?,host=?,port=?,username=?,auth_type=?,password=?,private_key_path=?,private_key_passphrase=?,group_id=?,memo=?,encoding=?,jump_session_id=?,agent_forward=? WHERE id=?",
+            params![
+                input.name, input.host, input.port, input.username, input.auth_type,
+                input.password, input.private_key_path, input.private_key_passphrase,
+                input.group_id, input.memo, encoding, input.jump_session_id, agent_forward, id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 在事务里写入 app_settings（存在则更新）。
+fn upsert_setting(
+    tx: &rusqlite::Transaction<'_>,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "INSERT INTO app_settings(key,value) VALUES(?,?)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -478,6 +557,63 @@ mod tests {
             jump_session_id: None,
             agent_forward: None,
         }
+    }
+
+    #[test]
+    fn update_sessions_atomic_updates_all_rows() {
+        let db = test_db();
+        let a = db.create_session(session_input("a")).unwrap();
+        let b = db.create_session(session_input("b")).unwrap();
+
+        let mut ia = session_input("a2");
+        ia.password = Some("p2".into());
+        let ib = session_input("b2");
+        db.update_sessions_atomic(vec![(a.clone(), ia), (b.clone(), ib)])
+            .unwrap();
+
+        let list = db.list_sessions().unwrap();
+        let na = list.iter().find(|s| s.id == a).unwrap();
+        let nb = list.iter().find(|s| s.id == b).unwrap();
+        assert_eq!(na.name, "a2");
+        assert_eq!(na.password.as_deref(), Some("p2"));
+        assert_eq!(nb.name, "b2");
+    }
+
+    #[test]
+    fn update_sessions_atomic_accepts_empty_batch() {
+        let db = test_db();
+        db.update_sessions_atomic(vec![]).unwrap();
+    }
+
+    #[test]
+    fn rotate_master_key_commits_settings_with_sessions() {
+        let db = test_db();
+        let id = db.create_session(session_input("a")).unwrap();
+        db.rotate_master_key(
+            vec![(id.clone(), session_input("a2"))],
+            "salt-hex",
+            "verify-ct",
+        )
+        .unwrap();
+
+        assert_eq!(db.get_setting("master_salt").as_deref(), Some("salt-hex"));
+        assert_eq!(db.get_setting("master_verify").as_deref(), Some("verify-ct"));
+        assert_eq!(db.list_sessions().unwrap()[0].name, "a2");
+    }
+
+    #[test]
+    fn clear_master_key_removes_settings_with_sessions() {
+        let db = test_db();
+        let id = db.create_session(session_input("a")).unwrap();
+        db.set_setting("master_salt", "s").unwrap();
+        db.set_setting("master_verify", "v").unwrap();
+
+        db.clear_master_key(vec![(id.clone(), session_input("a2"))])
+            .unwrap();
+
+        assert!(db.get_setting("master_salt").is_none());
+        assert!(db.get_setting("master_verify").is_none());
+        assert_eq!(db.list_sessions().unwrap()[0].name, "a2");
     }
 
     #[test]

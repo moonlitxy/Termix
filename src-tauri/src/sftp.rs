@@ -863,6 +863,7 @@ impl SftpService {
         remote_path: &str,
         local_path: &str,
     ) -> Result<String, String> {
+        ensure_safe_download_target(local_path)?;
         if self
             .has_active_duplicate("download", session_id, local_path, remote_path)
             .await
@@ -1084,6 +1085,7 @@ impl SftpService {
         remote_dir: &str,
         local_dir: &str,
     ) -> Result<String, String> {
+        ensure_safe_download_target(local_dir)?;
         let sftp = self.session(connection_id).await?;
         let task_id = uuid::Uuid::new_v4().to_string();
         let file_name = Path::new(remote_dir)
@@ -1991,6 +1993,51 @@ fn ensure_safe_local_path(path: &str) -> Result<PathBuf, String> {
     Ok(p)
 }
 
+/// 远端条目名必须是单层文件名：拒绝空、"."、".." 与路径分隔符。
+/// 恶意 SFTP 服务器可以返回含 `../` 或绝对路径的条目名，若直接拼进本地
+/// 下载路径就能写到目标目录之外。
+fn safe_child_name(name: &str) -> Option<&str> {
+    if name.is_empty() || name == "." || name == ".." {
+        return None;
+    }
+    if name.contains('/') || name.contains('\\') {
+        return None;
+    }
+    Some(name)
+}
+
+/// 删除时必须保护文件系统根目录（parent 为空）和用户主目录，
+/// 不依赖 home_dir() 是否可用。
+fn is_protected_delete_path(p: &Path) -> bool {
+    if p.parent().is_none() {
+        return true;
+    }
+    std::env::home_dir().is_some_and(|home| p == home)
+}
+
+/// 下载落点必须是绝对文件路径，且不含 "." / ".." 组件或末尾分隔符。
+fn ensure_safe_download_target(local_path: &str) -> Result<(), String> {
+    if local_path.ends_with('/') || local_path.ends_with('\\') {
+        return Err("下载目标不是文件路径".into());
+    }
+    let p = std::path::Path::new(local_path);
+    if !p.is_absolute() {
+        return Err("下载目标必须是绝对路径".into());
+    }
+    if p.file_name().is_none() {
+        return Err("下载目标不是文件路径".into());
+    }
+    if p.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    }) {
+        return Err("下载目标包含非法的路径跳转".into());
+    }
+    Ok(())
+}
+
 pub fn local_mkdir(path: &str) -> Result<(), String> {
     let p = ensure_safe_local_path(path)?;
     std::fs::create_dir(&p).map_err(|e| format!("create_dir failed: {e}"))
@@ -2015,10 +2062,8 @@ pub fn local_rename(old_path: &str, new_path: &str) -> Result<(), String> {
 
 pub fn local_delete(path: &str, is_dir: bool) -> Result<(), String> {
     let p = ensure_safe_local_path(path)?;
-    if let Some(home) = std::env::home_dir() {
-        if p == home || p == PathBuf::from("/") {
-            return Err("refusing to delete protected path".into());
-        }
+    if is_protected_delete_path(&p) {
+        return Err("refusing to delete protected path".into());
     }
     if is_dir {
         let empty = std::fs::read_dir(&p)
@@ -2289,10 +2334,16 @@ async fn transfer_download_dir(
         .await
         .map_err(|e| format!("read_dir {remote_dir}: {e}"))?;
     let items: Vec<(String, String, bool)> = entries
-        .map(|e| {
+        .filter_map(|e| {
             let name = e.file_name();
+            if safe_child_name(&name).is_none() {
+                log::warn!(
+                    "sftp: download-dir[{task_id}] skip unsafe entry name {name:?}"
+                );
+                return None;
+            }
             let meta = e.metadata();
-            (name.clone(), join_remote(remote_dir, &name), meta.is_dir())
+            Some((name.clone(), join_remote(remote_dir, &name), meta.is_dir()))
         })
         .collect();
     let total = items.len().max(1) as f64;
@@ -2353,6 +2404,30 @@ fn collect_local_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_child_name_rejects_traversal_and_separators() {
+        assert_eq!(safe_child_name("report.txt"), Some("report.txt"));
+        assert_eq!(safe_child_name(".."), None);
+        assert_eq!(safe_child_name("."), None);
+        assert_eq!(safe_child_name(""), None);
+        assert_eq!(safe_child_name("a/b"), None);
+        assert_eq!(safe_child_name("a\\b"), None);
+    }
+
+    #[test]
+    fn protected_delete_path_always_includes_root() {
+        assert!(is_protected_delete_path(Path::new("/")));
+        assert!(!is_protected_delete_path(Path::new("/tmp/not-protected")));
+    }
+
+    #[test]
+    fn download_target_rejects_parent_dir_and_relative() {
+        assert!(ensure_safe_download_target("/Users/me/Downloads/a.txt").is_ok());
+        assert!(ensure_safe_download_target("/Users/me/Downloads/../evil").is_err());
+        assert!(ensure_safe_download_target("relative/a.txt").is_err());
+        assert!(ensure_safe_download_target("/Users/me/Downloads/").is_err());
+    }
 
     fn item(name: &str, is_dir: bool) -> SftpItem {
         SftpItem {
