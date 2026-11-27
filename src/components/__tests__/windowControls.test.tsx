@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 // @ts-ignore vitest node 环境提供 fs / path
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 // @ts-ignore vitest node 环境提供 fs / path
 import { join } from "node:path";
 
 declare const process: { cwd: () => string };
+
+// 设计稿在 gitignore 的 plan/ 下，只存在于本地工作副本；CI 上跳过图标断言
+const iconPath = join(
+  process.cwd(),
+  "plan/design/icon-concepts/04-orbit-terminal.svg"
+);
+const iconExists = existsSync(iconPath);
 
 describe("macOS 窗口控制与应用图标", () => {
   const controlsSource = readFileSync(
@@ -13,10 +20,6 @@ describe("macOS 窗口控制与应用图标", () => {
   );
   const stylesSource = readFileSync(
     join(process.cwd(), "src/styles/global.css"),
-    "utf-8"
-  );
-  const iconSource = readFileSync(
-    join(process.cwd(), "plan/design/icon-concepts/04-orbit-terminal.svg"),
     "utf-8"
   );
 
@@ -42,7 +45,8 @@ describe("macOS 窗口控制与应用图标", () => {
     );
   });
 
-  it("应用图标不再包含外层底板且只保留一个圆角形状", () => {
+  it.skipIf(!iconExists)("应用图标不再包含外层底板且只保留一个圆角形状", () => {
+    const iconSource = readFileSync(iconPath, "utf-8");
     expect(iconSource).not.toContain('rx="116"');
     expect(iconSource).not.toContain("linearGradient");
     expect(iconSource.match(/<rect [^>]*rx="92"/g)).toHaveLength(1);
