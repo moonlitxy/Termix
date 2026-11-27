@@ -957,6 +957,7 @@ a {
   right: 0;
   z-index: 210;
   min-width: 250px;
+  max-width: 360px;
   max-height: calc(100vh - 80px);
   overflow-y: auto;
 }
@@ -966,7 +967,6 @@ a {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border-neutral-l1);
 }
 
 .titlebar__avatar-badge {
@@ -999,24 +999,58 @@ a {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .titlebar__avatar-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: var(--body-sm-font-size);
   font-weight: 600;
   color: var(--text-default);
+  cursor: text;
+  text-align: left;
+}
+
+.titlebar__avatar-name > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.titlebar__avatar-sub {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
+.titlebar__avatar-name .icon {
+  flex-shrink: 0;
   color: var(--text-tertiary);
-  font-family: var(--font-family-mono);
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.titlebar__avatar-name:hover .icon,
+.titlebar__avatar-name:focus-visible .icon {
+  opacity: 1;
+}
+
+.titlebar__avatar-name-input {
+  width: 100%;
+  min-width: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--border-brand);
+  border-radius: var(--radius-4);
+  background: var(--bg-overlay-l2);
+  color: var(--text-default);
+  font: inherit;
+  font-size: var(--body-sm-font-size);
+  font-weight: 600;
+  outline: none;
 }
 
 .titlebar__avatar-picker-wrap {
@@ -1041,12 +1075,14 @@ a {
 
 .titlebar__menu-seg {
   margin: 0;
-  padding: 2px;
-  gap: 2px;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 
 .titlebar__menu-seg .st-seg__btn {
-  padding: 2px 6px;
+  padding: 4px 8px;
+  border-radius: 0;
   font-size: 11px;
 }
 
@@ -1091,7 +1127,7 @@ a {
 
 .titlebar__avatar-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 8px;
   padding: 4px 10px 8px;
 }
@@ -1113,23 +1149,17 @@ a {
 }
 
 .titlebar__avatar-pick--default {
-  background: #64748b;
-  color: #ffffff;
+  background: #e8f2ff;
   outline-color: transparent;
 }
 
 .titlebar__avatar-pick--default:hover,
 .titlebar__avatar-pick--default.is-active {
-  background: #526277;
+  background: #f6faff;
 }
 
 .titlebar__avatar-pick--default.is-active {
   outline-color: var(--text-secondary);
-}
-
-.titlebar__avatar-pick--default .icon {
-  width: 32px;
-  height: 32px;
 }
 
 .titlebar__avatar-upload {

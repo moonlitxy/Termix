@@ -165,55 +165,17 @@ export function TerminalView({ tab }: { tab: Tab }) {
       })
     );
 
-    // 自动重连：意外断开后最多重试 3 次（用户手动断开不会触发）
-    let reconnectCount = 0;
-    let reconnecting = false;
-    const doReconnect = async () => {
-      if (cancelled || reconnecting) return;
-      // 手动断开（断开按钮 / ⌘D）：不自动重连
-      if (tabRef.current.manualClosed) return;
-      if (reconnectCount >= 3) {
-        terminal.write(`\r\n\x1b[31m${tr("term.reconnectFailed")}\x1b[0m\r\n`);
-        return;
-      }
-      reconnecting = true;
-      reconnectCount += 1;
-      terminal.write(`\r\n连接断开，2 秒后自动重连（第 ${reconnectCount}/3 次）...\r\n`);
-      await new Promise((r) => setTimeout(r, 2000));
-      if (cancelled) {
-        reconnecting = false;
-        return;
-      }
-      const cur = tabRef.current;
-      try {
-        const connId = await ipc.sessionConnect(cur.sessionId);
-        const shellId = await ipc.terminalCreate(
-          connId,
-          cur.id,
-          terminal.cols,
-          terminal.rows
-        );
-        updateTab(cur.id, {
-          connectionId: connId,
-          shellId,
-          status: "connected",
-          manualClosed: false,
-        });
-        reconnectCount = 0;
-        reconnecting = false;
-        terminal.write(`\x1b[32m${tr("term.reconnected")}\x1b[0m\r\n`);
-      } catch (e) {
-        terminal.write(`\x1b[31m重连失败: ${String(e)}\x1b[0m\r\n`);
-        reconnecting = false;
-        void doReconnect();
-      }
-    };
-
-    // 订阅连接状态
+    // 订阅连接状态：被动断开后不自动重连，等待用户手动重连
     onConnectionStatus((e) => {
       if (e.tabId === tab.id && e.status === "closed" && !cancelled) {
-        updateTab(tab.id, { status: "disconnected" });
-        void doReconnect();
+        if (tabRef.current.status !== "disconnected") {
+          terminal.write(`\r\n\x1b[33m${tr("term.disconnectedHint")}\x1b[0m\r\n`);
+        }
+        updateTab(tab.id, {
+          status: "disconnected",
+          connectionId: undefined,
+          shellId: undefined,
+        });
       }
     }).then((un) => {
       if (cancelled) un();
@@ -363,7 +325,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
           connectionId: connId,
           shellId,
           status: "connected",
-          manualClosed: false,
         });
       } catch (e) {
         if (cancelled) return;
@@ -640,7 +601,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title={tr("term.copySel")}
               disabled={!hasSelectionRef.current}
               onClick={handleCopy}
             >
@@ -649,7 +609,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title={tr("term.paste")}
               onClick={handlePaste}
             >
               粘贴
@@ -658,7 +617,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title={tr("term.find")}
               onClick={handleFind}
             >
               查找
@@ -666,7 +624,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title={tr("term.saveLog")}
               onClick={handleSaveLog}
             >
               保存日志
@@ -674,7 +631,6 @@ export function TerminalView({ tab }: { tab: Tab }) {
             <button
               type="button"
               className="terminal-view__ctx-item"
-              title={tr("term.clear")}
               onClick={handleClear}
             >
               清屏

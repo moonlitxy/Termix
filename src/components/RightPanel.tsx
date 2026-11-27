@@ -229,7 +229,6 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
       toast.warning(tr("panel.sessionGone"));
       return;
     }
-    console.log("[transfer] retry", t.id, t.direction, { local: t.localPath, remote: t.remotePath });
     if (t.direction === "upload") {
       if (t.isDir) {
         void ipc.sftpUploadDir(conn.connectionId, t.sessionId, t.localPath, t.remotePath);
@@ -321,7 +320,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="bar" size={14} />Memory
+              <Icon name="bar" size={14} />{tr("stats.memory")}
             </span>
             <span className="res-card__value" style={{ color: resTextColor(memPct) }}>
               {memPct}%
@@ -342,7 +341,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
         <div className="ds-card">
           <div className="res-card__head">
             <span className="res-card__label">
-              <Icon name="folder" size={14} />Disk
+              <Icon name="folder" size={14} />{tr("stats.disk")}
             </span>
             <span className="res-card__value" style={{ color: resTextColor(disk) }}>
               {disk}%
@@ -407,7 +406,7 @@ export function RightPanel({ transfersOnly = false }: { transfersOnly?: boolean 
           <div className="res-card__head">
             <span className="res-card__label">
               <Icon name="arrow-right-to-line" size={14} />
-              Network
+              {tr("mon.network")}
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

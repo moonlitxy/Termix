@@ -141,13 +141,6 @@ export function SidebarStats() {
           placeholder="0%"
           title={t("stats.noConnMem")}
         />
-        <Metric
-          label={t("stats.disk")}
-          value={0}
-          ready={false}
-          placeholder="0%"
-          title={t("stats.noConnDisk")}
-        />
         <div className="sidebar-stats__net">
           <span>↑ 0 B/s</span>
           <span>↓ 0 B/s</span>
@@ -164,7 +157,6 @@ export function SidebarStats() {
     metrics && metrics.memTotal > 0
       ? Math.round((metrics.memUsed / metrics.memTotal) * 100)
       : 0;
-  const disk = metrics ? Math.round(metrics.diskUsedPct) : 0;
   const load = metrics
     ? `${metrics.load1.toFixed(2)} ${metrics.load5.toFixed(2)} ${metrics.load15.toFixed(2)}`
     : "-";
@@ -173,8 +165,6 @@ export function SidebarStats() {
       ? t("stats.loadTitleCores", { n: cpuMeta.cores })
       : t("stats.loadTitle")
     : undefined;
-  const rootDisk = metrics?.disks.find((item) => item.mount === "/") ?? metrics?.disks[0];
-
   const copyInfo = async () => {
     try {
       await navigator.clipboard.writeText(
@@ -242,24 +232,6 @@ export function SidebarStats() {
             ? t("stats.memDetail", {
                 pair: formatBytePair(metrics.memUsed, metrics.memTotal),
                 pct: memPct,
-              })
-            : t("stats.waiting")
-        }
-      />
-      <Metric
-        label={t("stats.disk")}
-        value={metrics ? disk : 0}
-        ready={!!metrics}
-        detail={
-          metrics
-            ? formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0)
-            : undefined
-        }
-        title={
-          metrics
-            ? t("stats.diskDetail", {
-                pair: formatBytePair(rootDisk?.used ?? 0, rootDisk?.total ?? 0),
-                pct: disk,
               })
             : t("stats.waiting")
         }

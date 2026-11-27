@@ -242,7 +242,7 @@ export function EditorTabs() {
 
   const toggleConnection = async () => {
     if (!activeTab) return;
-    if (activeTab.connectionId) {
+    if (activeTab.connectionId && activeTab.status !== "disconnected") {
       try {
         if (activeTab.shellId) {
           await ipc.terminalDestroy(activeTab.connectionId, activeTab.shellId);
@@ -253,7 +253,6 @@ export function EditorTabs() {
       }
       updateTab(activeTab.id, {
         status: "disconnected",
-        manualClosed: true,
         connectionId: undefined,
         shellId: undefined,
         error: undefined,
@@ -262,7 +261,8 @@ export function EditorTabs() {
     }
     updateTab(activeTab.id, {
       status: "connecting",
-      manualClosed: false,
+      connectionId: undefined,
+      shellId: undefined,
       error: undefined,
     });
     requestReconnect(activeTab.id);

@@ -10,7 +10,8 @@ import chestnutAvatar from "../assets/avatars/chestnut.webp";
 import mintAvatar from "../assets/avatars/mint.webp";
 import shionAvatar from "../assets/avatars/shion.webp";
 import yukinoAvatar from "../assets/avatars/yukino.webp";
-import defaultAvatar from "../assets/avatars/default.svg";
+import whaleAvatar from "../assets/avatars/whale.webp";
+import defaultAvatar from "../assets/avatars/default.webp";
 
 export interface Avatar {
   id: string;
@@ -25,10 +26,13 @@ export const AVATARS: Avatar[] = [
   { id: "chestnut", name: "栗子", src: chestnutAvatar, bg: "#ead3bd" },
   { id: "yukino", name: "雪乃", src: yukinoAvatar, bg: "#e6e2f3" },
   { id: "shion", name: "紫苑", src: shionAvatar, bg: "#e2d5f0" },
+  { id: "whale", name: "鲸鱼娘", src: whaleAvatar, bg: "#155e75" },
 ];
 
 export const AVATAR_KEY = "termix.avatarId";
 export const CUSTOM_AVATAR_KEY = "termix.customAvatar";
+export const AVATAR_NAMES_KEY = "termix.avatarNames";
+export const AVATAR_NAME_MAX = 24;
 export const CUSTOM_AVATAR_ID = "custom";
 export const DEFAULT_AVATAR_ID = "default";
 
@@ -36,7 +40,7 @@ export const DEFAULT_AVATAR: Avatar = {
   id: DEFAULT_AVATAR_ID,
   name: "默认头像",
   src: defaultAvatar,
-  bg: "#64748b",
+  bg: "#e8f2ff",
 };
 
 export function getAvatar(id: string | null | undefined): Avatar {
@@ -71,6 +75,44 @@ export function saveAvatarId(id: string): void {
       AVATARS.some((a) => a.id === id)
     ) {
       localStorage.setItem(AVATAR_KEY, id);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function readAvatarNames(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(AVATAR_NAMES_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const names: Record<string, string> = {};
+    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "string" && value.trim()) {
+        names[id] = value.trim().slice(0, AVATAR_NAME_MAX);
+      }
+    }
+    return names;
+  } catch {
+    return {};
+  }
+}
+
+export function loadAvatarNames(): Record<string, string> {
+  return readAvatarNames();
+}
+
+export function saveAvatarName(id: string, name: string): void {
+  try {
+    const names = readAvatarNames();
+    const trimmed = name.trim().slice(0, AVATAR_NAME_MAX);
+    if (trimmed) names[id] = trimmed;
+    else delete names[id];
+    if (Object.keys(names).length > 0) {
+      localStorage.setItem(AVATAR_NAMES_KEY, JSON.stringify(names));
+    } else {
+      localStorage.removeItem(AVATAR_NAMES_KEY);
     }
   } catch {
     /* ignore */

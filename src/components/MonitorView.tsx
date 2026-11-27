@@ -291,7 +291,7 @@ export function MonitorView() {
           ))}
           {(metrics?.disks ?? []).length === 0 && (
             <div className="mon-table__row">
-              <span>{t("mon.noData")}</span>
+              <span>{t("mon.disksEmpty")}</span>
             </div>
           )}
         </div>

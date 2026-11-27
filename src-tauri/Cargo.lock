@@ -4809,7 +4809,7 @@ dependencies = [
 
 [[package]]
 name = "termix"
-version = "1.0.16"
+version = "1.0.17"
 dependencies = [
  "encoding_rs",
  "env_logger",

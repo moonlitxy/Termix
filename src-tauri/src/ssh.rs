@@ -967,7 +967,7 @@ impl SshManager {
                     },
                 }
             }
-            // 兜底：被动断开（网络中断等）时确保通知前端，便于自动重连
+            // 兜底：被动断开（网络中断等）时确保通知前端，便于更新连接状态
             if !user_closed {
                 let _ = app2.emit(
                     "connection-status",

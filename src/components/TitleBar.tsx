@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AVATAR_NAME_MAX,
   AVATARS,
   CUSTOM_AVATAR_ID,
+  DEFAULT_AVATAR,
   DEFAULT_AVATAR_ID,
   getAvatar,
   isDefaultAvatar,
   loadAvatarId,
+  loadAvatarNames,
   loadCustomAvatar,
   readAvatarFile,
   saveAvatarId,
+  saveAvatarName,
   saveCustomAvatar,
 } from "../lib/avatar";
 import { getLang, useT, type Lang } from "../lib/i18n";
@@ -31,8 +35,12 @@ export function TitleBar() {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [pickAvatarOpen, setPickAvatarOpen] = useState(false);
   const [avatarId, setAvatarId] = useState(loadAvatarId);
+  const [avatarNames, setAvatarNames] = useState<Record<string, string>>(loadAvatarNames);
   const [customAvatar, setCustomAvatar] = useState(loadCustomAvatar);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [nameEditing, setNameEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const [isWindows] = useState(isWindowsPlatform);
   const [curTheme, setCurTheme] = useState<"dark" | "light">(() => loadSettings().theme);
   const [curLang, setCurLang] = useState<Lang>(getLang);
@@ -42,19 +50,58 @@ export function TitleBar() {
     ? { ...selectedAvatar, src: customAvatar, name: t("avatar.custom"), bg: "#64748b" }
     : selectedAvatar;
   const avatarSrc = avatar.src;
+  const avatarName = (id: string) => t(`avatar.${id}`);
+  const defaultAvatarName =
+    avatar.id === DEFAULT_AVATAR_ID ? t("avatar.defaultName") : avatarName(avatar.id);
+  const displayAvatarName = avatarNames[avatar.id] ?? defaultAvatarName;
 
   useEffect(() => {
     setCurLang(getLang());
     setCurTheme(loadSettings().theme);
+    if (!avatarOpen) {
+      setPickAvatarOpen(false);
+      setNameEditing(false);
+    }
   }, [avatarOpen]);
+
+  useEffect(() => {
+    if (!nameEditing) return;
+    nameInputRef.current?.focus();
+    nameInputRef.current?.select();
+  }, [nameEditing]);
 
   const pickAvatar = (id: string) => {
     setAvatarId(id);
     saveAvatarId(id);
+    setNameEditing(false);
+    setNameDraft("");
   };
 
   const toggleAvatarPicker = () => {
     setPickAvatarOpen((open) => !open);
+  };
+
+  const startEditAvatarName = () => {
+    setNameDraft(displayAvatarName);
+    setNameEditing(true);
+  };
+
+  const commitAvatarName = () => {
+    const next = nameDraft.trim().slice(0, AVATAR_NAME_MAX);
+    saveAvatarName(avatar.id, next);
+    setAvatarNames((prev) => {
+      const names = { ...prev };
+      if (next) names[avatar.id] = next;
+      else delete names[avatar.id];
+      return names;
+    });
+    setNameEditing(false);
+    setNameDraft("");
+  };
+
+  const cancelEditAvatarName = () => {
+    setNameEditing(false);
+    setNameDraft("");
   };
 
   const uploadAvatar = async (file: File | undefined) => {
@@ -70,8 +117,6 @@ export function TitleBar() {
       toast.error(t("avatar.uploadFailed", { e: String(error) }));
     }
   };
-  const avatarName = (id: string) => t(`avatar.${id}`);
-
   const handleSwitchTheme = (theme: "dark" | "light") => {
     const s = loadSettings();
     const next = { ...s, theme };
@@ -144,7 +189,7 @@ export function TitleBar() {
               "titlebar__avatar" + (avatarOpen ? " is-active" : "")
             }
             type="button"
-            title={`${t("titlebar.userMenu")} (${avatarName(avatar.id)})`}
+            title={`${t("titlebar.userMenu")} (${displayAvatarName})`}
             aria-label={t("titlebar.userMenu")}
             style={{ background: avatar.bg }}
             onClick={() => setAvatarOpen((v) => !v)}
@@ -178,11 +223,36 @@ export function TitleBar() {
                   </div>
                   <div className="titlebar__avatar-meta-main">
                     <div className="titlebar__avatar-name-row">
-                      <span className="titlebar__avatar-name">{avatarName(avatar.id)}</span>
-                    </div>
-                    <div className="titlebar__avatar-sub">
-                      <Icon name="sparkles" size={11} />
-                      <span>v{__TERMIX_VERSION__}</span>
+                      {nameEditing ? (
+                        <input
+                          ref={nameInputRef}
+                          className="titlebar__avatar-name-input"
+                          value={nameDraft}
+                          maxLength={AVATAR_NAME_MAX}
+                          aria-label={t("avatar.editName")}
+                          onChange={(event) => setNameDraft(event.target.value)}
+                          onBlur={commitAvatarName}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              commitAvatarName();
+                            } else if (event.key === "Escape") {
+                              event.preventDefault();
+                              cancelEditAvatarName();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="titlebar__avatar-name"
+                          title={t("avatar.editName")}
+                          onClick={startEditAvatarName}
+                        >
+                          <span>{displayAvatarName}</span>
+                          <Icon name="edit" size={11} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -200,7 +270,7 @@ export function TitleBar() {
                         aria-label={t("avatar.default")}
                         onClick={() => pickAvatar(DEFAULT_AVATAR_ID)}
                       >
-                        <Icon name="user-round" size={20} />
+                        <img src={DEFAULT_AVATAR.src} alt="" />
                       </button>
                       {AVATARS.map((a) => (
                         <button

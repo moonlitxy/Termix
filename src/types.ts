@@ -90,8 +90,6 @@ export interface Tab {
   hidden?: boolean;
   /** 分屏 pane 标签：所属主标签 id */
   splitOf?: string;
-  /** 用户手动断开标记：置位后意外断开不再自动重连 */
-  manualClosed?: boolean;
 }
 
 // ---- v0.2: SFTP ----

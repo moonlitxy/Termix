@@ -52,6 +52,10 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     join(process.cwd(), "src/components/SftpView.tsx"),
     "utf-8"
   );
+  const terminalSrc = readFileSync(
+    join(process.cwd(), "src/components/TerminalView.tsx"),
+    "utf-8"
+  );
 
   it("GlobalTooltip 不再渲染指向触发元素的箭头", () => {
     expect(tooltipSrc).not.toContain("--tooltip-arrow-x");
@@ -125,6 +129,14 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     expect(monitorSrc).not.toContain("ipc.systemInfo");
   });
 
+  it("终端断开后不自动重连，右键菜单不弹悬浮提示", () => {
+    expect(terminalSrc).not.toContain("doReconnect");
+    expect(terminalSrc).not.toContain("term.copySel");
+    expect(terminalSrc).toMatch(
+      /status: "disconnected",[\s\S]{0,80}connectionId: undefined/
+    );
+  });
+
   it("左侧资源占用改为细轨道与右侧百分比", () => {
     expect(sidebarStatsSrc).toContain("sidebar-stat__track");
     expect(sidebarStatsSrc).toContain("sidebar-stat__pct");
@@ -155,5 +167,11 @@ describe("GlobalTooltip 与 CommandInput 交互回归", () => {
     expect(titlebarSrc).toContain("DEFAULT_AVATAR_ID");
     expect(titlebarSrc).not.toContain("titlebar__avatar-toggle");
     expect(cssSrc).not.toContain(".titlebar__avatar-toggle");
+  });
+
+  it("关闭头像弹窗后再次打开不保留头像列表", () => {
+    expect(titlebarSrc).toMatch(
+      /if \(!avatarOpen\) \{[\s\S]{0,120}setPickAvatarOpen\(false\);/
+    );
   });
 });

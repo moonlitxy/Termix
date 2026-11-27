@@ -383,7 +383,11 @@ export default function App() {
         if (tab?.connectionId && tab.shellId) {
           void ipc.terminalDestroy(tab.connectionId, tab.shellId);
           void ipc.sessionDisconnect(tab.connectionId);
-          st.updateTab(tab.id, { status: "disconnected", manualClosed: true });
+          st.updateTab(tab.id, {
+            status: "disconnected",
+            connectionId: undefined,
+            shellId: undefined,
+          });
         }
       } else if (e.key === "=" || e.key === "+") {
         e.preventDefault();
