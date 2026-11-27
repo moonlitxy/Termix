@@ -140,14 +140,14 @@ npm run tauri build
 ### 运行单元测试
 
 ```bash
-cd src-tauri && cargo test   # Rust 后端（66 个用例）
-npm test                     # 前端 Vitest（139 个用例）
+cd src-tauri && cargo test   # Rust 后端单元测试
+npm test                     # 前端 Vitest 单元测试
 npm run test:coverage        # 前端覆盖率报告（coverage/）
 npm run test:ssh             # 启动本地隔离 sshd 并跑 SSH/SFTP 集成测试
 scripts/check-en-ui.sh       # 真实构建产物英文界面自检（需本机 Chrome）
 ```
 
-> 网络类功能（SSH / SFTP）默认不跑集成测试；`npm run test:ssh` 会用本地隔离 sshd 验证连接、SFTP 与 Agent 认证。
+> 网络类功能（SSH / SFTP）默认不跑集成测试；`npm run test:ssh` 会用本地隔离 sshd 验证连接与 SFTP。Agent 认证用例默认跳过，需设置 `TERMIX_TEST_AGENT=1` 并自备已 `ssh-add` 的 ssh-agent。
 
 ---
 

@@ -92,7 +92,7 @@ describe("ipc command wrappers", () => {
       ["masterLock", []],
       ["masterClear", ["pass"]],
       ["checkUpdate", [null, null]],
-      ["downloadUpdate", ["url", "file", null]],
+      ["downloadUpdate", ["url", "file", "sha256:" + "a".repeat(64), null]],
       ["authRespond", ["auth-1", ["code"]]],
       ["authCancel", ["auth-1"]],
       ["sshConfigReadDefault", []],
@@ -119,6 +119,17 @@ describe("ipc command wrappers", () => {
         "check_update",
       ])
     );
+  });
+
+  it("downloadUpdate 透传 digest 与代理", () => {
+    const digest = "sha256:" + "a".repeat(64);
+    ipc.downloadUpdate("https://example.com/a.dmg", "a.dmg", digest, null);
+    expect(mocks.invoke).toHaveBeenCalledWith("download_update", {
+      url: "https://example.com/a.dmg",
+      fileName: "a.dmg",
+      digest,
+      proxy: null,
+    });
   });
 
   it("事件监听封装传递载荷并返回 unlisten", async () => {

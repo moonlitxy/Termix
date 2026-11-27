@@ -84,7 +84,12 @@ export const useUpdate = create<UpdateState>((set, get) => ({
     set({ downloading: true, progress: 0, downloadedPath: null, error: null });
     try {
       const ep = currentEndpoint();
-      await ipc.downloadUpdate(info.assetUrl, info.assetName, ep.proxy);
+      await ipc.downloadUpdate(
+        info.assetUrl,
+        info.assetName,
+        info.assetDigest ?? "",
+        ep.proxy
+      );
     } catch (e) {
       set({ downloading: false, error: String(e) });
     }

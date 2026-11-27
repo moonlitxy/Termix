@@ -184,8 +184,12 @@ export const ipc = {
   // ---- 软件更新 ----
   checkUpdate: (mirror: string | null, proxy: string | null) =>
     invoke<UpdateInfo>("check_update", { mirror, proxy }),
-  downloadUpdate: (url: string, fileName: string, proxy: string | null) =>
-    invoke<void>("download_update", { url, fileName, proxy }),
+  downloadUpdate: (
+    url: string,
+    fileName: string,
+    digest: string,
+    proxy: string | null
+  ) => invoke<void>("download_update", { url, fileName, digest, proxy }),
   authRespond: (authId: string, responses: string[]) =>
     invoke<void>("auth_respond", { authId, responses }),
   authCancel: (authId: string) => invoke<void>("auth_cancel", { authId }),
