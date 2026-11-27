@@ -55,7 +55,7 @@ const en: Dict = {
 /* ---- 标题栏 / 活动栏 / 状态栏 ---- */
 const zhChrome: Dict = {
   "titlebar.search": "搜索",
-  "titlebar.searchTitle": "全局搜索（{mod}K）",
+  "titlebar.searchTitle": "全局搜索（{key}）",
   "titlebar.settings": "设置",
   "titlebar.userMenu": "用户菜单",
   "titlebar.prefs": "系统偏好设置",
@@ -92,7 +92,7 @@ const zhChrome: Dict = {
 
 const enChrome: Dict = {
   "titlebar.search": "Search",
-  "titlebar.searchTitle": "Global search ({mod}K)",
+  "titlebar.searchTitle": "Global search ({key})",
   "titlebar.settings": "Settings",
   "titlebar.userMenu": "User menu",
   "titlebar.prefs": "Preferences",
@@ -486,6 +486,7 @@ const zhSession: Dict = {
   "session.newGroup": "新建分组",
   "session.groupNamePh": "分组名称",
   "session.empty": "暂无会话，点击 + 新建",
+  "session.noRecent": "暂无最近连接",
   "session.recent": "最近连接",
   "session.viaJump": "经跳板",
   "session.viaJumpTitle": "经跳板机连接",
@@ -551,6 +552,7 @@ const enSession: Dict = {
   "session.newGroup": "New group",
   "session.groupNamePh": "Group name",
   "session.empty": "No sessions, click + to create",
+  "session.noRecent": "No recent connections",
   "session.recent": "Recent",
   "session.viaJump": "via jump",
   "session.viaJumpTitle": "Via jump host",

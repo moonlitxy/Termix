@@ -2354,7 +2354,7 @@ button.sftp-head__cell {
   font-family: var(--font-family-mono);
 }
 
-/* 终端内搜索行（Ctrl+F / 右键查找展开） */
+/* 终端内搜索行（搜索快捷键 / 右键查找展开） */
 .sftp-search {
   display: flex;
   align-items: center;

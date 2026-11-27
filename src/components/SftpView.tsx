@@ -228,7 +228,7 @@ export function SftpView() {
   const [colWidths, setColWidths] = useState<Record<ColKey, number> | null>(null);
   const customized = useRef(false);
 
-  // 终端内搜索（Ctrl+F / 右键查找）
+  // 终端内搜索（应用搜索快捷键 / 右键查找）
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -539,7 +539,7 @@ export function SftpView() {
     };
   }, []);
 
-  // 搜索入口：Ctrl+F 与终端右键「查找」统一触发
+  // 搜索入口：应用搜索快捷键与终端右键「查找」统一触发
   useEffect(() => {
     const onSearch = () => {
       const st = useApp.getState();

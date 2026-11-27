@@ -20,6 +20,7 @@ import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { WindowControls } from "./WindowControls";
 import { isWindowsPlatform, windowControls } from "../lib/windowControls";
+import { appShortcutKey } from "../lib/shortcuts";
 import { useUpdate } from "../store/update";
 import { toast } from "../store/feedback";
 import { ipc } from "../lib/ipc";
@@ -44,7 +45,7 @@ export function TitleBar() {
   const [isWindows] = useState(isWindowsPlatform);
   const [curTheme, setCurTheme] = useState<"dark" | "light">(() => loadSettings().theme);
   const [curLang, setCurLang] = useState<Lang>(getLang);
-  const shortcutMod = isWindows ? "Ctrl" : "⌘";
+  const searchShortcut = appShortcutKey("K");
   const selectedAvatar = getAvatar(avatarId);
   const avatar = selectedAvatar.id === CUSTOM_AVATAR_ID && customAvatar
     ? { ...selectedAvatar, src: customAvatar, name: t("avatar.custom"), bg: "#64748b" }
@@ -163,12 +164,12 @@ export function TitleBar() {
         <button
           className="titlebar__search"
           type="button"
-          title={t("titlebar.searchTitle", { mod: shortcutMod })}
+          title={t("titlebar.searchTitle", { key: searchShortcut })}
           onClick={openPalette}
         >
           <Icon name="search" size={14} />
           <span>{t("titlebar.search")}</span>
-          <span className="ds-kbd">{shortcutMod}K</span>
+          <span className="ds-kbd">{searchShortcut}</span>
         </button>
       </div>
       <div className="titlebar__right">

@@ -70,7 +70,7 @@ interface AppState {
   rightPanelExpanded: boolean;
   /** 悬浮传输窗口是否展开 */
   transferWindowOpen: boolean;
-  /** 底部命令输入条展开状态：默认隐藏，Ctrl+L 唤出 */
+  /** 底部命令输入条展开状态：默认隐藏，应用快捷键唤出 */
   commandInputOpen: boolean;
   /** 各标签的重连触发计数：请求重新连接时自增，终端视图据此重建连接 */
   reconnectNonce: Record<string, number>;

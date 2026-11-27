@@ -5,6 +5,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
+import { isWindowsPlatform } from "../lib/windowControls";
 import { ipc, onConnectionStatus, HISTORY_CHANGED_EVENT } from "../lib/ipc";
 import { subscribeTerminalOutput } from "../lib/terminalOutput";
 import { terminalRegistry } from "../lib/terminalRegistry";
@@ -140,10 +141,14 @@ export function TerminalView({ tab }: { tab: Tab }) {
       }
       terminal.focus();
     };
-    // 终端内标准复制/粘贴快捷键（macOS Cmd+C/V，Windows/Linux Ctrl+C/V 或 Ctrl+Shift+C/V）
+    // 终端内复制/粘贴：macOS 只用 Cmd+C/V，Windows 只用 Ctrl+C/V（含 Ctrl+Shift+C/V）
+    const mac = !isWindowsPlatform();
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
-      if (!event.metaKey && !event.ctrlKey) return true;
+      const mod = mac ? event.metaKey : event.ctrlKey;
+      if (!mod || event.altKey) return true;
+      if (mac && event.ctrlKey) return true;
+      if (!mac && event.metaKey) return true;
       const key = event.key.toLowerCase();
       if (key === "c" && terminal.hasSelection()) {
         event.preventDefault();
@@ -326,6 +331,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
           shellId,
           status: "connected",
         });
+        void useApp.getState().loadSessions();
       } catch (e) {
         if (cancelled) return;
         const msg = String(e);
@@ -538,7 +544,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     t.focus();
   };
 
-  // 查找：复用工具栏的终端内搜索（Ctrl+F 同一入口）
+  // 查找：复用工具栏的终端内搜索（应用搜索快捷键同一入口）
   const handleFind = () => {
     closeCtxMenu();
     document.dispatchEvent(new CustomEvent("termix:search"));

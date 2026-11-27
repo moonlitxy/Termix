@@ -1,5 +1,5 @@
 import { useApp } from "../store/app";
-import { isWindowsPlatform } from "../lib/windowControls";
+import { appShortcutKey } from "../lib/shortcuts";
 import { Icon } from "./Icon";
 import { broadcastTargets } from "../lib/terminalBroadcast";
 import { useT } from "../lib/i18n";
@@ -7,7 +7,8 @@ import { loadSettings, saveSettings } from "../lib/settings";
 
 export function StatusBar() {
   const t = useT();
-  const shortcutMod = isWindowsPlatform() ? "Ctrl" : "⌘";
+  const newSessionShortcut = appShortcutKey("T");
+  const disconnectShortcut = appShortcutKey("D");
   const tabs = useApp((s) => s.tabs);
   const activeTabId = useApp((s) => s.activeTabId);
   const transfers = useApp((s) => s.transfers);
@@ -88,10 +89,10 @@ export function StatusBar() {
           )}
         </button>
         <span className="status-bar__shortcut">
-          {t("statusbar.terminal")} <span className="ds-kbd">{shortcutMod}T</span> {t("statusbar.newSession")}
+          {t("statusbar.terminal")} <span className="ds-kbd">{newSessionShortcut}</span> {t("statusbar.newSession")}
         </span>
         <span className="status-bar__shortcut">
-          {t("statusbar.disconnect")} <span className="ds-kbd">{shortcutMod}D</span>
+          {t("statusbar.disconnect")} <span className="ds-kbd">{disconnectShortcut}</span>
         </span>
       </div>
     </div>

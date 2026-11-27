@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
 import { getLang, useT } from "../lib/i18n";
+import { appShortcutKey, copyShortcutKey, zoomShortcutLabel } from "../lib/shortcuts";
 
 interface Faq {
   q: string;
@@ -50,15 +51,17 @@ const BLOCKS: HelpBlock[] = [
     ],
   },
   {
+    id: "shortcuts",
     icon: "key",
     title: "快捷键",
+    // 下方 keys 是 macOS 兜底值，HelpView 渲染时会按当前系统覆盖
     kbd: [
-      { label: "全局搜索", keys: "⌘ / Ctrl + K" },
-      { label: "新建连接", keys: "⌘ / Ctrl + T" },
-      { label: "断开当前连接", keys: "⌘ / Ctrl + D" },
-      { label: "底部命令输入", keys: "Ctrl + L" },
-      { label: "终端字号缩放", keys: "Ctrl + / -" },
-      { label: "终端内搜索", keys: "Ctrl + F" },
+      { label: "全局搜索", keys: "⌘K" },
+      { label: "新建连接", keys: "⌘T" },
+      { label: "断开当前连接", keys: "⌘D" },
+      { label: "底部命令输入", keys: "⌘L" },
+      { label: "终端字号缩放", keys: "⌘ + / -" },
+      { label: "终端内搜索", keys: "⌘F" },
       { label: "命令历史", keys: "↑ / ↓" },
     ],
   },
@@ -202,15 +205,16 @@ const BLOCKS_EN: HelpBlock[] = [
     ],
   },
   {
+    id: "shortcuts",
     icon: "key",
     title: "Shortcuts",
     kbd: [
-      { label: "Global search", keys: "⌘ / Ctrl + K" },
-      { label: "New connection", keys: "⌘ / Ctrl + T" },
-      { label: "Disconnect", keys: "⌘ / Ctrl + D" },
-      { label: "Bottom command input", keys: "Ctrl + L" },
-      { label: "Terminal font zoom", keys: "Ctrl + / -" },
-      { label: "Search in terminal", keys: "Ctrl + F" },
+      { label: "Global search", keys: "⌘K" },
+      { label: "New connection", keys: "⌘T" },
+      { label: "Disconnect", keys: "⌘D" },
+      { label: "Bottom command input", keys: "⌘L" },
+      { label: "Terminal font zoom", keys: "⌘ + / -" },
+      { label: "Search in terminal", keys: "⌘F" },
       { label: "Command history", keys: "↑ / ↓" },
     ],
   },
@@ -327,6 +331,33 @@ const BLOCKS_EN: HelpBlock[] = [
 export function HelpView() {
   const t = useT();
   const helpAnchor = useApp((s) => s.helpAnchor);
+  const lang = getLang();
+  const shortcutKeys = [
+    appShortcutKey("K"),
+    appShortcutKey("T"),
+    appShortcutKey("D"),
+    appShortcutKey("L"),
+    zoomShortcutLabel(),
+    appShortcutKey("F"),
+    "↑ / ↓",
+  ];
+  const formatHelpText = (text: string) =>
+    text
+      .replace("⌘/Ctrl+T", appShortcutKey("T"))
+      .replace("Ctrl+L", appShortcutKey("L"))
+      .replace("Cmd/Ctrl+C", copyShortcutKey())
+      .replace("Ctrl+F", appShortcutKey("F"));
+  const blocks = (lang === "en" ? BLOCKS_EN : BLOCKS).map((b) => ({
+    ...b,
+    items: b.items?.map(formatHelpText),
+    kbd:
+      b.id === "shortcuts"
+        ? b.kbd?.map((item, index) => ({
+            ...item,
+            keys: shortcutKeys[index] ?? item.keys,
+          }))
+        : b.kbd,
+  }));
 
   // 标题栏「关于 Termix」跳转帮助页后，定位到「关于」区块（含版本信息）
   useEffect(() => {
@@ -342,7 +373,7 @@ export function HelpView() {
         <span className="fw-toolbar__title">{t("help.title")}</span>
       </div>
       <div className="st-body">
-        {(getLang() === "en" ? BLOCKS_EN : BLOCKS).map((b) => (
+        {blocks.map((b) => (
           <div
             className="ds-card st-section"
             key={b.title}

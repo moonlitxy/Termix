@@ -36,7 +36,7 @@ import {
   TERMINAL_FOCUS_CHANGED_EVENT,
   terminalRegistry,
 } from "./lib/terminalRegistry";
-import { isWindowsPlatform } from "./lib/windowControls";
+import { appShortcutKey, isAppShortcut, isZoomShortcut } from "./lib/shortcuts";
 import { useUpdate } from "./store/update";
 import { toast } from "./store/feedback";
 import { selectWorkspaceTargetTab } from "./lib/workspaceTarget";
@@ -125,7 +125,6 @@ export default function App() {
   const stackRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<{ startY: number; startRatio: number } | null>(null);
   const [panelResizing, setPanelResizing] = useState(false);
-  const [isWindows] = useState(isWindowsPlatform);
   const [sftpRatio, setSftpRatio] = useState(() =>
     Math.min(0.8, Math.max(0.15, loadSettings().sftpPanelRatio || 0.4))
   );
@@ -365,18 +364,16 @@ export default function App() {
 
   const hasTabs = tabs.length > 0;
 
-  // 全局快捷键：⌘/Ctrl+T 新建连接、⌘/Ctrl+D 断开当前、Ctrl+/- 缩放终端字号
+  // 全局快捷键：macOS Cmd+key，Windows Ctrl+Shift+key，避免抢占终端控制键
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      if (e.key.toLowerCase() === "k") {
+      if (isAppShortcut(e, "k")) {
         e.preventDefault();
         useApp.getState().openPalette();
-      } else if (e.key.toLowerCase() === "t") {
+      } else if (isAppShortcut(e, "t")) {
         e.preventDefault();
         useApp.getState().openNewConnection();
-      } else if (e.key.toLowerCase() === "d") {
+      } else if (isAppShortcut(e, "d")) {
         e.preventDefault();
         const st = useApp.getState();
         const tab = st.tabs.find((t) => t.id === st.activeTabId);
@@ -389,16 +386,16 @@ export default function App() {
             shellId: undefined,
           });
         }
-      } else if (e.key === "=" || e.key === "+") {
+      } else if (isZoomShortcut(e, "=") || isZoomShortcut(e, "+")) {
         e.preventDefault();
         adjustFontSize(1);
-      } else if (e.key === "-") {
+      } else if (isZoomShortcut(e, "-")) {
         e.preventDefault();
         adjustFontSize(-1);
-      } else if (e.key.toLowerCase() === "f") {
+      } else if (isAppShortcut(e, "f")) {
         e.preventDefault();
         document.dispatchEvent(new CustomEvent("termix:search"));
-      } else if (e.key.toLowerCase() === "l") {
+      } else if (isAppShortcut(e, "l")) {
         e.preventDefault();
         useApp.getState().setCommandInputOpen(true);
       }
@@ -533,7 +530,7 @@ export default function App() {
                   {t("session.newConnTitle")}
                 </button>
                 <div className="workspace__empty-shortcut">
-                  <span className="ds-kbd">{isWindows ? "Ctrl+T" : "⌘T"}</span>{" "}
+                  <span className="ds-kbd">{appShortcutKey("T")}</span>{" "}
                   {t("app.quickNew")}
                 </div>
               </div>

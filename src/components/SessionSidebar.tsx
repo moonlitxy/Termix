@@ -23,6 +23,7 @@ interface GroupCtxMenu {
 export function SessionSidebar() {
   const t = useT();
   const sessions = useApp(selectFilteredSessions);
+  const searchKeyword = useApp((s) => s.searchKeyword);
   const groups = useApp((s) => s.groups);
   const tabs = useApp((s) => s.tabs);
   const openNewConnection = useApp((s) => s.openNewConnection);
@@ -68,6 +69,14 @@ export function SessionSidebar() {
   const menuReturnRef = useRef<HTMLElement | null>(null);
   const menuPosition = useClampedMenuPosition(ctx ?? groupCtx, menuRef);
   const draggingSession = sessions.find((s) => s.id === draggingSessionId);
+  const searching = searchKeyword.trim().length > 0;
+  const ungroupedId = "__ungrouped__";
+  const ungroupedSessions = sessions.filter((s) => !s.groupId);
+  const recentSessions = sessions
+    .filter((s) => s.lastConnectedAt)
+    .slice()
+    .sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
+    .slice(0, 2);
 
   // 导出会话（JSON 备份下载）
   const handleExport = async () => {
@@ -338,8 +347,9 @@ export function SessionSidebar() {
     }
   };
 
-  // 分组默认展开，折叠状态按分组独立记录
-  const isGroupOpen = (id: string) => groupsOpen[id] !== false;
+  // 分组默认折叠；搜索时临时展开，避免结果藏在折叠组里
+  const isGroupOpen = (id: string) => searching || groupsOpen[id] === true;
+  const ungroupedOpen = isGroupOpen(ungroupedId);
 
   const renderSessionRow = (s: Session, child = false) => {
     const state = sessionState(s.id);
@@ -456,8 +466,10 @@ export function SessionSidebar() {
         <div className="session-sidebar__section-title">{t("session.recent")}</div>
         {sessions.length === 0 ? (
           <div className="session-sidebar__empty">{t("session.empty")}</div>
+        ) : recentSessions.length === 0 ? (
+          <div className="session-sidebar__empty">{t("session.noRecent")}</div>
         ) : (
-          sessions.map((s) => renderSessionRow(s))
+          recentSessions.map((s) => renderSessionRow(s))
         )}
 
         <div className="session-sidebar__section-head">
@@ -505,63 +517,93 @@ export function SessionSidebar() {
             </div>
           </div>
         )}
-        {groups.length === 0 ? (
+        {groups.length === 0 && ungroupedSessions.length === 0 ? (
           <div className="session-sidebar__empty-hint">{t("session.noGroups")}</div>
         ) : (
-          groups.map((g) => {
-            const open = isGroupOpen(g.id);
-            const groupSessions = sessions.filter((s) => s.groupId === g.id);
-            return (
-              <div key={g.id}>
+          <>
+            {groups.map((g) => {
+              const open = isGroupOpen(g.id);
+              const groupSessions = sessions.filter((s) => s.groupId === g.id);
+              return (
+                <div key={g.id}>
+                  <div
+                    className={
+                      "group-row" +
+                      (dragOverGroupId === g.id ? " is-drop-target" : "")
+                    }
+                    onClick={() =>
+                      setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
+                    }
+                    onDragOver={(e) => handleGroupDragOver(e, g)}
+                    onDragLeave={(e) => handleGroupDragLeave(e, g)}
+                    onDrop={(e) => void handleGroupDrop(e, g)}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={open}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      setGroupsOpen((m) => ({ ...m, [g.id]: !open }));
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setGroupCtx({ x: e.clientX, y: e.clientY, group: g });
+                    }}
+                  >
+                    <span className="session-row__chevron">
+                      <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+                    </span>
+                    <span style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
+                      <Icon name="folder" size={14} />
+                    </span>
+                    <span className="group-row__name">{g.name}</span>
+                    <span className="ds-tag ds-tag--count">{groupSessions.length}</span>
+                    <button
+                      className="group-row__add"
+                      type="button"
+                      title={t("session.newConnInGroup", { n: g.name })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openNewConnection(undefined, g.id);
+                      }}
+                    >
+                      <Icon name="plus" size={12} />
+                    </button>
+                  </div>
+                  {open && groupSessions.map((s) => renderSessionRow(s, true))}
+                </div>
+              );
+            })}
+            {ungroupedSessions.length > 0 && (
+              <div>
                 <div
-                  className={
-                    "group-row" +
-                    (dragOverGroupId === g.id ? " is-drop-target" : "")
-                  }
+                  className="group-row"
                   onClick={() =>
-                    setGroupsOpen((m) => ({ ...m, [g.id]: !open }))
+                    setGroupsOpen((m) => ({ ...m, [ungroupedId]: !ungroupedOpen }))
                   }
-                  onDragOver={(e) => handleGroupDragOver(e, g)}
-                  onDragLeave={(e) => handleGroupDragLeave(e, g)}
-                  onDrop={(e) => void handleGroupDrop(e, g)}
                   role="button"
                   tabIndex={0}
-                  aria-expanded={open}
+                  aria-expanded={ungroupedOpen}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter" && e.key !== " ") return;
                     e.preventDefault();
-                    setGroupsOpen((m) => ({ ...m, [g.id]: !open }));
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setGroupCtx({ x: e.clientX, y: e.clientY, group: g });
+                    setGroupsOpen((m) => ({ ...m, [ungroupedId]: !ungroupedOpen }));
                   }}
                 >
                   <span className="session-row__chevron">
-                    <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+                    <Icon name={ungroupedOpen ? "chevron-down" : "chevron-right"} size={12} />
                   </span>
                   <span style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
                     <Icon name="folder" size={14} />
                   </span>
-                  <span className="group-row__name">{g.name}</span>
-                  <span className="ds-tag ds-tag--count">{groupSessions.length}</span>
-                  <button
-                    className="group-row__add"
-                    type="button"
-                    title={t("session.newConnInGroup", { n: g.name })}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openNewConnection(undefined, g.id);
-                    }}
-                  >
-                    <Icon name="plus" size={12} />
-                  </button>
+                  <span className="group-row__name">{t("session.ungrouped")}</span>
+                  <span className="ds-tag ds-tag--count">{ungroupedSessions.length}</span>
                 </div>
-                {open && groupSessions.map((s) => renderSessionRow(s, true))}
+                {ungroupedOpen && ungroupedSessions.map((s) => renderSessionRow(s, true))}
               </div>
-            );
-          })
+            )}
+          </>
         )}
         {draggingSession?.groupId && (
           <div

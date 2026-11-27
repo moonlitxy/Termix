@@ -42,6 +42,20 @@ describe("isWindowsPlatform", () => {
     });
     expect(isWindowsPlatform()).toBe(false);
   });
+
+  it("缺少 UA 时按 platform 识别 Windows", () => {
+    vi.stubGlobal("navigator", { userAgent: "", platform: "Win32" });
+    expect(isWindowsPlatform()).toBe(true);
+  });
+
+  it("userAgentData.platform 识别 Windows", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0",
+      platform: "",
+      userAgentData: { platform: "Windows" },
+    });
+    expect(isWindowsPlatform()).toBe(true);
+  });
 });
 
 describe("windowControls", () => {
