@@ -47,9 +47,23 @@ pub fn from_hex(s: &str) -> Result<Vec<u8>, String> {
     if s.len() % 2 != 0 {
         return Err("invalid hex".into());
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
+    fn nibble(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+    // 按字节解析而不是按字符边界切片：输入来自数据库/导入文件，
+    // 含多字节 UTF-8 时必须返回错误而不是 panic。
+    s.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = nibble(pair[0]).ok_or_else(|| "invalid hex".to_string())?;
+            let lo = nibble(pair[1]).ok_or_else(|| "invalid hex".to_string())?;
+            Ok(hi << 4 | lo)
+        })
         .collect()
 }
 
@@ -127,6 +141,14 @@ mod tests {
         let ct = encrypt(&key, "data");
         let wrong = derive_key("pass-b", b"salt");
         assert!(decrypt(&wrong, &ct).is_err());
+    }
+
+    #[test]
+    fn from_hex_rejects_non_ascii_without_panic() {
+        // "a中" 字节长度为偶数，但按字节偏移切片会落在字符中间
+        assert!(from_hex("a中").is_err());
+        assert!(from_hex("ab").is_ok());
+        assert_eq!(from_hex("00ff").unwrap(), vec![0x00, 0xff]);
     }
 
     #[test]

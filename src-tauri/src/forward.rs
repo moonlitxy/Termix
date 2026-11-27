@@ -19,8 +19,9 @@ struct ActiveForward {
     remote_bind: Option<(String, String, u32)>,
 }
 
-/// 完成 SOCKS5 无认证握手，解析 CONNECT 目标地址。返回 (host, port)。
-async fn socks5_handshake(socket: &mut TcpStream) -> Result<(String, u16), String> {
+/// 完成 SOCKS5 无认证协商并解析 CONNECT 目标地址（不发送连接结果）。
+/// 成功/失败回复由调用方在 SSH 隧道建立后再发送。
+async fn socks5_negotiate(socket: &mut TcpStream) -> Result<(String, u16), String> {
     // 版本与方法协商：05 01 00
     let mut buf = [0u8; 2];
     socket.read_exact(&mut buf).await.map_err(|e| format!("read greeting: {e}"))?;
@@ -68,12 +69,23 @@ async fn socks5_handshake(socket: &mut TcpStream) -> Result<(String, u16), Strin
     let mut port = [0u8; 2];
     socket.read_exact(&mut port).await.map_err(|e| format!("read port: {e}"))?;
     let port = u16::from_be_bytes(port);
-    // 回复成功：05 00 00 01 0.0.0.0 0
+    Ok((host, port))
+}
+
+/// 隧道已建立：回复 SOCKS5 成功（05 00 00 01 0.0.0.0 0）。
+async fn socks5_reply_success(socket: &mut TcpStream) -> Result<(), String> {
     socket
         .write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
         .await
-        .map_err(|e| format!("write reply: {e}"))?;
-    Ok((host, port))
+        .map_err(|e| format!("write reply: {e}"))
+}
+
+/// 隧道建立失败：回复 SOCKS5 错误码（如 0x05 connection refused）。
+async fn socks5_reply_error(socket: &mut TcpStream, code: u8) -> Result<(), String> {
+    socket
+        .write_all(&[5, code, 0, 1, 0, 0, 0, 0, 0, 0])
+        .await
+        .map_err(|e| format!("write reply: {e}"))
 }
 
 impl ForwardService {
@@ -148,7 +160,7 @@ impl ForwardService {
                         tokio::spawn(async move {
                             // 动态代理：先完成 SOCKS5 握手获取目标地址
                             let (target_host, target_port) = if dyn_flag {
-                                match socks5_handshake(&mut socket).await {
+                                match socks5_negotiate(&mut socket).await {
                                     Ok(t) => {
                                         log::debug!(
                                             "forward: rule {lid} socks5 CONNECT -> {}:{}",
@@ -171,6 +183,9 @@ impl ForwardService {
                             {
                                 Ok(c) => c,
                                 Err(e) => {
+                                    if dyn_flag {
+                                        let _ = socks5_reply_error(&mut socket, 0x05).await;
+                                    }
                                     log::error!(
                                         "forward: rule {lid} open direct-tcpip to {target_host}:{target_port} failed: {e}"
                                     );
@@ -180,6 +195,13 @@ impl ForwardService {
                             log::debug!(
                                 "forward: rule {lid} tunnel established to {target_host}:{target_port}"
                             );
+                            // 只有隧道真正建立后才告诉 SOCKS5 客户端连接成功
+                            if dyn_flag {
+                                if let Err(e) = socks5_reply_success(&mut socket).await {
+                                    log::debug!("forward: rule {lid} socks5 reply failed: {e}");
+                                    return;
+                                }
+                            }
                             let mut stream = channel.into_stream();
                             match copy_bidirectional(&mut socket, &mut stream).await {
                                 Ok((to_srv, to_cli)) => {
@@ -298,5 +320,78 @@ impl ForwardService {
                 log::info!("forward: dropping remote bind {host}:{port} (connection closing)");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn socks5_negotiate_defers_success_until_tunnel_is_ready() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let client = tokio::spawn(async move {
+            let mut c = TcpStream::connect(addr).await.unwrap();
+            c.write_all(&[5, 1, 0]).await.unwrap();
+            let mut method = [0u8; 2];
+            c.read_exact(&mut method).await.unwrap();
+            assert_eq!(method, [5, 0]);
+
+            let mut req = vec![5, 1, 0, 3, 11];
+            req.extend_from_slice(b"example.com");
+            req.extend_from_slice(&[0, 80]);
+            c.write_all(&req).await.unwrap();
+
+            // 隧道尚未建立，协商阶段不得收到成功回复
+            let mut buf = [0u8; 10];
+            let early = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                c.read(&mut buf),
+            )
+            .await;
+            assert!(early.is_err(), "SOCKS5 success must wait for tunnel");
+            ready_tx.send(()).unwrap();
+
+            let mut reply = [0u8; 10];
+            c.read_exact(&mut reply).await.unwrap();
+            assert_eq!(reply, [5, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
+        });
+
+        let (mut server, _) = listener.accept().await.unwrap();
+        let (host, port) = socks5_negotiate(&mut server).await.unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        // 等客户端确认协商阶段没有收到成功回复，再显式回复
+        ready_rx.await.unwrap();
+        socks5_reply_success(&mut server).await.unwrap();
+        client.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn socks5_reply_error_uses_failure_code() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = tokio::spawn(async move {
+            let mut c = TcpStream::connect(addr).await.unwrap();
+            c.write_all(&[5, 1, 0]).await.unwrap();
+            let mut method = [0u8; 2];
+            c.read_exact(&mut method).await.unwrap();
+            c.write_all(&[5, 1, 0, 1, 127, 0, 0, 1, 0, 80]).await.unwrap();
+            let mut reply = [0u8; 10];
+            c.read_exact(&mut reply).await.unwrap();
+            reply
+        });
+
+        let (mut server, _) = listener.accept().await.unwrap();
+        let _ = socks5_negotiate(&mut server).await.unwrap();
+        socks5_reply_error(&mut server, 0x05).await.unwrap();
+        let reply = client.await.unwrap();
+        assert_eq!(reply[0], 5);
+        assert_eq!(reply[1], 0x05);
     }
 }

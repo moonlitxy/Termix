@@ -5,7 +5,8 @@ import { SearchAddon } from "@xterm/addon-search";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "./Icon";
 import { useApp } from "../store/app";
-import { ipc, onTerminalOutput, onConnectionStatus, HISTORY_CHANGED_EVENT } from "../lib/ipc";
+import { ipc, onConnectionStatus, HISTORY_CHANGED_EVENT } from "../lib/ipc";
+import { subscribeTerminalOutput } from "../lib/terminalOutput";
 import { terminalRegistry } from "../lib/terminalRegistry";
 import { confirmDialog } from "../store/feedback";
 import { loadSettings, SETTINGS_CHANGE_EVENT } from "../lib/settings";
@@ -157,15 +158,12 @@ export function TerminalView({ tab }: { tab: Tab }) {
       return true;
     });
 
-    // 订阅终端输出
-    onTerminalOutput((e) => {
-      if (e.tabId === tab.id && !cancelled) {
-        terminal.write(e.data);
-      }
-    }).then((un) => {
-      if (cancelled) un();
-      else unlisteners.push(un);
-    });
+    // 订阅终端输出：共享订阅按 tabId 分发，避免每个标签都处理全量事件
+    unlisteners.push(
+      subscribeTerminalOutput(tab.id, (e) => {
+        if (!cancelled) terminal.write(e.data);
+      })
+    );
 
     // 自动重连：意外断开后最多重试 3 次（用户手动断开不会触发）
     let reconnectCount = 0;

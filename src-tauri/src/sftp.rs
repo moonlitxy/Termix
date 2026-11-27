@@ -2006,6 +2006,15 @@ fn safe_child_name(name: &str) -> Option<&str> {
     Some(name)
 }
 
+/// 删除时必须保护文件系统根目录（parent 为空）和用户主目录，
+/// 不依赖 home_dir() 是否可用。
+fn is_protected_delete_path(p: &Path) -> bool {
+    if p.parent().is_none() {
+        return true;
+    }
+    std::env::home_dir().is_some_and(|home| p == home)
+}
+
 /// 下载落点必须是绝对文件路径，且不含 "." / ".." 组件或末尾分隔符。
 fn ensure_safe_download_target(local_path: &str) -> Result<(), String> {
     if local_path.ends_with('/') || local_path.ends_with('\\') {
@@ -2053,10 +2062,8 @@ pub fn local_rename(old_path: &str, new_path: &str) -> Result<(), String> {
 
 pub fn local_delete(path: &str, is_dir: bool) -> Result<(), String> {
     let p = ensure_safe_local_path(path)?;
-    if let Some(home) = std::env::home_dir() {
-        if p == home || p == PathBuf::from("/") {
-            return Err("refusing to delete protected path".into());
-        }
+    if is_protected_delete_path(&p) {
+        return Err("refusing to delete protected path".into());
     }
     if is_dir {
         let empty = std::fs::read_dir(&p)
@@ -2406,6 +2413,12 @@ mod tests {
         assert_eq!(safe_child_name(""), None);
         assert_eq!(safe_child_name("a/b"), None);
         assert_eq!(safe_child_name("a\\b"), None);
+    }
+
+    #[test]
+    fn protected_delete_path_always_includes_root() {
+        assert!(is_protected_delete_path(Path::new("/")));
+        assert!(!is_protected_delete_path(Path::new("/tmp/not-protected")));
     }
 
     #[test]

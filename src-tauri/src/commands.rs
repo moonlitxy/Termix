@@ -378,7 +378,8 @@ pub fn master_clear(master: String, state: State<'_, AppState>) -> Result<(), St
 
 #[tauri::command]
 pub async fn session_list(state: State<'_, AppState>) -> Result<Vec<Session>, String> {
-    state.db.list_sessions()
+    let sessions = state.db.list_sessions()?;
+    Ok(sessions_for_ui(sessions, state.master.key().as_ref()))
 }
 
 /// 同一分组（无分组视为同一组）内连接名称唯一性校验。
@@ -429,8 +430,24 @@ pub async fn session_update(
 ) -> Result<(), String> {
     ensure_session_name_unique(&state.db, &input.name, input.group_id.as_deref(), Some(&id))?;
     if state.db.get_setting("master_salt").is_some() {
-        let key = state.master.key().ok_or_else(|| "已设置主密码，请先在设置中解锁".to_string())?;
-        encrypt_session_fields(&mut input, &key);
+        match state.master.key() {
+            Some(key) => encrypt_session_fields(&mut input, &key),
+            None => {
+                // 锁定状态：允许改名称/端口等字段，但不允许改写或清空密码
+                if has_plaintext_secret(&input) {
+                    return Err(
+                        "已设置主密码，请先在设置中解锁后再修改密码".to_string()
+                    );
+                }
+                let existing = state
+                    .db
+                    .list_sessions()?
+                    .into_iter()
+                    .find(|s| s.id == id)
+                    .ok_or_else(|| "session not found".to_string())?;
+                preserve_locked_secrets(&existing, &mut input);
+            }
+        }
     }
     state.db.update_session(&id, input)?;
     snapshot_sessions(&state);
@@ -491,6 +508,34 @@ fn build_session_export(db: &Db, master: &MasterService) -> Result<SessionExport
         }
     }
     Ok(out)
+}
+
+/// 会话列表展示用：已解锁时解密密码字段；单条解密失败保留原值，
+/// 不让一条来自其他设备的密文拖垮整个列表。
+fn sessions_for_ui(mut sessions: Vec<Session>, key: Option<&crypto::MasterKey>) -> Vec<Session> {
+    if let Some(key) = key {
+        for s in sessions.iter_mut() {
+            if let Err(e) = decrypt_session_secrets(s, key) {
+                log::warn!("session {} secret decrypt failed: {e}", s.id);
+            }
+        }
+    }
+    sessions
+}
+
+/// 输入里是否带新的明文密码（锁定状态下不允许，需先解锁）。
+fn has_plaintext_secret(input: &SessionInput) -> bool {
+    [input.password.as_deref(), input.private_key_passphrase.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|v| !v.is_empty() && !crypto::is_encrypted(v))
+}
+
+/// 锁定状态下更新会话时保留数据库中的密码字段：
+/// 不允许在未解锁时改写或清空密钥。
+fn preserve_locked_secrets(existing: &Session, input: &mut SessionInput) {
+    input.password = existing.password.clone();
+    input.private_key_passphrase = existing.private_key_passphrase.clone();
 }
 
 /// 从 JSON 备份导入会话与分组。
@@ -1738,6 +1783,56 @@ mod tests {
             exported.sessions[0].password.as_deref(),
             Some("secret-pass")
         );
+    }
+
+    #[test]
+    fn has_plaintext_secret_detects_new_secret() {
+        let mut input = session_input_with_password("plain");
+        assert!(has_plaintext_secret(&input));
+        input.password = Some("enc:v1:aa:bb".into());
+        assert!(!has_plaintext_secret(&input));
+        input.password = Some(String::new());
+        assert!(!has_plaintext_secret(&input));
+        input.password = None;
+        assert!(!has_plaintext_secret(&input));
+    }
+
+    #[test]
+    fn preserve_locked_secrets_keeps_stored_ciphertext() {
+        let db = Db::open(":memory:").unwrap();
+        db.create_session(session_input_with_password("enc:v1:a:b"))
+            .unwrap();
+        let existing = db.list_sessions().unwrap().remove(0);
+
+        let mut input = session_input_with_password("typed-new");
+        input.private_key_passphrase = Some("typed-pass".into());
+        preserve_locked_secrets(&existing, &mut input);
+
+        assert_eq!(input.password.as_deref(), Some("enc:v1:a:b"));
+        assert_eq!(
+            input.private_key_passphrase,
+            existing.private_key_passphrase
+        );
+    }
+
+    #[test]
+    fn sessions_for_ui_decrypts_when_unlocked_and_keeps_broken_values() {
+        let db = Db::open(":memory:").unwrap();
+        let key = crypto::derive_key("master-pass", b"0123456789abcdef");
+        let ciphertext = crypto::encrypt(&key, "secret");
+        db.create_session(session_input_with_password(&ciphertext))
+            .unwrap();
+        db.create_session(session_input_with_password("enc:v1:aaaa:bbbb"))
+            .unwrap();
+
+        let sessions = sessions_for_ui(db.list_sessions().unwrap(), Some(&key));
+        assert!(sessions
+            .iter()
+            .any(|s| s.password.as_deref() == Some("secret")));
+        // 无法解密的存量数据保留原值，不能让整个列表失败
+        assert!(sessions
+            .iter()
+            .any(|s| s.password.as_deref() == Some("enc:v1:aaaa:bbbb")));
     }
 
     #[cfg(unix)]
